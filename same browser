@@ -1,0 +1,5 @@
+[33mcommit b4df74b05ac9ecf4e4a50c6d546ff4d44e5b3d6e[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m
+Author: Waseem <ehsan.kamalia@gmail.com>
+Date:   Wed Feb 11 00:47:30 2026 +0500
+
+    Unify browser launch functionality and update UI

@@ -83,7 +83,8 @@ class DealerService:
         """Get a dealer by business name (case insensitive)."""
         return self.db.query(Customer).filter(
             Customer.business_name.ilike(business_name),
-            Customer.type == CustomerType.DEALER
+            Customer.type == CustomerType.DEALER,
+            Customer.is_deleted == False
         ).first()
 
     def search_dealers_by_business_name(self, query: str, limit: int = 5) -> List[Customer]:
@@ -92,7 +93,8 @@ class DealerService:
             return []
         return self.db.query(Customer).filter(
             Customer.business_name.ilike(f"{query}%"),
-            Customer.type == CustomerType.DEALER
+            Customer.type == CustomerType.DEALER,
+            Customer.is_deleted == False
         ).limit(limit).all()
 
     def get_dealer_by_id(self, dealer_id: int) -> Optional[Customer]:
@@ -104,7 +106,10 @@ class DealerService:
 
     def get_all_dealers(self) -> List[Customer]:
         """Get all dealers."""
-        return self.db.query(Customer).filter(Customer.type == CustomerType.DEALER).all()
+        return self.db.query(Customer).filter(
+            Customer.type == CustomerType.DEALER,
+            Customer.is_deleted == False
+        ).all()
 
     def update_dealer(self, dealer_id: int, cnic: str, name: str, father_name: str, business_name: str, phone: str, address: str) -> Optional[Customer]:
         """Update an existing dealer."""

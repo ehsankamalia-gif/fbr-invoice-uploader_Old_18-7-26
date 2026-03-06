@@ -2,17 +2,23 @@ import customtkinter as ctk
 from typing import List, Callable, Any, Optional
 
 class AutocompleteEntry(ctk.CTkEntry):
-    def __init__(self, master, fetch_suggestions: Callable[[str], List[Any]], on_select: Callable[[Any], None], **kwargs):
+    def __init__(self, master, fetch_suggestions: Callable[[str], List[Any]], on_select: Callable[[Any], None], 
+                 display_attr: str = 'business_name', 
+                 suggestion_format: Optional[Callable[[Any], str]] = None,
+                 typing_delay: int = 300,
+                 **kwargs):
         super().__init__(master, **kwargs)
         
         self.fetch_suggestions = fetch_suggestions
         self.on_select = on_select
+        self.display_attr = display_attr
+        self.suggestion_format = suggestion_format
         
         self.dropdown_window: Optional[ctk.CTkToplevel] = None
         self.suggestions = []
         self.suggestion_buttons = []
         self._debounce_job = None
-        self._typing_delay = 300  # ms
+        self._typing_delay = typing_delay  # ms
         self.selected_index = -1
         
         self.bind("<KeyRelease>", self._on_key_release)
@@ -27,8 +33,8 @@ class AutocompleteEntry(ctk.CTkEntry):
         self.highlight_fg = ("gray75", "gray25")
 
     def _on_key_release(self, event):
-        # Ignore navigation keys
-        if event.keysym in ["Up", "Down", "Return", "Escape", "Tab", "Shift_L", "Shift_R", "Control_L", "Control_R", "Alt_L", "Alt_R"]:
+        # Ignore navigation keys and modifier keys
+        if event.keysym in ["Up", "Down", "Return", "Escape", "Tab", "Shift_L", "Shift_R", "Control_L", "Control_R", "Alt_L", "Alt_R", "Control_V", "Control_C", "Control_X"]:
             return
             
         if self._debounce_job:
@@ -38,29 +44,40 @@ class AutocompleteEntry(ctk.CTkEntry):
 
     def _fetch_and_show(self):
         query = self.get().strip()
-        if not query:
+        # Debug print for developers to see in console
+        # print(f"Autocomplete fetch query: '{query}'")
+        
+        if not query or len(query) < 1:
             self._close_dropdown()
             return
             
         # Fetch suggestions
-        results = self.fetch_suggestions(query)
-        self.suggestions = results
-        
-        if results:
-            self._show_dropdown(results)
-        else:
+        try:
+            results = self.fetch_suggestions(query)
+            self.suggestions = results
+            
+            if results:
+                self._show_dropdown(results)
+            else:
+                self._close_dropdown()
+        except Exception as e:
+            print(f"Autocomplete fetch error: {e}")
             self._close_dropdown()
 
     def _show_dropdown(self, items):
         if not self.dropdown_window or not self.dropdown_window.winfo_exists():
-            self.dropdown_window = ctk.CTkToplevel(self)
+            # Use the root window as the master to ensure the Toplevel is not nested
+            root = self.winfo_toplevel()
+            self.dropdown_window = ctk.CTkToplevel(root)
             self.dropdown_window.overrideredirect(True)
             self.dropdown_window.attributes("-topmost", True)
-            self.dropdown_window.withdraw()
+            try:
+                # Windows specific attribute to ensure it stays on top of everything
+                self.dropdown_window.wm_attributes("-topmost", True)
+            except:
+                pass
             
             # Use a regular frame inside to hold buttons, packed in a scrollable frame if needed
-            # For 5-7 items, a regular frame is fine, but user asked for "max 5-7 visible", so maybe Scrollable if more.
-            # But let's stick to the limit in query for simplicity and performance.
             self.dropdown_frame = ctk.CTkFrame(self.dropdown_window, corner_radius=0, fg_color=("gray95", "gray10"))
             self.dropdown_frame.pack(fill="both", expand=True)
 
@@ -95,12 +112,15 @@ class AutocompleteEntry(ctk.CTkEntry):
         self.selected_index = -1
         
         for index, item in enumerate(items):
-            # Extract text: assume item has business_name or is string
-            text = getattr(item, 'business_name', str(item))
+            # Extract text for display
+            if self.suggestion_format:
+                display_text = self.suggestion_format(item)
+            else:
+                display_text = getattr(item, self.display_attr, str(item))
             
             btn = ctk.CTkButton(
                 self.dropdown_frame,
-                text=text,
+                text=display_text,
                 anchor="w",
                 fg_color=self.default_fg,
                 text_color=("black", "white"),
@@ -165,8 +185,8 @@ class AutocompleteEntry(ctk.CTkEntry):
             return "break" # Prevent default Return behavior
 
     def _select_item(self, item):
-        # Update entry text
-        text = getattr(item, 'business_name', str(item))
+        # Update entry text based on display_attr
+        text = getattr(item, self.display_attr, str(item))
         self.delete(0, "end")
         self.insert(0, text)
         

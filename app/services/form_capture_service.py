@@ -8,6 +8,7 @@ from pathlib import Path
 from datetime import datetime
 from playwright.sync_api import sync_playwright, Page
 from app.services.captured_form_processor import CapturedFormProcessor
+from app.services.settings_service import settings_service
 
 # Configure logging
 logging.basicConfig(
@@ -43,6 +44,7 @@ class FormCaptureService:
         self.pending_action = None # For thread-safe navigation
         self.pending_url = None
         self.task_queue = queue.Queue()
+        self.on_data_captured = None # Callback for listeners (e.g. main_window)
         
         self.load_config()
         self.processor = CapturedFormProcessor(self.config)
@@ -65,7 +67,7 @@ class FormCaptureService:
                 self.config = json.load(f)
         else:
             self.config = {
-                "target_domains": [],
+                "target_domains": ["dealers.ahlportal.com"],
                 "exclude_selectors": ["input[type='password']"],
                 "debounce_ms": 300,
                 "output_file": "captured_forms.json"
@@ -73,6 +75,24 @@ class FormCaptureService:
             # Save default config
             with open(self.config_path, 'w') as f:
                 json.dump(self.config, f, indent=2)
+
+        # Pull Honda Portal credentials from SettingsService
+        try:
+            from app.core.config import settings
+            username = settings.HONDA_PORTAL_USERNAME
+            password = settings.HONDA_PORTAL_PASSWORD
+            
+            if username or password:
+                if "login_config" not in self.config:
+                    self.config["login_config"] = {}
+                
+                # Update if they are empty in the config
+                if not self.config["login_config"].get("dealer_code"):
+                    self.config["login_config"]["dealer_code"] = username
+                if not self.config["login_config"].get("password"):
+                    self.config["login_config"]["password"] = password
+        except Exception as e:
+            logging.error(f"Failed to load credentials from settings_service: {e}")
 
         if "output_file" in self.config:
             self.output_file = Path(self.config["output_file"])
@@ -94,6 +114,7 @@ class FormCaptureService:
             return
         
         self.is_running = True
+        self.load_config() # Refresh config and credentials
         
         # Load existing data to preserve history
         if self.output_file.exists():
@@ -110,6 +131,10 @@ class FormCaptureService:
         
         self.thread = threading.Thread(target=self._run_browser, args=(url,), daemon=True)
         self.thread.start()
+
+    def launch_browser(self, url=None):
+        """Alias for start_capture_session for compatibility"""
+        return self.start_capture_session(url)
 
     def stop_capture_session(self):
         self.is_running = False
@@ -160,8 +185,27 @@ class FormCaptureService:
         try:
             with sync_playwright() as p:
                 self.playwright = p
-                self.browser = p.chromium.launch(headless=False)
-                self.context = self.browser.new_context()
+                
+                # Path for persistent browser data (history, passwords, etc.)
+                user_data_dir = Path("browser_profile")
+                user_data_dir.mkdir(exist_ok=True)
+                
+                logging.info(f"Launching persistent browser context at {user_data_dir.absolute()}")
+                
+                # Launch persistent context to preserve history and passwords
+                # Using channel="chrome" to use the actual Chrome browser if installed
+                self.context = p.chromium.launch_persistent_context(
+                    user_data_dir=str(user_data_dir.absolute()),
+                    channel="chrome", # Use actual Chrome browser
+                    headless=False,
+                    args=[
+                        "--disable-blink-features=AutomationControlled", # Help bypass bot detection
+                        "--start-maximized"
+                    ],
+                    no_viewport=True # Allow window to be maximized
+                )
+                
+                self.browser = self.context.browser # Note: browser might be None for persistent context
                 
                 # Expose binding to Python
                 self.context.expose_binding("py_capture", self._handle_captured_data)
@@ -169,15 +213,19 @@ class FormCaptureService:
                 # Add init script to inject listener on every page
                 self.context.add_init_script(self._get_injection_script())
                 
-                self.page = self.context.new_page()
+                # If there are already pages (sometimes persistent context starts with one), use the first one
+                if self.context.pages:
+                    self.page = self.context.pages[0]
+                else:
+                    self.page = self.context.new_page()
                 
                 # Listen to console logs for debugging
                 self.page.on("console", lambda msg: logging.debug(f"Browser Console: {msg.text}"))
                 
                 # Handle new pages (popups)
-                def handle_page(page):
-                    logging.info(f"New page detected: {page.url}")
-                    page.on("console", lambda msg: logging.debug(f"Page Console: {msg.text}"))
+                def handle_page(new_p):
+                    logging.info(f"New page detected: {new_p.url}")
+                    new_p.on("console", lambda msg: logging.debug(f"Page Console: {msg.text}"))
                 
                 self.context.on("page", handle_page)
                 
@@ -199,30 +247,33 @@ class FormCaptureService:
                             else:
                                 logging.error(f"Navigation failed after {max_retries} attempts. Aborting session.")
                                 raise e
+                
+                # ATTEMPT LOGIN PREFILL (Only if data exists in settings)
+                try:
+                    login_config = self.config.get("login_config", {})
+                    dealer_code = login_config.get("dealer_code")
+                    password = login_config.get("password")
                     
-                    # ATTEMPT LOGIN PREFILL
-                    try:
-                        login_config = self.config.get("login_config", {})
-                        dealer_code = login_config.get("dealer_code")
-                        password = login_config.get("password")
+                    if dealer_code and password:
+                        user_sel = login_config.get("username_selector", "#txt_dealer_code")
+                        pass_sel = login_config.get("password_selector", "#txt_password")
                         
-                        if dealer_code and password:
-                            user_sel = login_config.get("username_selector", "#txt_dealer_code")
-                            pass_sel = login_config.get("password_selector", "#txt_password")
-                            
-                            # Check if selectors exist on page (wait briefly)
-                            try:
-                                # Wait up to 3s for login fields
-                                self.page.wait_for_selector(user_sel, timeout=3000)
-                                logging.info("Login fields detected. Attempting to prefill...")
-                                
+                        # Wait briefly for login fields
+                        try:
+                            self.page.wait_for_selector(user_sel, timeout=3000)
+                            # Only fill if the field is empty (to respect browser's saved passwords)
+                            current_val = self.page.input_value(user_sel)
+                            if not current_val:
+                                logging.info("Login fields detected and empty. Attempting to prefill...")
                                 self.page.fill(user_sel, dealer_code)
                                 self.page.fill(pass_sel, password)
                                 logging.info("Login fields prefilled successfully.")
-                            except:
-                                logging.info("Login fields not found on start page. Skipping prefill.")
-                    except Exception as e:
-                        logging.error(f"Error during login prefill: {e}")
+                            else:
+                                logging.info("Login fields already contain data (possibly from saved passwords). Skipping prefill.")
+                        except:
+                            pass
+                except Exception as e:
+                    logging.error(f"Error during login prefill check: {e}")
                 
                 # Keep the browser open until stopped
                 while self.is_running:
@@ -320,6 +371,23 @@ class FormCaptureService:
                 success = self.processor.process_submission(self.session_data)
                 if success:
                     logging.info("Invoice saved successfully. Clearing session data.")
+                    
+                    # Notify listener if registered
+                    if self.on_data_captured:
+                        try:
+                            # Pass the captured chassis to allow lookup
+                            chassis = self.session_data.get("pages", {}).get(data.get("url"), {}).get("fields", {}).get("#txt_chassis_no", {}).get("value")
+                            # If not found in current page, try searching all pages
+                            if not chassis:
+                                for url, page in self.session_data.get("pages", {}).items():
+                                    chassis = page.get("fields", {}).get("#txt_chassis_no", {}).get("value")
+                                    if chassis: break
+                            
+                            logging.info(f"Triggering on_data_captured callback with chassis: {chassis}")
+                            self.on_data_captured(chassis)
+                        except Exception as cb_ex:
+                            logging.error(f"Error in on_data_captured callback: {cb_ex}")
+
                     self.clear_session_data()
                     
                     logging.info("Submission captured. Waiting for next action.")

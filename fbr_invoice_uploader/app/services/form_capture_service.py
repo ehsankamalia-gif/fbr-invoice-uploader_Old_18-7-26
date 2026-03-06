@@ -109,6 +109,10 @@ class FormCaptureService:
         self.thread = threading.Thread(target=self._run_browser, args=(url,), daemon=True)
         self.thread.start()
 
+    def launch_browser(self, url=None):
+        """Alias for start_capture_session for compatibility"""
+        return self.start_capture_session(url)
+
     def stop_capture_session(self):
         self.is_running = False
         if self.browser:

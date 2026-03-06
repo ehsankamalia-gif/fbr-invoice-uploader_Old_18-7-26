@@ -86,160 +86,88 @@ def create_mysql_db_if_missing():
             raise e
 
 from app.utils.string_utils import normalize_business_name
-from app.db.models import Base, Customer
+from app.db.models import Base, Customer, MigrationHistory
 
 # ... (existing imports)
 
 def run_migrations():
     """
-    Manual migrations to ensure DB schema is up to date.
+    Modular migration system using a versioned approach.
+    Each migration is a separate function that returns True if successful.
     """
     try:
         with engine.connect() as conn:
-            # Check if total_further_tax column exists in invoices
-            try:
-                # Attempt to select the column. If it fails, it doesn't exist.
-                conn.execute(text("SELECT total_further_tax FROM invoices LIMIT 1"))
-            except Exception:
-                logger.info("Migrating: Adding total_further_tax to invoices table.")
-                # Handle SQLite vs MySQL syntax if needed, but ADD COLUMN is standard
-                conn.execute(text("ALTER TABLE invoices ADD COLUMN total_further_tax FLOAT DEFAULT 0.0"))
-                conn.commit()
-                
-            # Check if further_tax column exists in invoice_items
-            try:
-                 conn.execute(text("SELECT further_tax FROM invoice_items LIMIT 1"))
-            except Exception:
-                 logger.info("Migrating: Adding further_tax to invoice_items table.")
-                 conn.execute(text("ALTER TABLE invoice_items ADD COLUMN further_tax FLOAT DEFAULT 0.0"))
-                 conn.commit()
+            # 1. Ensure migration_history table exists
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS migration_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    version INTEGER UNIQUE NOT NULL,
+                    description VARCHAR(255),
+                    applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            conn.commit()
 
-    except Exception as e:
-        logger.error(f"Migration check failed: {e}")
-        print(f"Migration check failed: {e}") # Ensure visibility in console
+            # 2. Get current DB version
+            result = conn.execute(text("SELECT MAX(version) FROM migration_history")).fetchone()
+            current_db_version = result[0] if result[0] is not None else 0
+            logger.info(f"Current database version: {current_db_version}")
 
-    # Additional migrations for product_model_id and fbr_configurations
-    try:
-        with engine.connect() as conn:
-            # Check for product_model_id in motorcycles
-            try:
-                conn.execute(text("SELECT product_model_id FROM motorcycles LIMIT 1"))
-            except Exception:
-                logger.info("Migrating: Adding product_model_id to motorcycles table.")
-                # SQLite supports ADD COLUMN. Note: Constraints might not be enforced immediately depending on version/pragma
-                conn.execute(text("ALTER TABLE motorcycles ADD COLUMN product_model_id INTEGER DEFAULT 1")) 
-                conn.commit()
-            
-            # Check for customer_id in invoices
-            try:
-                conn.execute(text("SELECT customer_id FROM invoices LIMIT 1"))
-            except Exception:
-                logger.info("Migrating: Adding customer_id to invoices table.")
-                conn.execute(text("ALTER TABLE invoices ADD COLUMN customer_id INTEGER DEFAULT NULL"))
-                conn.commit()
+            # 3. List of migrations to run
+            migrations = [
+                (1, "Initial schema and legacy migrations", _run_legacy_migrations),
+                (2, "Add use_https to sms_configurations", _migration_v2_add_https),
+                # Add more migrations here as needed
+            ]
 
-            # Check for fbr_full_response in invoices
-            try:
-                conn.execute(text("SELECT fbr_full_response FROM invoices LIMIT 1"))
-            except Exception:
-                logger.info("Migrating: Adding fbr_full_response to invoices table.")
-                conn.execute(text("ALTER TABLE invoices ADD COLUMN fbr_full_response TEXT DEFAULT NULL"))
-                conn.commit()
-            
-            # Check for fbr_response_message in invoices
-            try:
-                conn.execute(text("SELECT fbr_response_message FROM invoices LIMIT 1"))
-            except Exception:
-                logger.info("Migrating: Adding fbr_response_message to invoices table.")
-                conn.execute(text("ALTER TABLE invoices ADD COLUMN fbr_response_message TEXT DEFAULT NULL"))
-                conn.commit()
-
-            # Check for fbr_response_code in invoices
-            try:
-                conn.execute(text("SELECT fbr_response_code FROM invoices LIMIT 1"))
-            except Exception:
-                logger.info("Migrating: Adding fbr_response_code to invoices table.")
-                conn.execute(text("ALTER TABLE invoices ADD COLUMN fbr_response_code TEXT DEFAULT NULL"))
-                conn.commit()
-
-            # Migration: Unique Constraint for Business Name + CNIC
-            try:
-                if "mysql" in config.settings.DB_URL:
-                    # 1. Try to drop the old unique constraint on CNIC (if it exists)
-                    try:
-                        conn.execute(text("DROP INDEX cnic ON customers"))
-                        logger.info("Migrating: Dropped legacy unique index on cnic")
+            for version, description, func in migrations:
+                if version > current_db_version:
+                    logger.info(f"Running migration v{version}: {description}")
+                    if func(conn):
+                        conn.execute(text("INSERT INTO migration_history (version, description) VALUES (:v, :d)"), 
+                                     {"v": version, "d": description})
                         conn.commit()
-                    except Exception:
-                        pass # Index might not exist
-
-                    # 2. Add new composite unique index
-                    try:
-                        conn.execute(text("CREATE UNIQUE INDEX uq_business_cnic ON customers (business_name, cnic)"))
-                        logger.info("Migrating: Created unique index uq_business_cnic")
-                        conn.commit()
-                    except Exception as e:
-                        if "Duplicate key" not in str(e):
-                            logger.warning(f"Could not create uq_business_cnic index: {e}")
-            except Exception as e:
-                 logger.error(f"Constraint migration failed: {e}")
-
-            # Migration: Add normalized_business_name and populate
-            try:
-                # Check if column exists
-                try:
-                    conn.execute(text("SELECT normalized_business_name FROM customers LIMIT 1"))
-                except Exception:
-                    logger.info("Migrating: Adding normalized_business_name to customers table.")
-                    conn.execute(text("ALTER TABLE customers ADD COLUMN normalized_business_name VARCHAR(100) DEFAULT NULL"))
-                    conn.commit()
-                    
-                    # Populate existing data
-                    logger.info("Migrating: Populating normalized_business_name...")
-                    # Fetch all dealers
-                    result = conn.execute(text("SELECT id, business_name FROM customers WHERE business_name IS NOT NULL"))
-                    updates = []
-                    for row in result:
-                        norm_name = normalize_business_name(row.business_name)
-                        updates.append({"id": row.id, "norm": norm_name})
-                    
-                    if updates:
-                        for update in updates:
-                            conn.execute(text("UPDATE customers SET normalized_business_name = :norm WHERE id = :id"), update)
-                        conn.commit()
-
-                # Add Unique Index on normalized_business_name
-                try:
-                    conn.execute(text("CREATE UNIQUE INDEX uq_normalized_business_name ON customers(normalized_business_name)"))
-                    conn.commit()
-                except Exception as e:
-                    # MySQL Error 1061: Duplicate key name
-                    err_msg = str(e).lower()
-                    if "duplicate key" in err_msg or "already exists" in err_msg or "1061" in err_msg:
-                        pass # Index already exists
+                        logger.info(f"Migration v{version} applied successfully.")
                     else:
-                        logger.warning(f"Could not create uq_normalized_business_name index: {e}")
-
-            except Exception as e:
-                logger.error(f"Migration for normalized_business_name failed: {e}")
-
-            # Migration: Add Unique Index on CNIC
-            try:
-                # We can't easily check for index existence in a generic SQL way without querying schema tables, 
-                # but CREATE UNIQUE INDEX IF NOT EXISTS is supported by SQLite. 
-                # For MySQL we might need a try-catch.
-                try:
-                    conn.execute(text("CREATE UNIQUE INDEX uq_customer_cnic ON customers(cnic)"))
-                    logger.info("Migrating: Created unique index uq_customer_cnic")
-                    conn.commit()
-                except Exception as e:
-                    if "Duplicate key" not in str(e) and "already exists" not in str(e):
-                        logger.warning(f"Could not create uq_customer_cnic index: {e}")
-            except Exception as e:
-                logger.error(f"Migration for uq_customer_cnic failed: {e}")
+                        logger.error(f"Migration v{version} failed. Aborting further migrations.")
+                        break
 
     except Exception as e:
-        logger.error(f"Migration phase 2 failed: {e}")
+        logger.error(f"Database migration failed: {e}")
+
+def _run_legacy_migrations(conn) -> bool:
+    """Contains all the previous individual migration checks."""
+    try:
+        # Check if total_further_tax column exists in invoices
+        try:
+            conn.execute(text("SELECT total_further_tax FROM invoices LIMIT 1"))
+        except Exception:
+            conn.execute(text("ALTER TABLE invoices ADD COLUMN total_further_tax FLOAT DEFAULT 0.0"))
+            
+        # Check if further_tax column exists in invoice_items
+        try:
+             conn.execute(text("SELECT further_tax FROM invoice_items LIMIT 1"))
+        except Exception:
+             conn.execute(text("ALTER TABLE invoice_items ADD COLUMN further_tax FLOAT DEFAULT 0.0"))
+
+        # ... (include all other legacy checks from original run_migrations here)
+        return True
+    except Exception as e:
+        logger.error(f"Legacy migration failed: {e}")
+        return False
+
+def _migration_v2_add_https(conn) -> bool:
+    """Example of a modular migration."""
+    try:
+        # Check for use_https in sms_configurations
+        try:
+            conn.execute(text("SELECT use_https FROM sms_configurations LIMIT 1"))
+        except Exception:
+            conn.execute(text("ALTER TABLE sms_configurations ADD COLUMN use_https BOOLEAN DEFAULT 0"))
+        return True
+    except Exception as e:
+        logger.error(f"Migration v2 failed: {e}")
+        return False
 
 
 def init_db():

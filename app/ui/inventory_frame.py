@@ -25,8 +25,15 @@ class InventoryFrame(ctk.CTkFrame):
         self.add_btn = ctk.CTkButton(self.header_frame, text="Add Motorcycle", command=self.open_add_dialog)
         self.add_btn.pack(side="right", padx=10)
 
-        self.import_web_btn = ctk.CTkButton(self.header_frame, text="Import from Web", command=self.open_web_import_dialog, fg_color="#E67E22", hover_color="#D35400")
+        self.import_web_btn = ctk.CTkButton(self.header_frame, text="Import Inventory", command=self.open_web_import_dialog, fg_color="#E67E22", hover_color="#D35400")
         self.import_web_btn.pack(side="right", padx=10)
+        
+        # New Capture Buttons
+        self.capture_btn = ctk.CTkButton(self.header_frame, text="Launch Capture", command=self.launch_capture_browser, fg_color="#3498DB", hover_color="#2980B9")
+        self.capture_btn.pack(side="right", padx=10)
+        
+        self.view_captured_btn = ctk.CTkButton(self.header_frame, text="View Captured", command=self.view_captured_data, fg_color="#1ABC9C", hover_color="#16A085")
+        self.view_captured_btn.pack(side="right", padx=10)
 
         # Stats Badges
         self.stats_frame = ctk.CTkFrame(self.header_frame, fg_color="transparent")
@@ -383,6 +390,16 @@ class InventoryFrame(ctk.CTkFrame):
 
     def open_add_dialog(self):
         AddMotorcycleDialog(self)
+
+    def launch_capture_browser(self):
+        """Calls the main window's capture browser event."""
+        if hasattr(self.master, "form_capture_button_event"):
+            self.master.form_capture_button_event()
+
+    def view_captured_data(self):
+        """Switches view to the captured data frame."""
+        if hasattr(self.master, "captured_data_button_event"):
+            self.master.captured_data_button_event()
 
     def open_web_import_dialog(self):
         WebImportDialog(self)

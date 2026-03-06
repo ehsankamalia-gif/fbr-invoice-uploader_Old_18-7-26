@@ -23,6 +23,7 @@ from app.ui.db_settings_dialog import DatabaseSettingsDialog
 from app.ui.backup_frame import BackupFrame
 from app.ui.spare_ledger_frame import SpareLedgerFrame
 from app.services.dealer_service import dealer_service
+from app.services.customer_service import customer_service
 from app.services.backup_service import backup_service
 from app.services.form_capture_service import form_capture_service
 from app.services.update_service import UpdateService
@@ -31,11 +32,13 @@ from app.ui.captured_data_frame import CapturedDataFrame
 from app.ui.welcome_frame import WelcomeFrame
 from app.ui.autocomplete_entry import AutocompleteEntry
 from app.ui.stock_summary_frame import StockSummaryFrame
-from app.excise.ui.excise_frame import ExciseFrame
 
 from app.utils.price_data import price_manager
 import app.core.config as config
 import threading
+import webbrowser
+
+from reporting.server import start_reporting_server
 
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
@@ -109,6 +112,9 @@ class App(ctk.CTk):
         # Migrate prices if needed
         self.migrate_prices()
 
+        # Start reporting portal in background (non-blocking)
+        start_reporting_server()
+
         # Grid Configuration for Top-Bar Layout
         self.grid_columnconfigure(0, weight=1) # Full width content
         self.grid_rowconfigure(0, weight=0)    # Header (Top Bar)
@@ -130,7 +136,6 @@ class App(ctk.CTk):
         self.create_backup_frame()
         self.create_spare_ledger_frame()
         self.create_captured_data_frame()
-        self.create_excise_frame()
 
         self.select_frame_by_name("home")
         
@@ -145,6 +150,9 @@ class App(ctk.CTk):
         # Start Sync Service
         sync_service.set_status_callback(self.on_sync_status_change)
         sync_service.start()
+        
+        # Register Data Capture Callback
+        form_capture_service.on_data_captured = self.on_browser_data_captured
         
         # Handle Window Close
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -166,6 +174,40 @@ class App(ctk.CTk):
         except Exception as e:
             print(f"Error stopping sync service: {e}")
         self.destroy()
+
+    def on_browser_data_captured(self, chassis):
+        """Called when data is captured in the background browser."""
+        # Use after() to ensure UI updates on main thread
+        if self.winfo_exists():
+             self.after(0, lambda: self._handle_bg_capture(chassis))
+
+    def _handle_bg_capture(self, chassis):
+        # If we are on the invoice frame, try to auto-fill
+        # and maybe show a notification
+        if hasattr(self, "invoice_frame") and self.invoice_frame.winfo_viewable():
+            if chassis:
+                # Set chassis and trigger auto-fill
+                self.chassis_var.set(chassis)
+                self.auto_fill_chassis()
+                messagebox.showinfo("Data Captured", f"Successfully imported details for chassis: {chassis}")
+            else:
+                messagebox.showinfo("Data Captured", "New data was captured from the browser.\nYou can now use 'Fetch Last' or enter a chassis number.")
+
+    def fetch_last_captured_record(self):
+        """Fetches the most recent record from CapturedData and fills the form."""
+        db = SessionLocal()
+        try:
+            last = db.query(CapturedData).order_by(CapturedData.created_at.desc()).first()
+            if last:
+                self.chassis_var.set(last.chassis_number)
+                self.auto_fill_chassis()
+                messagebox.showinfo("Success", f"Loaded last captured data for {last.chassis_number}")
+            else:
+                messagebox.showwarning("No Data", "No captured data found in database.")
+        except Exception as e:
+             messagebox.showerror("Error", f"Failed to fetch captured data: {e}")
+        finally:
+             db.close()
 
     def on_sync_status_change(self, is_online, pending_count):
         """Called by background thread, so must use after to update UI safely"""
@@ -223,7 +265,8 @@ class App(ctk.CTk):
                 "subitems": [
                     ("New Invoice", "invoice", self.invoice_button_event),
                     ("Print Invoice", "print_invoice", self.print_invoice_button_event),
-                    ("Reports", "reports", self.reports_button_event)
+                    ("Reports", "reports", self.reports_button_event),
+                    ("Web Reporting Portal", None, self.open_reporting_portal),
                 ]
             },
             "inventory": {
@@ -231,24 +274,11 @@ class App(ctk.CTk):
                 "command": None,
                 "subitems": [
                     ("Inventory Stock", "inventory", self.inventory_button_event),
+                    ("Captured Customer Data", "captured_data", self.captured_data_button_event),
+                    ("Launch Capture Browser", "capture_live", self.form_capture_button_event),
                     ("Customers", "customer", self.customer_button_event),
                     ("Dealers", "dealer", self.dealer_button_event),
                     ("Price List", "pricelist", self.open_price_list)
-                ]
-            },
-            "capture": {
-                "label": "Capture",
-                "command": None,
-                "subitems": [
-                    ("Launch Browser", "capture_live", self.form_capture_button_event),
-                    ("View Captured Data", "captured_data", self.captured_data_button_event)
-                ]
-            },
-            "excise": {
-                "label": "Excise",
-                "command": None,
-                "subitems": [
-                    ("Excise Dashboard", "excise", self.excise_button_event)
                 ]
             },
             "system": {
@@ -754,21 +784,47 @@ class App(ctk.CTk):
 
     def create_invoice_frame(self):
         self.invoice_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
-        self.invoice_frame.grid_columnconfigure(0, weight=1)
+        self.invoice_frame.grid_columnconfigure(0, weight=1) # Main area expands
+        self.invoice_frame.grid_columnconfigure(1, weight=0, minsize=180) # Sidebar has fixed min width
         self.invoice_frame.grid_rowconfigure(1, weight=1)
         
         self.current_price_obj = None
 
-        self.label_invoice = ctk.CTkLabel(self.invoice_frame, text="New Invoice", font=ctk.CTkFont(size=24, weight="bold"))
-        self.label_invoice.grid(row=0, column=0, padx=60, pady=20, sticky="w")
+        # Header Frame for Title and Stats
+        self.invoice_header = ctk.CTkFrame(self.invoice_frame, fg_color="transparent")
+        self.invoice_header.grid(row=0, column=0, columnspan=2, fill="x", padx=20, pady=10)
+        self.invoice_header.grid_columnconfigure(0, weight=1)
+
+        self.label_invoice = ctk.CTkLabel(self.invoice_header, text="New Invoice", font=ctk.CTkFont(size=24, weight="bold"))
+        self.label_invoice.grid(row=0, column=0, padx=40, pady=10, sticky="w")
         
+        # FBR Submitted Statistic Box (Now in Header, Right Aligned)
+        self.fbr_stat_frame = ctk.CTkFrame(self.invoice_header, fg_color=("#C0392B", "#922B21"), corner_radius=10)
+        self.fbr_stat_frame.grid(row=0, column=1, padx=20, pady=5, sticky="e")
+        
+        ctk.CTkLabel(self.fbr_stat_frame, text="FBR Submitted", font=ctk.CTkFont(size=11, weight="bold"), text_color="white").pack(padx=10, pady=(5,0))
+        self.fbr_stat_value = ctk.CTkLabel(self.fbr_stat_frame, text="0", font=ctk.CTkFont(size=20, weight="bold"), text_color="white")
+        self.fbr_stat_value.pack(padx=10, pady=(0,5))
+
         self.form_frame = ctk.CTkScrollableFrame(
             self.invoice_frame, 
             label_text="Invoice Details",
             label_font=ctk.CTkFont(size=18, weight="bold")
         )
-        self.form_frame.grid(row=1, column=0, padx=20, pady=10, sticky="nsew")
+        self.form_frame.grid(row=1, column=0, padx=(20, 10), pady=10, sticky="nsew")
         self.form_frame.grid_columnconfigure(1, weight=1)
+
+        # Right Sidebar for QR (Fixed, not scrolling)
+        self.right_sidebar = ctk.CTkFrame(self.invoice_frame, fg_color="transparent", width=180)
+        self.right_sidebar.grid(row=1, column=1, padx=(10, 20), pady=10, sticky="nsew")
+
+        # QR Code Display Area (Fixed in Sidebar)
+        self.qr_code_label = ctk.CTkLabel(self.right_sidebar, text="", width=150, height=150)
+        self.qr_code_label.pack(pady=10)
+        
+        # FBR Invoice Number Label (Fixed in Sidebar)
+        self.fbr_inv_label = ctk.CTkLabel(self.right_sidebar, text="", font=("Arial", 12, "bold"), text_color="blue", wraplength=160)
+        self.fbr_inv_label.pack(pady=10)
 
         # Configure columns with minsize to prevent squashing
         self.form_frame.grid_columnconfigure(1, weight=1, minsize=200)
@@ -786,14 +842,6 @@ class App(ctk.CTk):
         self.refresh_inv_btn = ctk.CTkButton(self.form_frame, text="↺", width=30, command=self.generate_invoice_number)
         self.refresh_inv_btn.grid(row=0, column=2, padx=5, sticky="w")
 
-        # FBR Submitted Statistic Box
-        self.fbr_stat_frame = ctk.CTkFrame(self.form_frame, fg_color=("#C0392B", "#922B21"), corner_radius=10)
-        self.fbr_stat_frame.grid(row=0, column=3, padx=10, pady=10, sticky="nsew")
-        
-        ctk.CTkLabel(self.fbr_stat_frame, text="FBR Submitted", font=ctk.CTkFont(size=11, weight="bold"), text_color="white").pack(pady=(5,0))
-        self.fbr_stat_value = ctk.CTkLabel(self.fbr_stat_frame, text="0", font=ctk.CTkFont(size=20, weight="bold"), text_color="white")
-        self.fbr_stat_value.pack(pady=(0,5))
-
         # Create empty image for clearing QR code safely
         # Use a 1x1 transparent image to avoid layout shifts or None-state bugs
         self.empty_qr_image = ctk.CTkImage(
@@ -802,21 +850,21 @@ class App(ctk.CTk):
             size=(1, 1)
         )
 
-        # QR Code Display Area (Placeholder for Success)
-        self.qr_code_label = ctk.CTkLabel(self.form_frame, text="", width=120, height=120)
-        self.qr_code_label.grid(row=1, column=3, rowspan=4, padx=10, pady=10, sticky="n")
-        
-        # FBR Invoice Number Label (Below QR Code)
-        self.fbr_inv_label = ctk.CTkLabel(self.form_frame, text="", font=("Arial", 12, "bold"), text_color="blue")
-        self.fbr_inv_label.grid(row=5, column=3, padx=10, pady=0, sticky="n")
-
         # 1.5 ID Card (CNIC)
         ctk.CTkLabel(self.form_frame, text="ID Card (CNIC)").grid(row=1, column=0, padx=10, pady=5, sticky="e")
         self.buyer_cnic_var = ctk.StringVar()
         self.buyer_cnic_var.trace_add("write", self.validate_cnic_input)
-        self.buyer_cnic_entry = ctk.CTkEntry(self.form_frame, textvariable=self.buyer_cnic_var, placeholder_text="33302-1234567-0")
+        self.buyer_cnic_entry = ctk.CTkEntry(
+            self.form_frame,
+            textvariable=self.buyer_cnic_var,
+            placeholder_text="33302-1234567-0"
+        )
         self.buyer_cnic_entry.grid(row=1, column=1, padx=10, pady=5, sticky="ew")
-        self.buyer_cnic_entry.bind("<KeyRelease>", self.auto_fill_cnic)
+        self.buyer_cnic_entry.bind("<KeyRelease>", self.on_cnic_key_release)
+        self.buyer_cnic_entry.bind("<Down>", self.on_cnic_suggestion_nav)
+        self.buyer_cnic_entry.bind("<Up>", self.on_cnic_suggestion_nav)
+        self.buyer_cnic_entry.bind("<Return>", self.on_cnic_suggestion_select)
+        self.buyer_cnic_entry.bind("<FocusOut>", lambda e: self.after(150, self.on_cnic_focus_out))
         
         # Scan ID Card Button
         self.scan_btn = ctk.CTkButton(self.form_frame, text="📷 Scan ID", width=80, command=self.scan_cnic_action, fg_color="#E67E22", hover_color="#D35400")
@@ -842,7 +890,8 @@ class App(ctk.CTk):
             self.form_frame, 
             textvariable=self.buyer_name_var,
             fetch_suggestions=self._fetch_dealer_suggestions,
-            on_select=self._on_dealer_selected
+            on_select=self._on_dealer_selected,
+            typing_delay=150
         )
         self.buyer_name_entry.grid(row=3, column=1, padx=10, pady=5, sticky="ew")
 
@@ -918,10 +967,15 @@ class App(ctk.CTk):
         self.chassis_entry.bind("<Return>", self.on_suggestion_select)
         self.chassis_entry.bind("<FocusOut>", self.on_chassis_focus_out)
         
-        # Suggestion Window (Toplevel for floating effect)
+        # Suggestion Windows (Toplevels for floating effect)
         self.suggestion_window = None
         self.suggestion_buttons = []
         self.selected_suggestion_index = -1
+        
+        self.cnic_suggestion_window = None
+        self.cnic_suggestion_buttons = []
+        self.cnic_selected_suggestion_index = -1
+        self.cnic_suggestions_data = [] # Store actual customer objects
         
         # Container for Chassis Tools (Checkbox + Feedback) in Column 2
         self.chassis_tools_frame = ctk.CTkFrame(self.form_frame, fg_color="transparent")
@@ -939,9 +993,9 @@ class App(ctk.CTk):
         self.chassis_feedback_label = ctk.CTkLabel(self.chassis_tools_frame, text="", width=20)
         self.chassis_feedback_label.pack(side="left")
 
-        # Check Stock Button - Moved to Column 3
+        # Check Stock Button - Moved to Column 2
         self.check_stock_btn = ctk.CTkButton(self.form_frame, text="Check Stock", width=100, command=self.check_stock)
-        self.check_stock_btn.grid(row=9, column=3, padx=10, pady=5)
+        self.check_stock_btn.grid(row=9, column=2, padx=5, pady=5, sticky="w")
 
         # 8. Engine Number
         ctk.CTkLabel(self.form_frame, text="Engine Number").grid(row=10, column=0, padx=10, pady=5, sticky="e")
@@ -1095,8 +1149,8 @@ class App(ctk.CTk):
                     # Note: CTkOptionMenu might need explicit focus_set() to receive keys.
                     widget.bind("<Return>", focus_next) 
         
-        # Explicitly bind FocusOut to CNIC for lookup
-        self.buyer_cnic_entry.bind("<FocusOut>", lambda e: self.perform_cnic_lookup())
+        # Explicitly bind FocusOut to CNIC for lookup and hide suggestions
+        self.buyer_cnic_entry.bind("<FocusOut>", lambda e: self.after(150, self.on_cnic_focus_out))
 
         # Bind Up/Down keys for OptionMenus
         self._bind_option_menu_arrows(self.model_combo, self.on_model_change)
@@ -1305,6 +1359,41 @@ class App(ctk.CTk):
         """Fetch dealer suggestions for autocomplete."""
         return dealer_service.search_dealers_by_business_name(query, limit=5)
 
+    def _fetch_cnic_suggestions(self, query):
+        """Fetch customer/dealer suggestions by CNIC for autocomplete."""
+        # Clean query for search
+        clean_query = query.strip()
+        if not clean_query:
+            return []
+        
+        # Search customers by CNIC prefix
+        return customer_service.db.query(Customer).filter(
+            Customer.is_deleted == False,
+            Customer.cnic.ilike(f"{clean_query}%")
+        ).limit(5).all()
+
+    def _on_cnic_select(self, customer):
+        """Handle CNIC selection from suggestions."""
+        if not customer:
+            return
+            
+        # Fill form with customer data
+        self.buyer_cnic_var.set(customer.cnic)
+        self.buyer_name_var.set(customer.name or "")
+        self.father_name_var.set(customer.father_name or "")
+        self.buyer_cell_var.set(customer.phone or "")
+        self.buyer_address_var.set(customer.address or "")
+        
+        if hasattr(self, 'buyer_ntn_var') and customer.ntn:
+            self.buyer_ntn_var.set(customer.ntn)
+            
+        # Clear any errors
+        self.clear_field_error(self.buyer_cnic_entry)
+        self.clear_field_error(self.buyer_name_entry)
+        self.clear_field_error(self.buyer_father_entry)
+        self.clear_field_error(self.buyer_cell_entry)
+        self.clear_field_error(self.buyer_address_entry)
+
     def _on_dealer_selected(self, dealer):
         """Handle dealer selection from autocomplete."""
         if not dealer:
@@ -1501,7 +1590,15 @@ class App(ctk.CTk):
         return
 
     def validate_cnic_input(self, *args):
+        if hasattr(self, '_cnic_formatting') and self._cnic_formatting:
+            return
+
         value = self.buyer_cnic_var.get()
+        
+        # Debounce/Throttle: Trigger suggestions after a short delay
+        if hasattr(self, '_cnic_suggestion_job') and self._cnic_suggestion_job:
+            self.after_cancel(self._cnic_suggestion_job)
+        self._cnic_suggestion_job = self.after(100, self._run_cnic_suggestion)
         
         # Get current cursor position to restore it later
         try:
@@ -1523,36 +1620,29 @@ class App(ctk.CTk):
             formatted = formatted[:15]
             
         if value != formatted:
-            # Adjust cursor position
-            # Calculate clean cursor position (relative to digits only)
-            non_digits_before = sum(1 for c in value[:cursor_pos] if not c.isdigit())
-            clean_pos = cursor_pos - non_digits_before
-            
-            # Map to formatted position based on fixed dashes
-            new_cursor = clean_pos
-            if clean_pos > 5:
-                new_cursor += 1
-            if clean_pos > 12:
-                new_cursor += 1
-            
-            self.buyer_cnic_var.set(formatted)
-            
-            # Restore cursor with slight delay to ensure UI update is complete
-            # and cancel any pending cursor updates to prevent race conditions
-            if hasattr(self, '_cnic_cursor_job') and self._cnic_cursor_job:
-                try:
-                    self.after_cancel(self._cnic_cursor_job)
-                except:
-                    pass
-            
-            def set_cursor():
-                try:
-                    self.buyer_cnic_entry.icursor(new_cursor)
-                except:
-                    pass
-                self._cnic_cursor_job = None
-
-            self._cnic_cursor_job = self.after(1, set_cursor)
+            self._cnic_formatting = True
+            try:
+                # Adjust cursor position
+                non_digits_before = sum(1 for c in value[:cursor_pos] if not c.isdigit())
+                clean_pos = cursor_pos - non_digits_before
+                
+                new_cursor = clean_pos
+                if clean_pos > 5:
+                    new_cursor += 1
+                if clean_pos > 12:
+                    new_cursor += 1
+                
+                self.buyer_cnic_var.set(formatted)
+                
+                # Restore cursor with slight delay
+                def set_cursor():
+                    try:
+                        self.buyer_cnic_entry.icursor(new_cursor)
+                    except:
+                        pass
+                self.after(1, set_cursor)
+            finally:
+                self._cnic_formatting = False
 
             if len(clean_digits) == 13:
                  self.perform_cnic_lookup(formatted)
@@ -1562,13 +1652,14 @@ class App(ctk.CTk):
         if len(clean_digits) == 13:
              self.perform_cnic_lookup(formatted)
              self.clear_field_error(self.buyer_cnic_entry)
-        elif len(clean_digits) > 0 and len(formatted) < 15:
-             # Optional: could show "Incomplete CNIC" but might be annoying while typing
-             pass
         else:
              self.clear_field_error(self.buyer_cnic_entry)
 
         self.check_form_validity()
+
+    def _run_cnic_suggestion(self):
+        self._cnic_suggestion_job = None
+        self.update_cnic_suggestions()
 
     def perform_cnic_lookup(self, cnic=None):
         """Wrapper to trigger customer lookup."""
@@ -1778,10 +1869,6 @@ class App(ctk.CTk):
         self.captured_data_frame = CapturedDataFrame(self, corner_radius=0, fg_color="transparent")
         self.captured_data_frame.grid_columnconfigure(0, weight=1)
 
-    def create_excise_frame(self):
-        self.excise_frame = ExciseFrame(self, corner_radius=0, fg_color="transparent")
-        self.excise_frame.grid_columnconfigure(0, weight=1)
-
     def create_welcome_frame(self):
         self.welcome_frame = WelcomeFrame(self, self.dismiss_welcome)
         # Use high rowspan/columnspan to cover the entire grid (sidebar + content)
@@ -1792,6 +1879,168 @@ class App(ctk.CTk):
         if hasattr(self, 'welcome_frame'):
             self.welcome_frame.destroy()
             del self.welcome_frame
+
+    def on_cnic_key_release(self, event=None):
+        """Handle key release for CNIC suggestion logic"""
+        if event and event.keysym in ["Down", "Up", "Return", "Escape", "Tab"]:
+            return
+            
+        # self.update_cnic_suggestions() # Moved to validate_cnic_input for better integration with auto-formatting
+        pass
+
+    def update_cnic_suggestions(self):
+        query = self.buyer_cnic_var.get().strip()
+        
+        # Hide if empty or too short to be useful
+        if not query or len(query) < 1:
+            self.hide_cnic_suggestions()
+            return
+            
+        db = SessionLocal()
+        try:
+            # BROAD SEARCH:
+            # 1. Strip non-digits for raw CNIC search
+            clean_query = ''.join(filter(str.isdigit, query))
+            
+            # 2. Build flexible search pattern
+            search_pattern = f"%{query}%"
+            clean_pattern = f"%{clean_query}%" if clean_query else search_pattern
+            
+            # 3. Query Customers table (includes Dealers)
+            # Match by Formatted CNIC, Raw Digits, Name, or Business Name
+            results = db.query(Customer).filter(
+                Customer.is_deleted == False,
+                (Customer.cnic.ilike(f"{query}%")) | 
+                (Customer.cnic.ilike(clean_pattern)) |
+                (Customer.name.ilike(search_pattern)) |
+                (Customer.business_name.ilike(search_pattern))
+            ).limit(7).all()
+            
+            if results:
+                self.show_cnic_suggestions(results)
+            else:
+                self.hide_cnic_suggestions()
+                
+        except Exception as e:
+            print(f"CNIC Suggestion error: {e}")
+        finally:
+            db.close()
+
+    def show_cnic_suggestions(self, customers):
+        # Update UI layout to ensure coordinate accuracy
+        self.update_idletasks()
+        
+        # Create Toplevel if not exists
+        if self.cnic_suggestion_window is None or not self.cnic_suggestion_window.winfo_exists():
+            root = self.winfo_toplevel()
+            self.cnic_suggestion_window = ctk.CTkToplevel(root)
+            self.cnic_suggestion_window.overrideredirect(True)
+            self.cnic_suggestion_window.attributes("-topmost", True)
+            try:
+                self.cnic_suggestion_window.wm_attributes("-topmost", True)
+            except: pass
+            self.cnic_suggestion_window.configure(fg_color=("gray95", "gray20"))
+            
+            self.cnic_suggestion_frame = ctk.CTkScrollableFrame(self.cnic_suggestion_window, corner_radius=0, fg_color="transparent")
+            self.cnic_suggestion_frame.pack(fill="both", expand=True)
+            
+        # Clear existing buttons
+        for btn in self.cnic_suggestion_buttons:
+            btn.destroy()
+        self.cnic_suggestion_buttons = []
+        self.cnic_suggestions_data = customers
+        
+        # Reset selection
+        self.cnic_selected_suggestion_index = -1
+        
+        # Populate frame
+        for idx, customer in enumerate(customers):
+            # Show both CNIC and Name/Business for clear identification
+            name_part = customer.name or (customer.business_name or "Unknown")
+            display_text = f"{customer.cnic} | {name_part}"
+            
+            btn = ctk.CTkButton(
+                self.cnic_suggestion_frame, 
+                text=display_text, 
+                anchor="w",
+                fg_color="transparent", 
+                text_color=("black", "white"),
+                hover_color=("gray75", "gray30"),
+                corner_radius=0,
+                command=lambda c=customer: self.select_cnic_suggestion(c)
+            )
+            btn.pack(fill="x", padx=0, pady=0)
+            self.cnic_suggestion_buttons.append(btn)
+            
+        # Position the window relative to entry
+        try:
+            # Get entry coordinates relative to screen
+            root_x = self.buyer_cnic_entry.winfo_rootx()
+            root_y = self.buyer_cnic_entry.winfo_rooty()
+            height = self.buyer_cnic_entry.winfo_height()
+            width = self.buyer_cnic_entry.winfo_width()
+            
+            # Calculate height (max 200px)
+            req_height = min(len(customers) * 32 + 10, 200)
+            
+            # SCREEN BOUNDARY AWARENESS:
+            # If dropdown overflows bottom of screen, flip it above the input field
+            screen_height = self.winfo_screenheight()
+            if root_y + height + req_height > screen_height:
+                pos_y = root_y - req_height - 2
+            else:
+                pos_y = root_y + height + 2
+                
+            geometry_str = f"{width}x{req_height}+{root_x}+{pos_y}"
+            self.cnic_suggestion_window.geometry(geometry_str)
+            self.cnic_suggestion_window.deiconify()
+            self.cnic_suggestion_window.lift()
+        except Exception as e:
+            print(f"Error placing CNIC suggestion window: {e}")
+
+    def hide_cnic_suggestions(self):
+        if self.cnic_suggestion_window and self.cnic_suggestion_window.winfo_exists():
+            self.cnic_suggestion_window.withdraw()
+        self.cnic_selected_suggestion_index = -1
+
+    def on_cnic_suggestion_nav(self, event):
+        if not self.cnic_suggestion_window or not self.cnic_suggestion_window.winfo_exists() or not self.cnic_suggestion_window.winfo_viewable():
+            return
+            
+        count = len(self.cnic_suggestion_buttons)
+        if count == 0:
+            return
+            
+        if event.keysym == "Down":
+            self.cnic_selected_suggestion_index = (self.cnic_selected_suggestion_index + 1) % count
+        elif event.keysym == "Up":
+            self.cnic_selected_suggestion_index = (self.cnic_selected_suggestion_index - 1 + count) % count
+            
+        self.highlight_cnic_suggestion()
+
+    def highlight_cnic_suggestion(self):
+        for idx, btn in enumerate(self.cnic_suggestion_buttons):
+            if idx == self.cnic_selected_suggestion_index:
+                btn.configure(fg_color=("gray85", "gray40"))
+                # Scroll to ensure visible if needed (CTkScrollableFrame handle)
+            else:
+                btn.configure(fg_color="transparent")
+
+    def on_cnic_suggestion_select(self, event=None):
+        if 0 <= self.cnic_selected_suggestion_index < len(self.cnic_suggestions_data):
+            customer = self.cnic_suggestions_data[self.cnic_selected_suggestion_index]
+            self.select_cnic_suggestion(customer)
+            return "break"
+
+    def select_cnic_suggestion(self, customer):
+        self.hide_cnic_suggestions()
+        # Use existing selection logic
+        self._on_cnic_select(customer)
+
+    def on_cnic_focus_out(self, event=None):
+        """Handle focus out for CNIC entry"""
+        self.hide_cnic_suggestions()
+        self.perform_cnic_lookup()
 
     def select_frame_by_name(self, name):
         self.current_frame_name = name
@@ -1810,7 +2059,6 @@ class App(ctk.CTk):
             "print_invoice": (getattr(self, "print_invoice_frame", None), None),
             "captured_data": (getattr(self, "captured_data_frame", None), lambda: self.captured_data_frame.load_data()),
             "spare_ledger": (getattr(self, "spare_ledger_frame", None), lambda: self.spare_ledger_frame.refresh()),
-            "excise": (getattr(self, "excise_frame", None), None),
         }
 
         # Get target frame info
@@ -1905,9 +2153,6 @@ class App(ctk.CTk):
     def captured_data_button_event(self):
         self.select_frame_by_name("captured_data")
 
-    def excise_button_event(self):
-        self.select_frame_by_name("excise")
-
     def open_price_list(self):
         PriceListDialog(self)
 
@@ -1916,6 +2161,12 @@ class App(ctk.CTk):
 
     def open_db_settings(self):
         DatabaseSettingsDialog(self)
+
+    def open_reporting_portal(self):
+        try:
+            webbrowser.open("http://localhost:9000/")
+        except Exception as e:
+            messagebox.showerror("Error", f"Unable to open reporting portal: {e}")
 
     def form_capture_button_event(self):
         """Launch the Browser for Import / Capture"""
@@ -2326,6 +2577,23 @@ class App(ctk.CTk):
                         self.buyer_address_var.set(cap.address)
                     if cap.engine_number and not self.engine_var.get().strip():
                         self.engine_var.set(cap.engine_number)
+                    
+                    # Also populate model and color if not already set (e.g. from inventory)
+                    if cap.model and not self.model_combo.get().strip():
+                        # Find closest match in model_combo values
+                        for val in self.model_combo._values:
+                            if cap.model.upper() in val.upper() or val.upper() in cap.model.upper():
+                                self.model_combo.set(val)
+                                self.on_model_change(val)
+                                break
+                    
+                    if cap.color and not self.color_combo.get().strip():
+                        # Try to match color
+                        for val in self.color_combo._values:
+                            if cap.color.upper() in val.upper() or val.upper() in cap.color.upper():
+                                self.color_combo.set(val)
+                                self.on_color_change(val)
+                                break
             except Exception as ce:
                 print(f"Captured data lookup error: {ce}")
         except Exception as e:

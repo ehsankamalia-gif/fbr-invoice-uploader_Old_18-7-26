@@ -2,10 +2,12 @@ import customtkinter as ctk
 from tkinter import messagebox, filedialog, ttk
 import csv
 from datetime import datetime
+from openpyxl import Workbook
 from app.db.session import SessionLocal
 from app.db.models import Invoice, Motorcycle, Customer, ProductModel, InvoiceItem
 from sqlalchemy import or_
 from sqlalchemy.orm import joinedload
+from app.services.report_service import report_service, SalesFilter
 from app.services.print_service import print_service
 from app.ui.calendar_dialog import CalendarDialog
 
@@ -26,16 +28,16 @@ class ReportsFrame(ctk.CTkFrame):
         self.refresh_btn = ctk.CTkButton(self.header_frame, text="Refresh Data", command=self.load_data)
         self.refresh_btn.pack(side="right")
         
-        # Tabs
         self.tabview = ctk.CTkTabview(self)
         self.tabview.grid(row=1, column=0, padx=20, pady=10, sticky="nsew")
         
         self.tab_sales = self.tabview.add("Sales Report")
         self.tab_inventory = self.tabview.add("Inventory Report")
+        self.tab_analytics = self.tabview.add("Analytics")
         
-        # Configure Tabs
         self.setup_sales_tab()
         self.setup_inventory_tab()
+        self.setup_analytics_tab()
         
         # Initial Load
         self.load_data()
@@ -61,6 +63,16 @@ class ReportsFrame(ctk.CTkFrame):
         self.sales_status_var = ctk.StringVar(value="All")
         self.sales_status_combo = ctk.CTkComboBox(self.sales_controls, values=["All", "Synced", "Pending", "Failed"], variable=self.sales_status_var, width=120)
         self.sales_status_combo.pack(side="left", padx=5)
+
+        ctk.CTkLabel(self.sales_controls, text="Payment:").pack(side="left", padx=(10, 5))
+        self.sales_payment_var = ctk.StringVar(value="All")
+        self.sales_payment_combo = ctk.CTkComboBox(
+            self.sales_controls,
+            values=["All", "Cash", "Card", "Cheque", "Pay Order", "Online", "Credit"],
+            variable=self.sales_payment_var,
+            width=140
+        )
+        self.sales_payment_combo.pack(side="left", padx=5)
 
         # Period Filter
         ctk.CTkLabel(self.sales_controls, text="Period:").pack(side="left", padx=(10, 5))
@@ -89,8 +101,11 @@ class ReportsFrame(ctk.CTkFrame):
         # Initial Toggle
         self.toggle_date_inputs("All Time")
 
+        self.export_sales_excel_btn = ctk.CTkButton(self.sales_controls, text="Export Excel", command=self.export_sales_excel)
+        self.export_sales_excel_btn.pack(side="right")
+
         self.export_sales_btn = ctk.CTkButton(self.sales_controls, text="Export CSV", command=self.export_sales)
-        self.export_sales_btn.pack(side="right")
+        self.export_sales_btn.pack(side="right", padx=5)
         
         self.view_detail_btn = ctk.CTkButton(self.sales_controls, text="View Details", fg_color="#E67E22", hover_color="#D35400", command=lambda: self.show_sales_detail(None))
         self.view_detail_btn.pack(side="right", padx=10)
@@ -155,12 +170,25 @@ class ReportsFrame(ctk.CTkFrame):
         self.inv_status_var = ctk.StringVar(value="All")
         self.inv_status_combo = ctk.CTkComboBox(self.inv_controls, values=["All", "IN_STOCK", "SOLD"], variable=self.inv_status_var, width=120)
         self.inv_status_combo.pack(side="left", padx=5)
+
+        ctk.CTkLabel(self.inv_controls, text="Color:").pack(side="left", padx=(10, 5))
+        self.inv_color_var = ctk.StringVar(value="All")
+        self.inv_color_combo = ctk.CTkComboBox(
+            self.inv_controls,
+            values=["All", "Red", "Black", "Blue", "Other"],
+            variable=self.inv_color_var,
+            width=120
+        )
+        self.inv_color_combo.pack(side="left", padx=5)
         
         self.filter_inv_btn = ctk.CTkButton(self.inv_controls, text="Filter", width=80, command=self.load_inventory)
         self.filter_inv_btn.pack(side="left", padx=5)
 
+        self.export_inv_excel_btn = ctk.CTkButton(self.inv_controls, text="Export Excel", command=self.export_inventory_excel)
+        self.export_inv_excel_btn.pack(side="right")
+
         self.export_inv_btn = ctk.CTkButton(self.inv_controls, text="Export CSV", command=self.export_inventory)
-        self.export_inv_btn.pack(side="right")
+        self.export_inv_btn.pack(side="right", padx=5)
         
         # Table Frame
         self.inv_table_frame = ctk.CTkFrame(self.tab_inventory)
@@ -189,6 +217,76 @@ class ReportsFrame(ctk.CTkFrame):
         self.inv_tree.pack(side="left", fill="both", expand=True)
         v_scroll.config(command=self.inv_tree.yview)
 
+    def setup_analytics_tab(self):
+        self.tab_analytics.grid_columnconfigure(0, weight=1)
+        self.tab_analytics.grid_rowconfigure(0, weight=0)
+        self.tab_analytics.grid_rowconfigure(1, weight=1)
+
+        header = ctk.CTkFrame(self.tab_analytics, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+
+        title = ctk.CTkLabel(header, text="Analytics Overview", font=ctk.CTkFont(size=18, weight="bold"))
+        title.pack(side="left")
+
+        info = ctk.CTkLabel(header, text="Uses current Sales filters for calculations", text_color="gray")
+        info.pack(side="left", padx=10)
+
+        refresh_btn = ctk.CTkButton(header, text="Refresh Analytics", command=self.load_analytics)
+        refresh_btn.pack(side="right")
+
+        metrics_frame = ctk.CTkFrame(self.tab_analytics)
+        metrics_frame.grid(row=1, column=0, sticky="nsew")
+        metrics_frame.grid_columnconfigure(0, weight=1)
+        metrics_frame.grid_columnconfigure(1, weight=1)
+
+        kpi_frame_left = ctk.CTkFrame(metrics_frame, fg_color="transparent")
+        kpi_frame_left.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+
+        kpi_frame_right = ctk.CTkFrame(metrics_frame, fg_color="transparent")
+        kpi_frame_right.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
+
+        self.analytics_total_sales = ctk.CTkLabel(kpi_frame_left, text="Total Sales: 0.00", font=ctk.CTkFont(size=14, weight="bold"))
+        self.analytics_total_sales.pack(anchor="w", pady=5)
+
+        self.analytics_total_invoices = ctk.CTkLabel(kpi_frame_left, text="Invoices: 0", font=ctk.CTkFont(size=14))
+        self.analytics_total_invoices.pack(anchor="w", pady=5)
+
+        self.analytics_total_qty = ctk.CTkLabel(kpi_frame_left, text="Total Quantity: 0", font=ctk.CTkFont(size=14))
+        self.analytics_total_qty.pack(anchor="w", pady=5)
+
+        self.analytics_avg_invoice = ctk.CTkLabel(kpi_frame_left, text="Avg Invoice: 0.00", font=ctk.CTkFont(size=14))
+        self.analytics_avg_invoice.pack(anchor="w", pady=5)
+
+        status_title = ctk.CTkLabel(kpi_frame_right, text="FBR Status Distribution", font=ctk.CTkFont(size=14, weight="bold"))
+        status_title.pack(anchor="w", pady=(0, 10))
+
+        status_synced_frame = ctk.CTkFrame(kpi_frame_right, fg_color="transparent")
+        status_synced_frame.pack(fill="x", pady=2)
+        label_synced = ctk.CTkLabel(status_synced_frame, text="Synced", width=80, anchor="w")
+        label_synced.pack(side="left")
+        self.analytics_bar_synced = ctk.CTkProgressBar(status_synced_frame)
+        self.analytics_bar_synced.pack(side="left", fill="x", expand=True, padx=5)
+        self.analytics_label_synced = ctk.CTkLabel(status_synced_frame, text="0%")
+        self.analytics_label_synced.pack(side="right")
+
+        status_pending_frame = ctk.CTkFrame(kpi_frame_right, fg_color="transparent")
+        status_pending_frame.pack(fill="x", pady=2)
+        label_pending = ctk.CTkLabel(status_pending_frame, text="Pending", width=80, anchor="w")
+        label_pending.pack(side="left")
+        self.analytics_bar_pending = ctk.CTkProgressBar(status_pending_frame)
+        self.analytics_bar_pending.pack(side="left", fill="x", expand=True, padx=5)
+        self.analytics_label_pending = ctk.CTkLabel(status_pending_frame, text="0%")
+        self.analytics_label_pending.pack(side="right")
+
+        status_failed_frame = ctk.CTkFrame(kpi_frame_right, fg_color="transparent")
+        status_failed_frame.pack(fill="x", pady=2)
+        label_failed = ctk.CTkLabel(status_failed_frame, text="Failed", width=80, anchor="w")
+        label_failed.pack(side="left")
+        self.analytics_bar_failed = ctk.CTkProgressBar(status_failed_frame)
+        self.analytics_bar_failed.pack(side="left", fill="x", expand=True, padx=5)
+        self.analytics_label_failed = ctk.CTkLabel(status_failed_frame, text="0%")
+        self.analytics_label_failed.pack(side="right")
+
     def toggle_date_inputs(self, choice):
         if choice == "Custom":
             self.date_frame.pack(side="left", padx=5, before=self.filter_sales_btn)
@@ -213,81 +311,52 @@ class ReportsFrame(ctk.CTkFrame):
     def load_data(self):
         self.load_sales()
         self.load_inventory()
+        self.load_analytics()
+
+    def _build_sales_filter(self):
+        search_text = self.sales_search.get().strip()
+        status_filter = self.sales_status_var.get()
+        period = self.sales_period_var.get()
+        payment_filter = self.sales_payment_var.get()
+
+        start_date = None
+        end_date = None
+
+        if period == "Custom":
+            s_str = self.start_date_entry.get().strip()
+            e_str = self.end_date_entry.get().strip()
+            if s_str:
+                try:
+                    start_date = datetime.strptime(s_str, "%Y-%m-%d")
+                except ValueError:
+                    start_date = None
+            if e_str:
+                try:
+                    end_date = datetime.strptime(e_str, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+                except ValueError:
+                    end_date = None
+
+        return SalesFilter(
+            search_text=search_text,
+            status=status_filter,
+            payment_mode=payment_filter,
+            period=period,
+            start_date=start_date,
+            end_date=end_date,
+        )
 
     def load_sales(self):
-        # Clear existing items
         for item in self.sales_tree.get_children():
             self.sales_tree.delete(item)
-            
+
         db = SessionLocal()
         try:
-            query = db.query(Invoice).join(Customer).options(
-                joinedload(Invoice.items).joinedload(InvoiceItem.motorcycle)
-            ).order_by(Invoice.datetime.desc())
-            
-            # Apply Filters
-            search_text = self.sales_search.get().strip()
-            status_filter = self.sales_status_var.get()
-            period = self.sales_period_var.get()
-            
-            # Date Filter
-            now = datetime.now()
-            start_date = None
-            end_date = None
-            
-            if period == "Today":
-                start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
-                end_date = now.replace(hour=23, minute=59, second=59, microsecond=999999)
-            elif period == "This Month":
-                start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-                # End of month
-                import calendar
-                last_day = calendar.monthrange(now.year, now.month)[1]
-                end_date = now.replace(day=last_day, hour=23, minute=59, second=59, microsecond=999999)
-            elif period == "Custom":
-                s_str = self.start_date_entry.get().strip()
-                e_str = self.end_date_entry.get().strip()
-                if s_str:
-                    try:
-                        start_date = datetime.strptime(s_str, "%Y-%m-%d")
-                    except ValueError:
-                        pass
-                if e_str:
-                    try:
-                        end_date = datetime.strptime(e_str, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
-                    except ValueError:
-                        pass
+            flt = self._build_sales_filter()
+            invoices = report_service.get_sales(db, flt)
 
-            if start_date:
-                query = query.filter(Invoice.datetime >= start_date)
-            if end_date:
-                query = query.filter(Invoice.datetime <= end_date)
-
-            if search_text:
-                search = f"%{search_text}%"
-                query = query.outerjoin(Invoice.items).outerjoin(InvoiceItem.motorcycle).filter(
-                    or_(
-                        Invoice.invoice_number.ilike(search),
-                        Customer.name.ilike(search),
-                        Customer.cnic.ilike(search),
-                        Motorcycle.chassis_number.ilike(search),
-                        Motorcycle.engine_number.ilike(search)
-                    )
-                )
-                
-            if status_filter == "Synced":
-                query = query.filter(Invoice.is_fiscalized == True)
-            elif status_filter == "Pending":
-                query = query.filter(Invoice.is_fiscalized == False, Invoice.sync_status != "FAILED")
-            elif status_filter == "Failed":
-                query = query.filter(Invoice.sync_status == "FAILED")
-            
-            invoices = query.all()
-            
             for inv in invoices:
                 date_str = inv.datetime.strftime("%Y-%m-%d %H:%M")
-                
-                # Determine Status and Tag
+
                 if inv.is_fiscalized:
                     status = "Synced"
                     tag = "synced"
@@ -297,20 +366,19 @@ class ReportsFrame(ctk.CTkFrame):
                 else:
                     status = "Pending"
                     tag = "pending"
-                
+
                 buyer_name = inv.customer.name if inv.customer else "N/A"
-                
-                # Get chassis and engine numbers
+
                 chassis_list = []
                 engine_list = []
                 for item in inv.items:
                     if item.motorcycle:
                         chassis_list.append(item.motorcycle.chassis_number or "")
                         engine_list.append(item.motorcycle.engine_number or "")
-                
+
                 chassis_str = ", ".join(filter(None, chassis_list))
                 engine_str = ", ".join(filter(None, engine_list))
-                
+
                 self.sales_tree.insert("", "end", values=(
                     date_str,
                     inv.invoice_number,
@@ -320,7 +388,7 @@ class ReportsFrame(ctk.CTkFrame):
                     f"{inv.total_amount:,.2f}",
                     status
                 ), tags=(tag,))
-            
+
         except Exception as e:
             messagebox.showerror("Error", f"Failed to load sales: {e}")
         finally:
@@ -400,6 +468,7 @@ class ReportsFrame(ctk.CTkFrame):
             # Apply Filters
             search_text = self.inv_search.get().strip()
             status_filter = self.inv_status_var.get()
+            color_filter = self.inv_color_var.get()
             
             if search_text:
                 search = f"%{search_text}%"
@@ -413,6 +482,9 @@ class ReportsFrame(ctk.CTkFrame):
                 
             if status_filter and status_filter != "All":
                 query = query.filter(Motorcycle.status == status_filter)
+
+            if color_filter and color_filter != "All":
+                query = query.filter(Motorcycle.color == color_filter)
             
             bikes = query.all()
             
@@ -437,7 +509,8 @@ class ReportsFrame(ctk.CTkFrame):
             
         db = SessionLocal()
         try:
-            invoices = db.query(Invoice).options(
+            query = self._build_sales_query(db)
+            invoices = query.options(
                 joinedload(Invoice.customer),
                 joinedload(Invoice.items).joinedload(InvoiceItem.motorcycle)
             ).all()
@@ -471,6 +544,113 @@ class ReportsFrame(ctk.CTkFrame):
             messagebox.showinfo("Success", "Sales report exported successfully!")
         except Exception as e:
             messagebox.showerror("Error", f"Export failed: {e}")
+        finally:
+            db.close()
+
+    def export_sales_excel(self):
+        filename = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel Files", "*.xlsx")])
+        if not filename:
+            return
+
+        db = SessionLocal()
+        try:
+            query = self._build_sales_query(db)
+            invoices = query.all()
+
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Sales"
+
+            headers = [
+                "Invoice No",
+                "Date",
+                "Buyer",
+                "CNIC",
+                "Payment Mode",
+                "Chassis Number",
+                "Engine Number",
+                "Total Amount",
+                "Tax",
+                "Further Tax",
+                "FBR Status"
+            ]
+            ws.append(headers)
+
+            for inv in invoices:
+                chassis_list = []
+                engine_list = []
+                for item in inv.items:
+                    if item.motorcycle:
+                        chassis_list.append(item.motorcycle.chassis_number or "")
+                        engine_list.append(item.motorcycle.engine_number or "")
+
+                chassis_str = ", ".join(filter(None, chassis_list))
+                engine_str = ", ".join(filter(None, engine_list))
+
+                if inv.is_fiscalized:
+                    status = "Fiscalized"
+                elif inv.sync_status == "FAILED":
+                    status = "Failed"
+                else:
+                    status = "Pending"
+
+                ws.append([
+                    inv.invoice_number,
+                    inv.datetime,
+                    inv.customer.name if inv.customer else "",
+                    inv.customer.cnic if inv.customer else "",
+                    inv.payment_mode or "",
+                    chassis_str,
+                    engine_str,
+                    inv.total_amount,
+                    inv.total_tax_charged,
+                    inv.total_further_tax,
+                    status
+                ])
+
+            wb.save(filename)
+            messagebox.showinfo("Success", "Sales report (Excel) exported successfully!")
+        except Exception as e:
+            messagebox.showerror("Error", f"Export failed: {e}")
+        finally:
+            db.close()
+
+    def load_analytics(self):
+        db = SessionLocal()
+        try:
+            query = self._build_sales_query(db)
+            invoices = query.all()
+
+            total_sales = sum(inv.total_amount for inv in invoices)
+            total_invoices = len(invoices)
+            total_qty = sum(inv.total_quantity for inv in invoices)
+            avg_invoice = total_sales / total_invoices if total_invoices else 0
+
+            self.analytics_total_sales.configure(text=f"Total Sales: {total_sales:,.2f}")
+            self.analytics_total_invoices.configure(text=f"Invoices: {total_invoices}")
+            self.analytics_total_qty.configure(text=f"Total Quantity: {total_qty:,.2f}")
+            self.analytics_avg_invoice.configure(text=f"Avg Invoice: {avg_invoice:,.2f}")
+
+            synced = sum(1 for inv in invoices if inv.is_fiscalized)
+            failed = sum(1 for inv in invoices if inv.sync_status == "FAILED")
+            pending = total_invoices - synced - failed
+
+            def safe_ratio(count):
+                return (count / total_invoices) if total_invoices else 0
+
+            synced_ratio = safe_ratio(synced)
+            failed_ratio = safe_ratio(failed)
+            pending_ratio = safe_ratio(pending)
+
+            self.analytics_bar_synced.set(synced_ratio)
+            self.analytics_bar_failed.set(failed_ratio)
+            self.analytics_bar_pending.set(pending_ratio)
+
+            self.analytics_label_synced.configure(text=f"{synced_ratio*100:.0f}%")
+            self.analytics_label_failed.configure(text=f"{failed_ratio*100:.0f}%")
+            self.analytics_label_pending.configure(text=f"{pending_ratio*100:.0f}%")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load analytics: {e}")
         finally:
             db.close()
 
@@ -866,6 +1046,66 @@ class ReportsFrame(ctk.CTkFrame):
                         bike.status
                     ])
             messagebox.showinfo("Success", "Inventory report exported successfully!")
+        except Exception as e:
+            messagebox.showerror("Error", f"Export failed: {e}")
+        finally:
+            db.close()
+
+    def export_inventory_excel(self):
+        filename = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel Files", "*.xlsx")])
+        if not filename:
+            return
+
+        db = SessionLocal()
+        try:
+            query = db.query(Motorcycle).options(joinedload(Motorcycle.product_model))
+
+            search_text = self.inv_search.get().strip()
+            status_filter = self.inv_status_var.get()
+            color_filter = self.inv_color_var.get()
+
+            if search_text:
+                search = f"%{search_text}%"
+                query = query.join(ProductModel).filter(
+                    or_(
+                        Motorcycle.chassis_number.ilike(search),
+                        Motorcycle.engine_number.ilike(search),
+                        ProductModel.model_name.ilike(search)
+                    )
+                )
+
+            if status_filter and status_filter != "All":
+                query = query.filter(Motorcycle.status == status_filter)
+
+            if color_filter and color_filter != "All":
+                query = query.filter(Motorcycle.color == color_filter)
+
+            bikes = query.all()
+
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Inventory"
+
+            headers = ["Chassis", "Engine", "Make", "Model", "Year", "Color", "Cost", "Price", "Status"]
+            ws.append(headers)
+
+            for bike in bikes:
+                model_name = bike.product_model.model_name if bike.product_model else "Unknown"
+                make = bike.product_model.make if bike.product_model else "Honda"
+                ws.append([
+                    bike.chassis_number,
+                    bike.engine_number,
+                    make,
+                    model_name,
+                    bike.year,
+                    bike.color,
+                    bike.cost_price,
+                    bike.sale_price,
+                    bike.status
+                ])
+
+            wb.save(filename)
+            messagebox.showinfo("Success", "Inventory report (Excel) exported successfully!")
         except Exception as e:
             messagebox.showerror("Error", f"Export failed: {e}")
         finally:

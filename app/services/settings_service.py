@@ -89,7 +89,7 @@ class SettingsService:
         load_dotenv(dotenv_path=self.env_path, override=True)
 
     def save_environment(self, env: str, base_url: str, pos_id: str, usin: str, token: str, tax_rate: str, pct_code: str, 
-                         invoice_type: str, discount: str, item_code: str, item_name: str):
+                         invoice_type: str, discount: str, item_code: str, item_name: str, business_name: str = "Ehsan Trader"):
         env = env.upper()
         if env not in ("SANDBOX", "PRODUCTION"):
             raise ValueError("Environment must be SANDBOX or PRODUCTION")
@@ -111,6 +111,7 @@ class SettingsService:
             config.discount = float(discount)
             config.item_code = item_code
             config.item_name = item_name
+            config.business_name = business_name
             
             db.commit()
             logger.info(f"Updated settings for {env}")
@@ -174,6 +175,7 @@ class SettingsService:
                 "discount": str(config.discount),
                 "item_code": config.item_code,
                 "item_name": config.item_name,
+                "business_name": config.business_name or "Ehsan Trader",
             }
         finally:
             db.close()
@@ -202,6 +204,7 @@ class SettingsService:
                 "discount": config.discount,
                 "item_code": config.item_code,
                 "item_name": config.item_name,
+                "business_name": config.business_name or "Ehsan Trader",
             }
         finally:
             db.close()

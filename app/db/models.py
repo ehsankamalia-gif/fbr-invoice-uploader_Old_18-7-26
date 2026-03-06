@@ -245,8 +245,17 @@ class FBRConfiguration(Base):
     pct_code = Column(String(20), default="8711.2010")
     item_code = Column(String(50), nullable=True)
     item_name = Column(String(100), nullable=True)
+    business_name = Column(String(100), nullable=True, default="Ehsan Trader")
     
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
+
+class MigrationHistory(Base):
+    __tablename__ = "migration_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    version = Column(Integer, nullable=False, unique=True)
+    description = Column(String(255), nullable=True)
+    applied_at = Column(DateTime, default=dt.datetime.utcnow)
 
 # --- Spare Parts Ledger ---
 class LedgerTransactionType(str, enum.Enum):
@@ -262,6 +271,7 @@ class SpareLedgerTransaction(Base):
     amount = Column(Float, nullable=False)
     reference_number = Column(String(50), nullable=True)
     description = Column(String(255), nullable=True)
+    cash_type = Column(String(20), nullable=True, default="HARD_CASH") # BANK or HARD_CASH
     created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     month_key = Column(String(7), index=True)  # YYYY-MM of closing cycle (6th..5th)
 
@@ -287,3 +297,80 @@ class SpareLedgerAudit(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     transaction_id = Column(Integer, ForeignKey("spare_ledger_transactions.id"), nullable=True)
     details = Column(JSON, nullable=True)
+
+# --- SMS Module ---
+class SMSStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    SENDING = "SENDING"
+    SENT = "SENT"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+    SCHEDULED = "SCHEDULED"
+
+class SMSCampaign(Base):
+    __tablename__ = "sms_campaigns"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    template = Column(String(1000), nullable=False)
+    total_recipients = Column(Integer, default=0)
+    sent_count = Column(Integer, default=0)
+    failed_count = Column(Integer, default=0)
+    status = Column(String(20), default="PENDING", index=True) # PENDING, RUNNING, COMPLETED, PAUSED
+    error_message = Column(String(500), nullable=True)
+    
+    scheduled_at = Column(DateTime, nullable=True, index=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
+    completed_at = Column(DateTime, nullable=True)
+    
+    messages = relationship("SMSQueue", back_populates="campaign", cascade="all, delete-orphan")
+
+class SMSQueue(Base):
+    __tablename__ = "sms_queue"
+
+    id = Column(Integer, primary_key=True, index=True)
+    campaign_id = Column(Integer, ForeignKey("sms_campaigns.id"), nullable=True)
+    phone_number = Column(String(20), nullable=False, index=True)
+    recipient_name = Column(String(100), nullable=True)
+    message = Column(String(1000), nullable=False)
+    status = Column(String(20), default=SMSStatus.PENDING, index=True)
+    retry_count = Column(Integer, default=0)
+    error_message = Column(String(255), nullable=True)
+    
+    # Reference to invoice if applicable
+    invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=True)
+    
+    created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
+    sent_at = Column(DateTime, nullable=True)
+    scheduled_at = Column(DateTime, nullable=True, index=True)
+    
+    campaign = relationship("SMSCampaign", back_populates="messages")
+    invoice = relationship("Invoice")
+
+class SMSConfiguration(Base):
+    __tablename__ = "sms_configurations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    is_enabled = Column(Boolean, default=False)
+    gateway_type = Column(String(20), default="WIFI") # WIFI or CLOUD
+    
+    # WiFi Gateway Settings
+    gateway_ip = Column(String(100), nullable=True) 
+    gateway_port = Column(String(10), default="8080")
+    use_https = Column(Boolean, default=False)
+    
+    # Cloud/Common Settings
+    api_url = Column(String(255), nullable=True) # Cloud Server URL
+    cloud_username = Column(String(100), nullable=True)
+    cloud_password = Column(String(100), nullable=True)
+    gateway_username = Column(String(100), nullable=True) # WiFi Username
+    gateway_password = Column(String(100), nullable=True) # WiFi Password
+    api_key = Column(String(100), nullable=True)
+    delay_seconds = Column(Integer, default=5)
+    
+    # Templates
+    invoice_template = Column(String(500), default="Dear {customer}, your invoice {invoice_no} for Rs. {amount} has been generated. FBR ID: {fbr_id}")
+    otp_template = Column(String(500), default="Your verification code is {code}")
+    
+    updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
+

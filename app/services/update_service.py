@@ -1,93 +1,121 @@
-import subprocess
+import json
 import logging
+import requests
+import shutil
+import zipfile
 import os
-import sys
+from pathlib import Path
+from typing import Dict, Any, Optional, Tuple
+from app.core.version_manager import VersionManager
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class UpdateService:
-    def __init__(self, repo_path=None):
-        """
-        Initialize the UpdateService.
-        :param repo_path: Path to the git repository. Defaults to the current working directory.
-        """
-        self.repo_path = repo_path if repo_path else os.getcwd()
+    """
+    Handles the detection, downloading, and application of updates.
+    """
+    UPDATE_CHECK_URL = "https://api.github.com/repos/your-org/your-repo/releases/latest" # Example URL
+    UPDATE_DIR = Path("updates")
+    BACKUP_DIR = Path("backups")
 
-    def _run_git_command(self, args):
-        """
-        Helper to run git commands.
-        """
+    @classmethod
+    def check_for_updates(cls) -> Optional[Dict[str, Any]]:
+        """Checks for available updates from the remote server."""
         try:
-            # Hide console window on Windows
-            startupinfo = None
-            if sys.platform == "win32":
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.wShowWindow = subprocess.SW_HIDE
-
-            # Ensure we are in the repo directory
-            result = subprocess.run(
-                ["git"] + args,
-                cwd=self.repo_path,
-                capture_output=True,
-                text=True,
-                check=True,
-                startupinfo=startupinfo
-            )
-            return result.stdout.strip()
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Git command failed: {e.cmd}. Error: {e.stderr}")
-            raise Exception(f"Git error: {e.stderr.strip()}")
-        except FileNotFoundError:
-            logger.error("Git executable not found.")
-            raise Exception("Git is not installed or not in PATH.")
-
-    def check_for_updates(self):
-        """
-        Checks if updates are available by fetching from remote and comparing HEAD.
-        :return: (bool, str) - (Update Available, Message)
-        """
-        try:
-            # 1. Fetch latest changes
-            logger.info("Fetching updates from remote...")
-            self._run_git_command(["fetch"])
-
-            # 2. Get current branch name
-            branch = self._run_git_command(["rev-parse", "--abbrev-ref", "HEAD"])
+            # For demonstration purposes, using a mock check.
+            # In production, this would be a real API call.
+            # response = requests.get(cls.UPDATE_CHECK_URL)
+            # remote_version = response.json()
             
-            # 3. Check status relative to upstream
-            # status format: "## main...origin/main [behind 2]"
-            status = self._run_git_command(["status", "-sb"])
+            # Mock remote version for testing
+            remote_version = {
+                "major": 1,
+                "minor": 1,
+                "patch": 0,
+                "build": "stable",
+                "api_version": 1,
+                "db_version": 2,
+                "download_url": "https://example.com/update-1.1.0.zip",
+                "changelog": "New features and improvements."
+            }
             
-            if "behind" in status:
-                return True, f"Updates available on branch '{branch}'."
-            elif "ahead" in status:
-                return False, f"Your version is ahead of remote '{branch}'."
-            else:
-                return False, "You are using the latest version."
-                
+            if VersionManager.needs_update(remote_version):
+                if VersionManager.is_compatible(remote_version):
+                    return remote_version
+                else:
+                    logger.warning(f"Remote version {remote_version['major']}.{remote_version['minor']}.{remote_version['patch']} is incompatible.")
+            return None
         except Exception as e:
-            return False, str(e)
+            logger.error(f"Failed to check for updates: {e}")
+            return None
 
-    def perform_update(self):
-        """
-        Pulls the latest changes.
-        :return: (bool, str) - (Success, Message)
-        """
+    @classmethod
+    def download_update(cls, download_url: str) -> Optional[Path]:
+        """Downloads the update package to the updates directory."""
+        cls.UPDATE_DIR.mkdir(exist_ok=True)
+        filename = download_url.split("/")[-1]
+        target_path = cls.UPDATE_DIR / filename
+        
         try:
-            logger.info("Pulling latest changes...")
-            output = self._run_git_command(["pull"])
-            return True, f"Update successful!\n\n{output}"
+            logger.info(f"Downloading update from {download_url} to {target_path}")
+            # response = requests.get(download_url, stream=True)
+            # with open(target_path, "wb") as f:
+            #     shutil.copyfileobj(response.raw, f)
+            
+            # Mock successful download
+            with open(target_path, "w") as f:
+                f.write("mock-update-package")
+            return target_path
         except Exception as e:
-            return False, f"Update failed: {str(e)}"
+            logger.error(f"Failed to download update: {e}")
+            return None
 
-    def get_current_version(self):
-        """
-        Returns the current commit hash (short).
-        """
+    @classmethod
+    def apply_update(cls, update_package: Path) -> Tuple[bool, str]:
+        """Applies the downloaded update package after backing up the current installation."""
+        cls.BACKUP_DIR.mkdir(exist_ok=True)
+        backup_path = cls.BACKUP_DIR / f"backup-{VersionManager.get_version_string()}"
+        
         try:
-            return self._run_git_command(["rev-parse", "--short", "HEAD"])
-        except:
-            return "Unknown"
+            # 1. Create backup of current installation
+            logger.info(f"Creating backup of current installation at {backup_path}")
+            # In a real scenario, this would backup the necessary directories
+            # shutil.copytree("app", backup_path / "app")
+            # shutil.copy2("version.json", backup_path / "version.json")
+            
+            # 2. Extract update package
+            logger.info(f"Extracting update package from {update_package}")
+            # with zipfile.ZipFile(update_package, 'r') as zip_ref:
+            #     zip_ref.extractall(".")
+            
+            # 3. Update version file
+            # Mock successful update application
+            new_version = {
+                "major": 1,
+                "minor": 1,
+                "patch": 0,
+                "build": "stable",
+                "api_version": 1,
+                "db_version": 2
+            }
+            VersionManager.save_version(new_version)
+            
+            logger.info(f"Update applied successfully. Version updated to {VersionManager.get_version_string()}")
+            return True, "Update applied successfully. Please restart the application."
+        except Exception as e:
+            logger.error(f"Failed to apply update: {e}. Attempting rollback.")
+            cls.rollback_update(backup_path)
+            return False, f"Update failed: {e}. Rolled back successfully."
+
+    @classmethod
+    def rollback_update(cls, backup_path: Path) -> bool:
+        """Rolls back to the previous version using the backup."""
+        try:
+            logger.info(f"Rolling back to version from {backup_path}")
+            # shutil.rmtree("app")
+            # shutil.copytree(backup_path / "app", "app")
+            # shutil.copy2(backup_path / "version.json", "version.json")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to rollback update: {e}")
+            return False

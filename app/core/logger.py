@@ -27,20 +27,20 @@ class Logger:
         stream_handler.setFormatter(formatter)
         self.logger.addHandler(stream_handler)
 
-    def info(self, msg: str):
-        self.logger.info(msg)
+    def info(self, msg: str, *args, **kwargs):
+        self.logger.info(msg, *args, **kwargs)
     
-    def error(self, msg: str):
-        self.logger.error(msg)
+    def error(self, msg: str, *args, **kwargs):
+        self.logger.error(msg, *args, **kwargs)
         
-    def warning(self, msg: str):
-        self.logger.warning(msg)
+    def warning(self, msg: str, *args, **kwargs):
+        self.logger.warning(msg, *args, **kwargs)
         
-    def debug(self, msg: str):
-        self.logger.debug(msg)
+    def debug(self, msg: str, *args, **kwargs):
+        self.logger.debug(msg, *args, **kwargs)
     
-    def exception(self, msg: str):
-        self.logger.exception(msg)
+    def exception(self, msg: str, *args, **kwargs):
+        self.logger.exception(msg, *args, **kwargs)
 
 # Create global logger instance
 logger = Logger(settings.APP_NAME)

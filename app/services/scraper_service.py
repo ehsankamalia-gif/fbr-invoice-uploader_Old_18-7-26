@@ -2,7 +2,6 @@ import logging
 import sys
 import threading
 import time
-from tkinter import messagebox
 from typing import List, Dict, Optional
 from app.services.form_capture_service import FormCaptureService
 
@@ -114,7 +113,7 @@ class HondaScraper:
         try:
             self.capture_service.execute_task(login_task)
         except Exception as e:
-             messagebox.showwarning("Login Warning", f"Auto-login could not complete: {e}\nPlease login manually.")
+             logger.warning(f"Auto-login could not complete: {e}. Please login manually.")
 
     def _apply_layout_fixes(self, page):
         pass
