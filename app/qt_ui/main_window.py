@@ -2359,7 +2359,7 @@ class MainWindow(QMainWindow):
         upload_h_box = QHBoxLayout()
         self.bulk_file_path_input = QLineEdit()
         self.bulk_file_path_input.setReadOnly(True)
-        self.bulk_file_path_input.setPlaceholderText("Select .xlsx file...")
+        self.bulk_file_path_input.setPlaceholderText("Select .xlsx or .xlsm file...")
         upload_h_box.addWidget(self.bulk_file_path_input)
         
         browse_btn = QPushButton("📂 Browse File")
@@ -2524,7 +2524,7 @@ class MainWindow(QMainWindow):
         from PyQt6.QtWidgets import QFileDialog
         from app.services.excel_processing_service import ExcelProcessingService
 
-        file_path, _ = QFileDialog.getOpenFileName(self, "Select Excel File", "", "Excel Files (*.xlsx *.xls)")
+        file_path, _ = QFileDialog.getOpenFileName(self, "Select Excel File", "", "Excel Files (*.xlsx *.xls *.xlsm)")
         if file_path:
             self.bulk_file_path_input.setText(file_path)
             

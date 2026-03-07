@@ -374,3 +374,12 @@ class SMSConfiguration(Base):
     
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
 
+class AppConfiguration(Base):
+    __tablename__ = "app_configurations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    auto_push_enabled = Column(Boolean, default=False)
+    auto_push_interval = Column(Integer, default=5) # seconds
+    
+    updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
+

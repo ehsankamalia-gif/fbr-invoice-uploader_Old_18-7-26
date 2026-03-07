@@ -548,7 +548,7 @@ class ReportsFrame(ctk.CTkFrame):
             db.close()
 
     def export_sales_excel(self):
-        filename = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel Files", "*.xlsx")])
+        filename = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel Files", "*.xlsx *.xlsm")])
         if not filename:
             return
 
@@ -1052,7 +1052,7 @@ class ReportsFrame(ctk.CTkFrame):
             db.close()
 
     def export_inventory_excel(self):
-        filename = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel Files", "*.xlsx")])
+        filename = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel Files", "*.xlsx *.xlsm")])
         if not filename:
             return
 

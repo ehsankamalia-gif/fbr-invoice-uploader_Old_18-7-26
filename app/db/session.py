@@ -117,6 +117,7 @@ def run_migrations():
             migrations = [
                 (1, "Initial schema and legacy migrations", _run_legacy_migrations),
                 (2, "Add use_https to sms_configurations", _migration_v2_add_https),
+                (3, "Add app_configurations table", _migration_v3_add_app_configs),
                 # Add more migrations here as needed
             ]
 
@@ -167,6 +168,22 @@ def _migration_v2_add_https(conn) -> bool:
         return True
     except Exception as e:
         logger.error(f"Migration v2 failed: {e}")
+        return False
+
+def _migration_v3_add_app_configs(conn) -> bool:
+    """Creates the app_configurations table if it doesn't exist."""
+    try:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS app_configurations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                auto_push_enabled BOOLEAN DEFAULT 0,
+                auto_push_interval INTEGER DEFAULT 5,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        return True
+    except Exception as e:
+        logger.error(f"Migration v3 failed: {e}")
         return False
 
 

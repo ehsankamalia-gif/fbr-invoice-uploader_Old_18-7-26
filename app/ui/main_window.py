@@ -33,6 +33,7 @@ from app.ui.welcome_frame import WelcomeFrame
 from app.ui.autocomplete_entry import AutocompleteEntry
 from app.ui.stock_summary_frame import StockSummaryFrame
 
+from app.utils.auto_git import auto_git_manager
 from app.utils.price_data import price_manager
 import app.core.config as config
 import threading
@@ -160,11 +161,29 @@ class App(ctk.CTk):
         # Keyboard Shortcuts
         self.bind("<Escape>", self.on_escape)
 
+        # Initialize Auto-Git Sync if enabled
+        self.update_auto_sync_status()
+
+    def update_auto_sync_status(self):
+        """Starts or stops the auto-sync manager based on current settings."""
+        config = settings_service.get_app_config()
+        if config.get("auto_push_enabled", False):
+            # Pass a callback to show sync status if desired
+            auto_git_manager.start()
+            logger.info("Auto-Git Sync feature is ENABLED")
+        else:
+            auto_git_manager.stop()
+            logger.info("Auto-Git Sync feature is DISABLED")
+
     def on_escape(self, event=None):
         pass # Sidebar toggle removed
 
     def on_closing(self):
         """Clean up resources before closing"""
+        try:
+            auto_git_manager.stop()
+        except Exception:
+            pass
         try:
             form_capture_service.stop_capture_session()
         except Exception as e:

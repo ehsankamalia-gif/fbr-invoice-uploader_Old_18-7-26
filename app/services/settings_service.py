@@ -3,7 +3,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
-from app.db.models import FBRConfiguration
+from app.db.models import FBRConfiguration, AppConfiguration
 import logging
 
 logger = logging.getLogger(__name__)
@@ -243,5 +243,46 @@ class SettingsService:
             "DB_USER": user,
             "DB_PASSWORD": password
         })
+
+    def get_app_config(self) -> dict:
+        """Get general application settings."""
+        db = SessionLocal()
+        try:
+            config = db.query(AppConfiguration).first()
+            if not config:
+                # Initialize default app config if missing
+                config = AppConfiguration(auto_push_enabled=False, auto_push_interval=5)
+                db.add(config)
+                db.commit()
+            
+            return {
+                "auto_push_enabled": config.auto_push_enabled,
+                "auto_push_interval": config.auto_push_interval
+            }
+        except Exception as e:
+            logger.error(f"Error getting app config: {e}")
+            return {"auto_push_enabled": False, "auto_push_interval": 5}
+        finally:
+            db.close()
+
+    def set_app_config(self, auto_push_enabled: bool, auto_push_interval: int = 5):
+        """Update general application settings."""
+        db = SessionLocal()
+        try:
+            config = db.query(AppConfiguration).first()
+            if not config:
+                config = AppConfiguration()
+                db.add(config)
+            
+            config.auto_push_enabled = auto_push_enabled
+            config.auto_push_interval = auto_push_interval
+            db.commit()
+            logger.info(f"Updated app config: auto_push={auto_push_enabled}")
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error saving app config: {e}")
+            raise
+        finally:
+            db.close()
 
 settings_service = SettingsService()

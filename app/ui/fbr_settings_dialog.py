@@ -97,6 +97,17 @@ class FBRSettingsDialog(ctk.CTkToplevel):
         self.item_name_entry = ctk.CTkEntry(self.defaults_frame)
         self.item_name_entry.grid(row=7, column=1, padx=10, pady=8, sticky="ew")
 
+        # --- Section 3: App Features (Full Width) ---
+        self.features_frame = ctk.CTkFrame(self.main_frame)
+        self.features_frame.grid(row=1, column=0, columnspan=2, padx=15, pady=20, sticky="nsew")
+        self.features_frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(self.features_frame, text="Application Features", font=ctk.CTkFont(size=16, weight="bold")).grid(row=0, column=0, columnspan=2, pady=15)
+
+        self.auto_push_var = ctk.BooleanVar(value=False)
+        self.auto_push_cb = ctk.CTkCheckBox(self.features_frame, text="Auto-Sync Code to Bitbucket (Uploads changes automatically on save)", variable=self.auto_push_var)
+        self.auto_push_cb.grid(row=1, column=0, columnspan=2, padx=20, pady=10, sticky="w")
+
         # --- Buttons ---
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
         btn_frame.grid(row=1, column=0, pady=20)
@@ -116,6 +127,11 @@ class FBRSettingsDialog(ctk.CTkToplevel):
         # Initialize
         active_env = settings_service.get_active_environment()
         self.env_combo.set(active_env)
+        
+        # Load App Config
+        app_config = settings_service.get_app_config()
+        self.auto_push_var.set(app_config.get("auto_push_enabled", False))
+
         self.on_env_change(active_env)
         self.refresh_preview()
 
@@ -259,6 +275,15 @@ class FBRSettingsDialog(ctk.CTkToplevel):
                 item_name=item_name
             )
             
+            # Save App Configuration (Auto-Push)
+            settings_service.set_app_config(
+                auto_push_enabled=self.auto_push_var.get()
+            )
+            
+            # Trigger application to update auto-sync status if master has the method
+            if hasattr(self.master, 'update_auto_sync_status'):
+                self.master.update_auto_sync_status()
+
             settings_service.set_active_environment(env)
             reload_settings()
             
