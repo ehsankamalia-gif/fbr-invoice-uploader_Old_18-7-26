@@ -63,6 +63,8 @@ from app.services.form_capture_service import form_capture_service
 from app.qt_ui.dealer_search_dialog import DealerSearchDialog
 from app.qt_ui.web_import_dialog import WebImportDialog
 from app.core.logger import logger
+from app.core.version_manager import VersionManager
+from app.updater.updater_manager import UpdaterManager
 
 
 @dataclass
@@ -218,7 +220,6 @@ class AutocompleteLineEdit(QLineEdit):
 class MainWindow(QMainWindow):
     sms_result_signal = pyqtSignal(bool, str)
     conn_test_result_signal = pyqtSignal(bool, str) # Added for connection tests
-    update_check_signal = pyqtSignal(object) # Added for update checks (sends update_info or None)
     campaign_progress_signal = pyqtSignal(int, int, int, int) # camp_id, sent, failed, total
     campaign_complete_signal = pyqtSignal(int, bool, str) # camp_id, success, message
 
@@ -234,7 +235,6 @@ class MainWindow(QMainWindow):
         # SMS Signal connection
         self.sms_result_signal.connect(self._handle_sms_result)
         self.conn_test_result_signal.connect(self._handle_conn_test_result)
-        self.update_check_signal.connect(self._handle_update_check_result)
         self.campaign_progress_signal.connect(self._handle_campaign_progress)
         self.campaign_complete_signal.connect(self._handle_campaign_complete)
 
@@ -251,13 +251,12 @@ class MainWindow(QMainWindow):
         # Register Data Capture Callback
         form_capture_service.on_data_captured = self._on_browser_data_captured
 
-        # Periodic Update Check (Every 4 hours)
-        self._update_check_timer = QTimer(self)
-        self._update_check_timer.setInterval(4 * 60 * 60 * 1000) # 4 hours in milliseconds
-        self._update_check_timer.timeout.connect(lambda: self._check_modular_updates(manual=False))
-        self._update_check_timer.start()
+        # Initialize Professional Updater
+        self._init_updater()
 
         self._init_ui()
+        
+        # Auto-refresh timer for Captured Data
         
         # Load active branding
         active_settings = settings_service.get_active_settings()
@@ -272,111 +271,84 @@ class MainWindow(QMainWindow):
             self.footer_update_btn.setEnabled(False)
             self.footer_update_btn.setText("⌛ Checking...")
             
-        self._check_modular_updates(manual=True)
+        self.updater_manager.check_for_updates_async()
 
-    def _check_modular_updates(self, manual: bool = False):
-        """Checks for updates in a background thread."""
-        import threading
-        from app.services.update_service import UpdateService
-        
-        logger.info(f"Checking for modular updates (Manual: {manual})...")
-        
-        def run_check():
-            try:
-                update_info = UpdateService.check_for_updates()
-                # Attach the manual flag to the result to know if we should show "Already up to date"
-                result = {"update_info": update_info, "manual": manual}
-                self.update_check_signal.emit(result)
-            except Exception as e:
-                logger.error(f"Error in update check thread: {e}")
-                self.update_check_signal.emit({"update_info": None, "manual": manual, "error": str(e)})
-        
-        threading.Thread(target=run_check, daemon=True).start()
-
-    def _handle_update_check_result(self, result: dict):
-        """Handles the result of the update check in the UI thread."""
-        update_info = result.get("update_info")
-        manual = result.get("manual", False)
-        error = result.get("error")
-
-        if manual:
-            if hasattr(self, 'manual_update_btn'):
-                self.manual_update_btn.setEnabled(True)
-                self.manual_update_btn.setText("🔄 Check for Updates Now")
-            if hasattr(self, 'footer_update_btn'):
-                self.footer_update_btn.setEnabled(True)
-                self.footer_update_btn.setText("🔄 Check for Updates")
-
-        if error:
-            if manual:
-                self._show_error("Update Check Failed", f"Could not check for updates:\n{error}")
-            return
-
-        if update_info:
-            # Update found notification - show even in background as requested
-            msg_prefix = "New Application Update Available" if not manual else "Update Found"
-            reply = QMessageBox.information(
-                self, 
-                msg_prefix, 
-                f"A new version ({update_info['major']}.{update_info['minor']}.{update_info['patch']}) has been released.\n\n"
-                f"Changelog: {update_info['changelog']}\n\n"
-                "Would you like to download and install it now?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-            
-            if reply == QMessageBox.StandardButton.Yes:
-                self._perform_modular_update(update_info)
-        elif manual:
-            self._show_success("Up to Date", "You are already using the latest version of the application.")
-
-    def _perform_modular_update(self, update_info):
-        """Downloads and applies the modular update."""
-        from app.services.update_service import UpdateService
-        
-        # UI feedback
-        if hasattr(self, 'manual_update_btn'):
-            self.manual_update_btn.setEnabled(False)
-            self.manual_update_btn.setText("⌛ Updating...")
-        if hasattr(self, 'footer_update_btn'):
-            self.footer_update_btn.setEnabled(False)
-            self.footer_update_btn.setText("⌛ Updating...")
-        
-        # 1. Download
-        package_path = UpdateService.download_update(update_info['download_url'])
-        if not package_path:
-            self._show_error("Update Error", "Failed to download the update package.")
-            if hasattr(self, 'manual_update_btn'):
-                self.manual_update_btn.setEnabled(True)
-                self.manual_update_btn.setText("🔄 Check for Updates Now")
-            if hasattr(self, 'footer_update_btn'):
-                self.footer_update_btn.setEnabled(True)
-                self.footer_update_btn.setText("🔄 Check for Updates")
-            return
-            
-        # 2. Apply
-        success, message = UpdateService.apply_update(package_path)
-        
-        if success:
-            self._show_success("Update Successful", message)
-            # Update version label in settings if it exists
-            if hasattr(self, 'settings_version_label'):
-                from app.core.version_manager import VersionManager
-                self.settings_version_label.setText(VersionManager.get_version_string())
-        else:
-            self._show_error("Update Failed", message)
-        
+    def _handle_no_update(self):
+        """Restores UI state and shows an 'Up to Date' toast."""
         if hasattr(self, 'manual_update_btn'):
             self.manual_update_btn.setEnabled(True)
             self.manual_update_btn.setText("🔄 Check for Updates Now")
         if hasattr(self, 'footer_update_btn'):
             self.footer_update_btn.setEnabled(True)
             self.footer_update_btn.setText("🔄 Check for Updates")
-
-        self._init_ui()
         
-        # Load active branding
-        active_settings = settings_service.get_active_settings()
-        self._update_app_branding(active_settings.get("business_name", "Ehsan Trader"))
+        # Show a professional toast for 'Up to Date' status
+        from app.updater.toast_notification import ToastNotification
+        toast = ToastNotification(
+            title="System Up to Date",
+            message="You are already using the latest version of the FBR Invoice Uploader.",
+            show_action=False, # No details button needed for "Up to Date"
+            bg_color="#27ae60", # Professional green for success
+            duration_ms=5000,
+            parent=self
+        )
+        toast.show_notification()
+
+    def _handle_update_error(self, error_msg: str):
+        """Restores UI state and shows error when update check fails."""
+        if hasattr(self, 'manual_update_btn'):
+            self.manual_update_btn.setEnabled(True)
+            self.manual_update_btn.setText("🔄 Check for Updates Now")
+        if hasattr(self, 'footer_update_btn'):
+            self.footer_update_btn.setEnabled(True)
+            self.footer_update_btn.setText("🔄 Check for Updates")
+        
+        # Show a professional toast for 'Error' status
+        from app.updater.toast_notification import ToastNotification
+        toast = ToastNotification(
+            title="Update Check Failed",
+            message=f"Unable to reach the update server. Please check your internet connection.",
+            show_action=False,
+            bg_color="#c0392b", # Professional red for errors
+            duration_ms=6000,
+            parent=self
+        )
+        toast.show_notification()
+        logger.error(f"Update check failed: {error_msg}")
+
+    def _init_updater(self):
+        """Initializes the professional update system."""
+        current_v = VersionManager.get_current_version()
+        
+        # Safely handle different version formats
+        if "major" in current_v:
+            version_str = f"{current_v['major']}.{current_v['minor']}.{current_v['patch']}"
+        elif "latest_version" in current_v:
+            version_str = current_v["latest_version"]
+        else:
+            version_str = "1.0.0"
+        
+        # Bitbucket Raw URL for version.json
+        version_url = "https://bitbucket.org/python_desktop/python_repository/raw/main/version.json"
+        
+        self.updater_manager = UpdaterManager(
+            current_version=version_str,
+            version_url=version_url,
+            parent=self
+        )
+        
+        # Connect additional signals for UI feedback
+        self.updater_manager.no_update_signal.connect(self._handle_no_update)
+        self.updater_manager.update_error_signal.connect(self._handle_update_error)
+        
+        # Check for updates immediately on startup (async)
+        self.updater_manager.check_for_updates_async()
+        
+        # Also setup a periodic check every 4 hours
+        self._update_check_timer = QTimer(self)
+        self._update_check_timer.setInterval(4 * 60 * 60 * 1000)
+        self._update_check_timer.timeout.connect(self.updater_manager.check_for_updates_async)
+        self._update_check_timer.start()
 
     def _init_ui(self) -> None:
         central = QWidget(self)

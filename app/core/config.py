@@ -1,11 +1,21 @@
 import os
+import sys
 import urllib.parse
 from pathlib import Path
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field
 
 # Load environment variables
-env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+def get_env_path():
+    """Get the path to .env file, considering both script and frozen (EXE) modes."""
+    if getattr(sys, 'frozen', False):
+        # Running as a bundled EXE
+        return Path(sys.executable).parent / ".env"
+    else:
+        # Running as a script
+        return Path(__file__).resolve().parent.parent.parent / ".env"
+
+env_path = get_env_path()
 load_dotenv(dotenv_path=env_path)
 
 # Resolve environment-specific FBR settings
@@ -40,18 +50,23 @@ def _pick_env_value(key: str) -> str:
     return selected.get(key) or os.getenv(key, "")
 
 def get_database_url() -> str:
-    """Construct database URL from environment variables."""
+    """Construct database URL from environment variables with professional persistent paths."""
     server = os.getenv("DB_SERVER")
     if server:
         user = os.getenv("DB_USER", "root")
         password = os.getenv("DB_PASSWORD", "")
         port = os.getenv("DB_PORT", "3306")
         name = os.getenv("DB_NAME", "fbr_invoice_uploader")
-        
-        # Encode password to handle special characters
         encoded_password = urllib.parse.quote_plus(password)
-        
         return f"mysql+pymysql://{user}:{encoded_password}@{server}:{port}/{name}"
+    
+    # Professional persistent path for SQLite in %APPDATA%
+    if sys.platform == "win32":
+        app_data = os.getenv("APPDATA")
+        db_dir = Path(app_data) / "EhsanTraderFBR"
+        db_dir.mkdir(parents=True, exist_ok=True)
+        db_path = db_dir / "fbr_invoices.db"
+        return f"sqlite:///{db_path}"
     
     return os.getenv("DB_URL", "sqlite:///./fbr_invoices.db")
 

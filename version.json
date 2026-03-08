@@ -1,8 +1,10 @@
 {
+    "latest_version": "1.0.0",
     "major": 1,
-    "minor": 1,
+    "minor": 0,
     "patch": 0,
     "build": "stable",
-    "api_version": 1,
-    "db_version": 2
+    "download_url": "https://bitbucket.org/python_desktop/python_repository/raw/main/setup.exe",
+    "release_date": "2026-03-07",
+    "changelog": "- Initial release with professional update system\n- Bitbucket integration\n- Toast notification system"
 }

@@ -48,7 +48,11 @@ class VersionManager:
     def get_version_string(cls) -> str:
         """Returns the version as a formatted string."""
         v = cls.get_current_version()
-        return f"v{v['major']}.{v['minor']}.{v['patch']}-{v['build']}"
+        major = v.get('major', 1)
+        minor = v.get('minor', 0)
+        patch = v.get('patch', 0)
+        build = v.get('build', 'stable')
+        return f"v{major}.{minor}.{patch}-{build}"
 
     @classmethod
     def is_compatible(cls, remote_version: Dict[str, Any]) -> bool:
@@ -58,14 +62,22 @@ class VersionManager:
         """
         current = cls.get_current_version()
         
+        # Safely extract major version from remote
+        remote_major = remote_version.get('major')
+        if remote_major is None and 'latest_version' in remote_version:
+            try:
+                remote_major = int(remote_version['latest_version'].split('.')[0])
+            except (ValueError, IndexError):
+                remote_major = 1
+
         # Major version changes indicate breaking changes
-        if remote_version['major'] > current['major']:
-            logger.warning(f"Remote major version ({remote_version['major']}) is greater than current major version ({current['major']}). Compatibility not guaranteed.")
+        if remote_major is not None and remote_major > current.get('major', 1):
+            logger.warning(f"Remote major version ({remote_major}) is greater than current major version ({current.get('major', 1)}). Compatibility not guaranteed.")
             return False
         
         # API version must be compatible
         if remote_version.get('api_version', 1) > current.get('api_version', 1):
-            logger.warning(f"Remote API version ({remote_version['api_version']}) is greater than current API version ({current['api_version']}). Compatibility not guaranteed.")
+            logger.warning(f"Remote API version ({remote_version.get('api_version', 1)}) is greater than current API version ({current.get('api_version', 1)}). Compatibility not guaranteed.")
             return False
             
         return True
@@ -75,12 +87,23 @@ class VersionManager:
         """Checks if the remote version is newer than the current version."""
         current = cls.get_current_version()
         
-        if remote_version['major'] > current['major']: return True
-        if remote_version['major'] < current['major']: return False
+        # Safely extract version components from remote
+        if 'major' in remote_version:
+            rm, rmi, rp = remote_version['major'], remote_version['minor'], remote_version['patch']
+        elif 'latest_version' in remote_version:
+            from app.updater.version_manager import VersionManager as ProfessionalVM
+            rm, rmi, rp = ProfessionalVM.parse_version(remote_version['latest_version'])
+        else:
+            return False
+
+        cm, cmi, cp = current.get('major', 1), current.get('minor', 0), current.get('patch', 0)
         
-        if remote_version['minor'] > current['minor']: return True
-        if remote_version['minor'] < current['minor']: return False
+        if rm > cm: return True
+        if rm < cm: return False
         
-        if remote_version['patch'] > current['patch']: return True
+        if rmi > cmi: return True
+        if rmi < cmi: return False
+        
+        if rp > cp: return True
         
         return False
