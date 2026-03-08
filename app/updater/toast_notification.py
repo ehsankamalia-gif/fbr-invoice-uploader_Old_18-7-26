@@ -10,12 +10,13 @@ class ToastNotification(QWidget):
     clicked = pyqtSignal()
 
     def __init__(self, title: str, message: str, parent=None, duration_ms: int = 8000, 
-                 show_action: bool = True, bg_color: str = "#2c3e50"):
+                 show_action: bool = True, bg_color: str = "#2c3e50", position: str = "bottom-right"):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
         self.duration_ms = duration_ms
+        self.position = position
         self._init_ui(title, message, show_action, bg_color)
         
         # Setup fade-in animation
@@ -120,10 +121,17 @@ class ToastNotification(QWidget):
         self.hide_notification()
 
     def show_notification(self):
-        # Position in bottom-right corner of the primary screen
+        # Position in corner of the primary screen
         screen = QApplication.primaryScreen().availableGeometry()
-        x = screen.width() - self.width() - 20
-        y = screen.height() - self.height() - 20
+        
+        if self.position == "top-right":
+            x = screen.width() - self.width() - 20
+            y = screen.y() + 20
+        else:
+            # Default to bottom-right
+            x = screen.width() - self.width() - 20
+            y = screen.height() - self.height() - 20
+            
         self.move(x, y)
         
         self.show()

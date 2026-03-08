@@ -11,7 +11,7 @@ import datetime as dt
 from PIL import Image
 from tenacity import RetryError
 
-from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QStringListModel, QTimer, QDate, pyqtSignal
+from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QStringListModel, QTimer, QDate, pyqtSignal, QObject, QEvent
 from PyQt6.QtGui import QPixmap, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QMainWindow,
@@ -145,21 +145,76 @@ class CapturedDataTableModel(QAbstractTableModel):
         self.endResetModel()
 
 class NavigationButton(QPushButton):
-    def __init__(self, text: str, page_key: str, parent: QWidget | None = None) -> None:
-        super().__init__(text, parent)
+    def __init__(self, icon_text: str, title: str, page_key: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.icon_text = icon_text
+        self.title = title
         self.page_key = page_key
         self.setCheckable(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setText(f"{icon_text}  {title}")
+
+    def set_collapsed(self, collapsed: bool) -> None:
+        if collapsed:
+            self.setText(self.icon_text)
+            self.setToolTip(self.title)
+            self.setStyleSheet("""
+                NavigationButton {
+                    background-color: transparent;
+                    color: #bdc3c7;
+                    border: none;
+                    border-left: 4px solid transparent;
+                    text-align: center;
+                    padding: 10px 0px;
+                    font-size: 18px;
+                    border-radius: 0;
+                }
+                NavigationButton:hover {
+                    background-color: #3e4f5f;
+                    color: white;
+                }
+                NavigationButton:checked {
+                    background-color: #3498db;
+                    color: white;
+                    border-left: 4px solid #2980b9;
+                }
+            """)
+        else:
+            self.setText(f"{self.icon_text}  {self.title}")
+            self.setToolTip("")
+            self.setStyleSheet("""
+                NavigationButton {
+                    background-color: transparent;
+                    color: #bdc3c7;
+                    border: none;
+                    border-left: 4px solid transparent;
+                    text-align: left;
+                    padding: 10px 15px;
+                    font-size: 13px;
+                    border-radius: 0;
+                }
+                NavigationButton:hover {
+                    background-color: #3e4f5f;
+                    color: white;
+                }
+                NavigationButton:checked {
+                    background-color: #3498db;
+                    color: white;
+                    border-left: 4px solid #2980b9;
+                }
+            """)
 
 
 class GroupHeaderButton(QPushButton):
-    def __init__(self, text: str, group_name: str, parent: QWidget | None = None) -> None:
-        super().__init__(text, parent)
+    def __init__(self, arrow: str, group_name: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.arrow = arrow
         self.group_name = group_name
         self.setCheckable(True)
         self.setChecked(True) # Expanded by default
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setText(f"{arrow} {group_name}")
         self.setStyleSheet("""
             QPushButton {
                 background-color: transparent;
@@ -175,6 +230,14 @@ class GroupHeaderButton(QPushButton):
                 color: white;
             }
         """)
+
+    def set_collapsed(self, collapsed: bool) -> None:
+        if collapsed:
+            self.setText("") # Hide group headers in collapsed mode
+            self.setMaximumHeight(0)
+        else:
+            self.setText(f"{self.arrow} {self.group_name}")
+            self.setMaximumHeight(16777215)
 
 
 class AutocompleteLineEdit(QLineEdit):
@@ -231,6 +294,8 @@ class MainWindow(QMainWindow):
         self._pages: Dict[str, QWidget] = {}
         self._nav_buttons: Dict[str, NavigationButton] = {}
         self._dealer_completer_map: Dict[str, int] = {}
+        self._is_dealer_selected: bool = False
+        self._is_sidebar_collapsed: bool = False # Track sidebar state
 
         # SMS Signal connection
         self.sms_result_signal.connect(self._handle_sms_result)
@@ -455,13 +520,34 @@ class MainWindow(QMainWindow):
         # Nav Header
         nav_header_container = QWidget()
         nav_header_container.setStyleSheet("background-color: #1a252f;")
-        nav_header_layout = QHBoxLayout(nav_header_container)
-        nav_header_layout.setContentsMargins(20, 15, 20, 15)
+        self.nav_header_layout = QHBoxLayout(nav_header_container)
+        self.nav_header_layout.setContentsMargins(15, 15, 15, 15)
+        self.nav_header_layout.setSpacing(10)
+        
+        # Toggle Button (Hamburger Menu)
+        self.sidebar_toggle_btn = QPushButton("≡")
+        self.sidebar_toggle_btn.setFixedSize(40, 40) # Slightly larger
+        self.sidebar_toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.sidebar_toggle_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: white;
+                border: none;
+                font-size: 28px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #34495e;
+                border-radius: 4px;
+            }
+        """)
+        self.sidebar_toggle_btn.clicked.connect(self._toggle_sidebar)
+        self.nav_header_layout.addWidget(self.sidebar_toggle_btn)
         
         self.nav_header_label = QLabel("EHSAN TRADER")
         self.nav_header_label.setStyleSheet("color: white; font-size: 16px; font-weight: bold; border: none;")
         
-        nav_header_layout.addWidget(self.nav_header_label, 1)
+        self.nav_header_layout.addWidget(self.nav_header_label, 1)
         nav_layout.addWidget(nav_header_container)
 
         self.stack = QStackedWidget(central)
@@ -516,7 +602,7 @@ class MainWindow(QMainWindow):
             # Group Header
             is_first = (i == 0)
             arrow = "▼" if is_first else "▶"
-            header = GroupHeaderButton(f"{arrow} {group_name}", group_name, self.nav_widget)
+            header = GroupHeaderButton(arrow, group_name, self.nav_widget)
             header.setChecked(is_first)
             header.clicked.connect(self._on_group_header_clicked)
             self._group_header_manager.addButton(header)
@@ -527,7 +613,7 @@ class MainWindow(QMainWindow):
             for key in keys:
                 title = self._pages[key].windowTitle()
                 icon = self.nav_icons.get(key, "🔹")
-                button = NavigationButton(f"{icon}  {title}", key, self.nav_widget)
+                button = NavigationButton(icon, title, key, self.nav_widget)
                 button.setStyleSheet("""
                     NavigationButton {
                         background-color: transparent;
@@ -535,7 +621,7 @@ class MainWindow(QMainWindow):
                         border: none;
                         border-left: 4px solid transparent;
                         text-align: left;
-                        padding: 10px 20px;
+                        padding: 10px 15px;
                         font-size: 13px;
                         border-radius: 0;
                     }
@@ -619,6 +705,124 @@ class MainWindow(QMainWindow):
         if not isinstance(button, NavigationButton):
             return
         self._select_page(button.page_key)
+
+    def _toggle_sidebar(self) -> None:
+        """Toggles the sidebar between collapsed and expanded states."""
+        self._is_sidebar_collapsed = not self._is_sidebar_collapsed
+        
+        # Target width
+        width = 60 if self._is_sidebar_collapsed else 200
+        
+        # Update Nav Widget Width
+        self.nav_widget.setFixedWidth(width)
+        
+        # Update Nav Header Label visibility
+        self.nav_header_label.setVisible(not self._is_sidebar_collapsed)
+        
+        # Adjust Header Margins for Centering
+        if self._is_sidebar_collapsed:
+            self.nav_header_layout.setContentsMargins(0, 15, 0, 15)
+            self.nav_header_layout.setSpacing(0)
+            self.nav_header_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        else:
+            self.nav_header_layout.setContentsMargins(15, 15, 15, 15)
+            self.nav_header_layout.setSpacing(10)
+            self.nav_header_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        
+        # Update Footer buttons text and style
+        if self._is_sidebar_collapsed:
+            self.footer_update_btn.setText("🔄")
+            self.footer_update_btn.setToolTip("Check for Updates")
+            self.footer_update_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: transparent;
+                    color: #bdc3c7;
+                    border: none;
+                    border-left: 4px solid transparent;
+                    text-align: center;
+                    padding: 15px 0px;
+                    font-size: 18px;
+                    border-radius: 0;
+                }
+                QPushButton:hover {
+                    background-color: #34495e;
+                    color: white;
+                    border-left: 4px solid #3498db;
+                }
+            """)
+            self.exit_btn.setText("🚪")
+            self.exit_btn.setToolTip("Exit Application")
+            self.exit_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: transparent;
+                    color: #e74c3c;
+                    border: none;
+                    border-left: 4px solid transparent;
+                    text-align: center;
+                    padding: 15px 0px;
+                    font-size: 18px;
+                    font-weight: bold;
+                    border-radius: 0;
+                }
+                QPushButton:hover {
+                    background-color: #c0392b;
+                    color: white;
+                }
+            """)
+        else:
+            self.footer_update_btn.setText("🔄 Check for Updates")
+            self.footer_update_btn.setToolTip("")
+            self.footer_update_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: transparent;
+                    color: #bdc3c7;
+                    border: none;
+                    border-left: 4px solid transparent;
+                    text-align: left;
+                    padding: 15px 20px;
+                    font-size: 13px;
+                    border-radius: 0;
+                }
+                QPushButton:hover {
+                    background-color: #34495e;
+                    color: white;
+                    border-left: 4px solid #3498db;
+                }
+            """)
+            self.exit_btn.setText("🚪 Exit Application")
+            self.exit_btn.setToolTip("")
+            self.exit_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: transparent;
+                    color: #e74c3c;
+                    border: none;
+                    border-left: 4px solid transparent;
+                    text-align: left;
+                    padding: 15px 20px;
+                    font-size: 14px;
+                    font-weight: bold;
+                    border-radius: 0;
+                }
+                QPushButton:hover {
+                    background-color: #c0392b;
+                    color: white;
+                }
+            """)
+
+        # Update Group Headers and Nav Buttons
+        for group_name, header in self._group_headers.items():
+            header.set_collapsed(self._is_sidebar_collapsed)
+            
+            # Update buttons in this group
+            for btn in self._group_buttons[group_name]:
+                btn.set_collapsed(self._is_sidebar_collapsed)
+                
+                if self._is_sidebar_collapsed:
+                    # Show all icons when collapsed
+                    btn.setVisible(True)
+                else:
+                    # Restore group-based visibility when expanded
+                    btn.setVisible(header.isChecked())
 
     def _select_page(self, key: str) -> None:
         if key not in self._pages:
@@ -1392,6 +1596,42 @@ class MainWindow(QMainWindow):
         self.invoice_buyer_cnic_input.setPlaceholderText("12345-1234567-1")
         group1_layout.addWidget(self.invoice_buyer_cnic_input, 2, 1)
 
+        def format_invoice_cnic_input():
+            text = self.invoice_buyer_cnic_input.text()
+            digits = "".join(c for c in text if c.isdigit())
+            formatted = digits
+            if len(digits) > 5:
+                formatted = digits[:5] + "-" + digits[5:]
+            if len(digits) > 12:
+                formatted = formatted[:13] + "-" + formatted[13:]
+            if len(formatted) > 15:
+                formatted = formatted[:15]
+            if formatted != text:
+                self.invoice_buyer_cnic_input.setText(formatted)
+            
+            # Real-time CNIC validation for invoice
+            if len(formatted) == 15:
+                db_check = SessionLocal()
+                try:
+                    existing = db_check.query(Customer).filter(Customer.cnic == formatted).first()
+                    if existing:
+                        from app.updater.toast_notification import ToastNotification
+                        msg = f"A {existing.type.lower()} named '{existing.name}' with this CNIC already exists."
+                        toast = ToastNotification(
+                                title="Existing Customer Found",
+                                message=msg,
+                                parent=self,
+                                duration_ms=5000,
+                                show_action=False,
+                                bg_color="#3498db", # Informative Blue
+                                position="top-right"
+                            )
+                        toast.show_notification()
+                finally:
+                    db_check.close()
+
+        self.invoice_buyer_cnic_input.textChanged.connect(format_invoice_cnic_input)
+
         # NTN
         group1_layout.addWidget(QLabel("NTN (Optional)"), 2, 2)
         self.invoice_buyer_ntn_input = QLineEdit()
@@ -1399,19 +1639,58 @@ class MainWindow(QMainWindow):
 
         # Buyer Name & Father Name (Side by Side)
         group1_layout.addWidget(QLabel("Buyer Name"), 3, 0)
+        
+        buyer_name_layout = QHBoxLayout()
         self.invoice_buyer_name_input = AutocompleteLineEdit()
         self.invoice_buyer_name_input.setPlaceholderText("Full Name (F2 to search dealers)")
-        group1_layout.addWidget(self.invoice_buyer_name_input, 3, 1)
+        buyer_name_layout.addWidget(self.invoice_buyer_name_input)
+        
+        # Allow only alphabetics and spaces for name
+        def format_invoice_name_input():
+            text = self.invoice_buyer_name_input.text()
+            filtered = "".join(c for c in text if c.isalpha() or c.isspace())
+            if filtered != text:
+                self.invoice_buyer_name_input.setText(filtered)
+        self.invoice_buyer_name_input.textChanged.connect(format_invoice_name_input)
+
+        search_dealer_btn = QPushButton("🔍")
+        search_dealer_btn.setFixedWidth(40)
+        search_dealer_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        search_dealer_btn.setToolTip("Search Dealers (F2)")
+        search_dealer_btn.clicked.connect(self._open_dealer_search_dialog)
+        buyer_name_layout.addWidget(search_dealer_btn)
+        
+        group1_layout.addLayout(buyer_name_layout, 3, 1)
 
         group1_layout.addWidget(QLabel("Father Name"), 3, 2)
         self.invoice_buyer_father_input = QLineEdit()
         group1_layout.addWidget(self.invoice_buyer_father_input, 3, 3)
 
+        # Allow only alphabetics and spaces for father name
+        def format_invoice_father_input():
+            text = self.invoice_buyer_father_input.text()
+            filtered = "".join(c for c in text if c.isalpha() or c.isspace())
+            if filtered != text:
+                self.invoice_buyer_father_input.setText(filtered)
+        self.invoice_buyer_father_input.textChanged.connect(format_invoice_father_input)
+
         # Phone & Address
         group1_layout.addWidget(QLabel("Cell (Phone)"), 4, 0)
         self.invoice_buyer_phone_input = QLineEdit()
-        self.invoice_buyer_phone_input.setPlaceholderText("03XXXXXXXXX")
+        self.invoice_buyer_phone_input.setPlaceholderText("03021234567")
         group1_layout.addWidget(self.invoice_buyer_phone_input, 4, 1)
+        
+        # Auto-format Phone Number as user types
+        def format_invoice_phone_input():
+            text = self.invoice_buyer_phone_input.text()
+            # Allow only digits and limit to 11
+            digits = "".join(c for c in text if c.isdigit())
+            if len(digits) > 11:
+                digits = digits[:11]
+            if digits != text:
+                self.invoice_buyer_phone_input.setText(digits)
+
+        self.invoice_buyer_phone_input.textChanged.connect(format_invoice_phone_input)
 
         group1_layout.addWidget(QLabel("Address"), 4, 2)
         self.invoice_buyer_address_input = QLineEdit()
@@ -3849,7 +4128,8 @@ class MainWindow(QMainWindow):
             total_further_tax = 0.0
             if self._invoice_current_price:
                 tax_per_unit = float(getattr(self._invoice_current_price, "tax_amount", 0) or 0)
-                further_per_unit = float(getattr(self._invoice_current_price, "levy_amount", 0) or 0)
+                # If dealer is selected, further tax is typically 0
+                further_per_unit = 0.0 if self._is_dealer_selected else float(getattr(self._invoice_current_price, "levy_amount", 0) or 0)
                 tax_charged = tax_per_unit * qty
                 total_further_tax = further_per_unit * qty
             else:
@@ -3858,7 +4138,11 @@ class MainWindow(QMainWindow):
                 sale_value = amount_excl * qty
                 tax_charged = (sale_value * tax_rate) / 100.0
                 try:
-                    total_further_tax = float(self.invoice_further_tax_spin.value())
+                    # If dealer is selected, default further tax to 0
+                    if self._is_dealer_selected:
+                        total_further_tax = 0.0
+                    else:
+                        total_further_tax = float(self.invoice_further_tax_spin.value())
                 except ValueError:
                     total_further_tax = 0.0
             if focused is self.invoice_tax_spin:
@@ -3891,6 +4175,10 @@ class MainWindow(QMainWindow):
     def _on_invoice_buyer_name_changed(self, text: str) -> None:
         if getattr(self.invoice_buyer_name_input, "is_navigating", False):
             return
+            
+        # If user manually edits name, reset dealer selection flag
+        self._is_dealer_selected = False
+        
         raw = text
         cleaned = "".join(c for c in raw if c.isalpha() or c.isspace())
         if cleaned != raw:
@@ -4088,6 +4376,8 @@ class MainWindow(QMainWindow):
                 dealer = dealer_service.get_dealer_by_business_name(key_name)
         if not dealer:
             return
+            
+        self._is_dealer_selected = True
         self.invoice_buyer_name_input.blockSignals(True)
         if dealer.name:
             self.invoice_buyer_name_input.setText(dealer.name.upper())
@@ -4108,6 +4398,16 @@ class MainWindow(QMainWindow):
             self.invoice_buyer_address_input.blockSignals(True)
             self.invoice_buyer_address_input.setText(dealer.address.upper())
             self.invoice_buyer_address_input.blockSignals(False)
+        if dealer.ntn:
+            self.invoice_buyer_ntn_input.blockSignals(True)
+            self.invoice_buyer_ntn_input.setText(dealer.ntn)
+            self.invoice_buyer_ntn_input.blockSignals(False)
+            
+        # Dealers are registered, so reset Further Tax to 0
+        self.invoice_further_tax_spin.blockSignals(True)
+        self.invoice_further_tax_spin.setValue(0.0)
+        self.invoice_further_tax_spin.blockSignals(False)
+        self._recalculate_invoice_totals()
 
     def _open_dealer_search_dialog(self) -> None:
         dialog = DealerSearchDialog(self)
@@ -4116,6 +4416,8 @@ class MainWindow(QMainWindow):
         dealer = dialog.selected_dealer
         if dealer is None:
             return
+            
+        self._is_dealer_selected = True
         self.invoice_buyer_name_input.blockSignals(True)
         if dealer.name:
             self.invoice_buyer_name_input.setText(dealer.name.upper())
@@ -4136,6 +4438,16 @@ class MainWindow(QMainWindow):
             self.invoice_buyer_address_input.blockSignals(True)
             self.invoice_buyer_address_input.setText(dealer.address.upper())
             self.invoice_buyer_address_input.blockSignals(False)
+        if dealer.ntn:
+            self.invoice_buyer_ntn_input.blockSignals(True)
+            self.invoice_buyer_ntn_input.setText(dealer.ntn)
+            self.invoice_buyer_ntn_input.blockSignals(False)
+
+        # Dealers are registered, so reset Further Tax to 0
+        self.invoice_further_tax_spin.blockSignals(True)
+        self.invoice_further_tax_spin.setValue(0.0)
+        self.invoice_further_tax_spin.blockSignals(False)
+        self._recalculate_invoice_totals()
 
     def _on_invoice_cnic_changed(self, text: str) -> None:
         raw = text
@@ -4395,6 +4707,7 @@ class MainWindow(QMainWindow):
             buyer_phone=buyer_cell,
             buyer_address=buyer_address,
             buyer_ntn=buyer_ntn,
+            buyer_type=CustomerType.DEALER if self._is_dealer_selected else CustomerType.INDIVIDUAL,
             payment_mode=payment_mode,
             items=[item],
         )
@@ -4441,6 +4754,7 @@ class MainWindow(QMainWindow):
             db.close()
 
     def _reset_invoice_form(self) -> None:
+        self._is_dealer_selected = False
         self.invoice_buyer_cnic_input.clear()
         self.invoice_buyer_ntn_input.clear()
         self.invoice_buyer_name_input.clear()
@@ -4613,6 +4927,10 @@ class MainWindow(QMainWindow):
             QLineEdit, QComboBox { padding: 10px 15px; border: 1px solid #dee2e6; border-radius: 8px; background-color: #ffffff; font-size: 13px; }
             QPushButton#primaryButton { background-color: #3498db; color: white; border: none; border-radius: 8px; font-weight: bold; padding: 10px 20px; }
             QPushButton#primaryButton:hover { background-color: #2980b9; }
+            QPushButton#actionButton { background-color: #3498db; color: white; border: none; border-radius: 8px; font-weight: bold; padding: 10px 20px; }
+            QPushButton#actionButton:hover { background-color: #2980b9; }
+            QPushButton#deleteButton { background-color: #e74c3c; color: white; border: none; border-radius: 8px; font-weight: bold; padding: 10px 20px; }
+            QPushButton#deleteButton:hover { background-color: #c0392b; }
             QTableView { 
                 background-color: white; 
                 border: 1px solid #e0e0e0; 
@@ -4658,6 +4976,7 @@ class MainWindow(QMainWindow):
         
         header_layout.addLayout(header_v_box)
         header_layout.addStretch(1)
+        
         layout.addWidget(header_widget)
 
         # Filter Card
@@ -4717,18 +5036,23 @@ class MainWindow(QMainWindow):
         action_bar = QHBoxLayout()
         action_bar.setSpacing(15)
         
+        add_btn = QPushButton("+ Add Dealer")
+        add_btn.setObjectName("actionButton")
+        add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        add_btn.clicked.connect(self._on_add_dealer_clicked)
+
         edit_btn = QPushButton("✎ Edit Dealer")
-        edit_btn.setObjectName("resetButton")
-        edit_btn.setStyleSheet("background-color: #3498db; color: white; border: none; font-weight: bold; padding: 10px 20px; border-radius: 8px;")
+        edit_btn.setObjectName("actionButton")
         edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         edit_btn.clicked.connect(self._on_edit_dealer_clicked)
         
         delete_btn = QPushButton("🗑 Delete Dealer")
-        delete_btn.setStyleSheet("background-color: #e74c3c; color: white; border: none; font-weight: bold; padding: 10px 20px; border-radius: 8px;")
+        delete_btn.setObjectName("deleteButton")
         delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         delete_btn.clicked.connect(self._on_delete_dealer_clicked)
         
         action_bar.addStretch(1)
+        action_bar.addWidget(add_btn)
         action_bar.addWidget(edit_btn)
         action_bar.addWidget(delete_btn)
         layout.addLayout(action_bar)
@@ -5052,6 +5376,23 @@ class MainWindow(QMainWindow):
         form = QGridLayout()
         form.setSpacing(15)
 
+        # Event filter to handle Enter key navigation and prevent dialog submission
+        class EnterKeyFilter(QObject):
+            def __init__(self, next_field, parent_dialog):
+                super().__init__(parent_dialog)
+                self.next_field = next_field
+                self.parent_dialog = parent_dialog
+
+            def eventFilter(self, obj, event):
+                if event.type() == QEvent.Type.KeyPress:
+                    if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                        if self.next_field:
+                            self.next_field.setFocus()
+                        else:
+                            self.parent_dialog.accept()
+                        return True
+                return super().eventFilter(obj, event)
+
         type_combo = QComboBox()
         type_combo.addItems(["CREDIT (Deposit/In)", "DEBIT (Order/Out)"])
         form.addWidget(QLabel("Transaction Type"), 0, 0)
@@ -5086,23 +5427,43 @@ class MainWindow(QMainWindow):
         form.addWidget(QLabel("Description"), 5, 0)
         form.addWidget(desc_input, 5, 1)
 
+        # Install event filters for sequential navigation
+        type_combo.installEventFilter(EnterKeyFilter(cash_type_combo, dialog))
+        cash_type_combo.installEventFilter(EnterKeyFilter(date_edit, dialog))
+        date_edit.installEventFilter(EnterKeyFilter(amount_spin, dialog))
+        amount_spin.installEventFilter(EnterKeyFilter(ref_input, dialog))
+        ref_input.installEventFilter(EnterKeyFilter(desc_input, dialog))
+        desc_input.installEventFilter(EnterKeyFilter(None, dialog))
+
         layout.addLayout(form)
 
         # Custom Button Box Styling
         btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        btn_box.button(QDialogButtonBox.StandardButton.Ok).setText("Save Transaction")
-        btn_box.button(QDialogButtonBox.StandardButton.Ok).setStyleSheet("""
-            QPushButton { background-color: #3498db; color: white; border: none; }
-            QPushButton:hover { background-color: #2980b9; }
-        """)
-        btn_box.button(QDialogButtonBox.StandardButton.Cancel).setStyleSheet("""
-            QPushButton { background-color: #f8f9fa; color: #6c757d; border: 1px solid #dee2e6; }
-            QPushButton:hover { background-color: #e2e6ea; }
-        """)
+        # Disable auto-default to prevent Enter key from triggering Save prematurely
+        ok_btn = btn_box.button(QDialogButtonBox.StandardButton.Ok)
+        if ok_btn:
+            ok_btn.setText("Save Transaction")
+            ok_btn.setAutoDefault(False)
+            ok_btn.setDefault(False)
+            ok_btn.setStyleSheet("""
+                QPushButton { background-color: #3498db; color: white; border: none; }
+                QPushButton:hover { background-color: #2980b9; }
+            """)
+        
+        cancel_btn = btn_box.button(QDialogButtonBox.StandardButton.Cancel)
+        if cancel_btn:
+            cancel_btn.setAutoDefault(False)
+            cancel_btn.setStyleSheet("""
+                QPushButton { background-color: #f8f9fa; color: #6c757d; border: 1px solid #dee2e6; }
+                QPushButton:hover { background-color: #e2e6ea; }
+            """)
         
         btn_box.accepted.connect(dialog.accept)
         btn_box.rejected.connect(dialog.reject)
         layout.addWidget(btn_box)
+
+        # Initial Focus
+        type_combo.setFocus()
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
             db = SessionLocal()
@@ -5809,6 +6170,23 @@ class MainWindow(QMainWindow):
             form_grid = QGridLayout()
             form_grid.setSpacing(12)
 
+            # Event filter to handle Enter key navigation and prevent dialog submission
+            class EnterKeyFilter(QObject):
+                def __init__(self, next_field, parent_dialog):
+                    super().__init__(parent_dialog)
+                    self.next_field = next_field
+                    self.parent_dialog = parent_dialog
+
+                def eventFilter(self, obj, event):
+                    if event.type() == QEvent.Type.KeyPress:
+                        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                            if self.next_field:
+                                self.next_field.setFocus()
+                            else:
+                                self.parent_dialog.accept()
+                            return True
+                    return super().eventFilter(obj, event)
+
             # Name
             form_grid.addWidget(QLabel("Full Name:"), 0, 0)
             name_input = QLineEdit(cust.name)
@@ -5816,6 +6194,14 @@ class MainWindow(QMainWindow):
                 name_input.setReadOnly(True)
                 name_input.setStyleSheet("background-color: #e9ecef; color: #6c757d;")
             form_grid.addWidget(name_input, 0, 1)
+
+            # Allow only alphabetics and spaces for name
+            def format_name_input_edit():
+                text = name_input.text()
+                filtered = "".join(c for c in text if c.isalpha() or c.isspace())
+                if filtered != text:
+                    name_input.setText(filtered)
+            name_input.textChanged.connect(format_name_input_edit)
 
             # Father Name
             form_grid.addWidget(QLabel("Father Name:"), 1, 0)
@@ -5825,6 +6211,14 @@ class MainWindow(QMainWindow):
                 father_input.setStyleSheet("background-color: #e9ecef; color: #6c757d;")
             form_grid.addWidget(father_input, 1, 1)
 
+            # Allow only alphabetics and spaces for father name
+            def format_father_input_edit():
+                text = father_input.text()
+                filtered = "".join(c for c in text if c.isalpha() or c.isspace())
+                if filtered != text:
+                    father_input.setText(filtered)
+            father_input.textChanged.connect(format_father_input_edit)
+
             # CNIC
             form_grid.addWidget(QLabel("CNIC / ID Card:"), 2, 0)
             cnic_input = QLineEdit(cust.cnic)
@@ -5833,10 +6227,60 @@ class MainWindow(QMainWindow):
                 cnic_input.setStyleSheet("background-color: #e9ecef; color: #6c757d;")
             form_grid.addWidget(cnic_input, 2, 1)
 
+            # Auto-format and check existence
+            def format_cnic_edit():
+                text = cnic_input.text()
+                digits = "".join(c for c in text if c.isdigit())
+                formatted = digits
+                if len(digits) > 5:
+                    formatted = digits[:5] + "-" + digits[5:]
+                if len(digits) > 12:
+                    formatted = formatted[:13] + "-" + formatted[13:]
+                if len(formatted) > 15:
+                    formatted = formatted[:15]
+                if formatted != text:
+                    cnic_input.setText(formatted)
+                
+                # Check for other customers with the same CNIC
+                if len(formatted) == 15 and formatted != cust.cnic:
+                    db_check = SessionLocal()
+                    try:
+                        existing = db_check.query(Customer).filter(Customer.cnic == formatted).first()
+                        if existing:
+                            from app.updater.toast_notification import ToastNotification
+                            msg = f"Another {existing.type.lower()} named '{existing.name}' with this CNIC already exists."
+                            toast = ToastNotification(
+                                title="CNIC Conflict",
+                                message=msg,
+                                parent=self,
+                                duration_ms=5000,
+                                show_action=False,
+                                bg_color="#e67e22",
+                                position="top-right"
+                            )
+                            toast.show_notification()
+                    finally:
+                        db_check.close()
+            
+            cnic_input.textChanged.connect(format_cnic_edit)
+
             # Phone
             form_grid.addWidget(QLabel("Phone Number:"), 3, 0)
             phone_input = QLineEdit(cust.phone or "")
+            phone_input.setPlaceholderText("03021234567")
             form_grid.addWidget(phone_input, 3, 1)
+
+            # Auto-format Phone Number as user types
+            def format_phone_input_edit():
+                text = phone_input.text()
+                # Allow only digits and limit to 11
+                digits = "".join(c for c in text if c.isdigit())
+                if len(digits) > 11:
+                    digits = digits[:11]
+                if digits != text:
+                    phone_input.setText(digits)
+
+            phone_input.textChanged.connect(format_phone_input_edit)
 
             # Address
             form_grid.addWidget(QLabel("Address:"), 4, 0)
@@ -5848,10 +6292,28 @@ class MainWindow(QMainWindow):
             ntn_input = QLineEdit(cust.ntn or "")
             form_grid.addWidget(ntn_input, 5, 1)
 
+            # Install event filters for sequential navigation
+            name_input.installEventFilter(EnterKeyFilter(father_input, dialog))
+            father_input.installEventFilter(EnterKeyFilter(cnic_input, dialog))
+            cnic_input.installEventFilter(EnterKeyFilter(phone_input, dialog))
+            phone_input.installEventFilter(EnterKeyFilter(address_input, dialog))
+            address_input.installEventFilter(EnterKeyFilter(ntn_input, dialog))
+            ntn_input.installEventFilter(EnterKeyFilter(None, dialog))
+
             layout.addLayout(form_grid)
             layout.addStretch(1)
 
             btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+            # Disable auto-default to prevent Enter key from triggering Save prematurely
+            save_btn = btn_box.button(QDialogButtonBox.StandardButton.Save)
+            if save_btn:
+                save_btn.setAutoDefault(False)
+                save_btn.setDefault(False)
+            
+            cancel_btn = btn_box.button(QDialogButtonBox.StandardButton.Cancel)
+            if cancel_btn:
+                cancel_btn.setAutoDefault(False)
+
             btn_box.accepted.connect(dialog.accept)
             btn_box.rejected.connect(dialog.reject)
             layout.addWidget(btn_box)
@@ -5948,6 +6410,235 @@ class MainWindow(QMainWindow):
         if not index.isValid():
             return
         self._on_edit_dealer_clicked()
+
+    def _on_add_dealer_clicked(self) -> None:
+        self._open_add_dealer_dialog()
+        self._reload_dealers()
+
+    def _open_add_dealer_dialog(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Add New Dealer")
+        dialog.setMinimumSize(500, 600)
+        dialog.setStyleSheet("""
+            QDialog { background-color: #f8f9fa; }
+            QLabel { font-weight: bold; color: #2c3e50; }
+            QLineEdit { 
+                padding: 8px; 
+                border: 1px solid #ced4da; 
+                border-radius: 4px; 
+                background-color: white;
+            }
+            QLineEdit:focus {
+                border: 2px solid #3498db;
+                background-color: #f7fbfe;
+            }
+        """)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(30, 30, 30, 30)
+        layout.setSpacing(15)
+
+        form_grid = QGridLayout()
+        form_grid.setSpacing(12)
+
+        # Event filter to handle Enter key navigation and prevent dialog submission
+        class EnterKeyFilter(QObject):
+            def __init__(self, current, next_field, parent_dialog):
+                super().__init__(parent_dialog)
+                self.current = current
+                self.next_field = next_field
+                self.parent_dialog = parent_dialog
+
+            def eventFilter(self, obj, event):
+                if event.type() == QEvent.Type.KeyPress:
+                    if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                        if self.next_field:
+                            self.next_field.setFocus()
+                        else:
+                            self.parent_dialog.accept()
+                        return True
+                return super().eventFilter(obj, event)
+
+        # Business Name
+        form_grid.addWidget(QLabel("Business Name:"), 0, 0)
+        business_input = QLineEdit()
+        business_input.setPlaceholderText("Enter registered business name")
+        form_grid.addWidget(business_input, 0, 1)
+
+        # Contact Name
+        form_grid.addWidget(QLabel("Contact Name:"), 1, 0)
+        name_input = QLineEdit()
+        name_input.setPlaceholderText("Enter person's full name")
+        form_grid.addWidget(name_input, 1, 1)
+
+        # Allow only alphabetics and spaces for name
+        def format_name_input():
+            text = name_input.text()
+            filtered = "".join(c for c in text if c.isalpha() or c.isspace())
+            if filtered != text:
+                name_input.setText(filtered)
+        name_input.textChanged.connect(format_name_input)
+
+        # Father Name
+        form_grid.addWidget(QLabel("Father Name:"), 2, 0)
+        father_input = QLineEdit()
+        father_input.setPlaceholderText("Enter father's name")
+        form_grid.addWidget(father_input, 2, 1)
+
+        # Allow only alphabetics and spaces for father name
+        def format_father_input():
+            text = father_input.text()
+            filtered = "".join(c for c in text if c.isalpha() or c.isspace())
+            if filtered != text:
+                father_input.setText(filtered)
+        father_input.textChanged.connect(format_father_input)
+
+        # CNIC
+        form_grid.addWidget(QLabel("CNIC / ID Card:"), 3, 0)
+        cnic_input = QLineEdit()
+        cnic_input.setPlaceholderText("XXXXX-XXXXXXX-X")
+        form_grid.addWidget(cnic_input, 3, 1)
+        
+        # Auto-format CNIC as user types
+        def format_cnic_input():
+            text = cnic_input.text()
+            digits = "".join(c for c in text if c.isdigit())
+            formatted = digits
+            if len(digits) > 5:
+                formatted = digits[:5] + "-" + digits[5:]
+            if len(digits) > 12:
+                formatted = formatted[:13] + "-" + formatted[13:]
+            if len(formatted) > 15:
+                formatted = formatted[:15]
+            if formatted != text:
+                cnic_input.setText(formatted)
+            
+            # Real-time CNIC validation
+            if len(formatted) == 15:
+                check_cnic_exists(formatted)
+
+        def check_cnic_exists(cnic: str):
+            db = SessionLocal()
+            try:
+                existing = db.query(Customer).filter(Customer.cnic == cnic).first()
+                if existing:
+                    from app.updater.toast_notification import ToastNotification
+                    msg = f"A {existing.type.lower()} named '{existing.name}' with this CNIC already exists."
+                    toast = ToastNotification(
+                        title="CNIC Already Exists",
+                        message=msg,
+                        parent=self,
+                        duration_ms=5000,
+                        show_action=False,
+                        bg_color="#e67e22", # Warning Orange
+                        position="top-right"
+                    )
+                    toast.show_notification()
+            finally:
+                db.close()
+
+        cnic_input.textChanged.connect(format_cnic_input)
+
+        # Phone
+        form_grid.addWidget(QLabel("Phone Number:"), 4, 0)
+        phone_input = QLineEdit()
+        phone_input.setPlaceholderText("03021234567")
+        form_grid.addWidget(phone_input, 4, 1)
+
+        # Auto-format Phone Number as user types
+        def format_phone_input():
+            text = phone_input.text()
+            # Allow only digits and limit to 11
+            digits = "".join(c for c in text if c.isdigit())
+            if len(digits) > 11:
+                digits = digits[:11]
+            if digits != text:
+                phone_input.setText(digits)
+
+        phone_input.textChanged.connect(format_phone_input)
+
+        # Address
+        form_grid.addWidget(QLabel("Address:"), 5, 0)
+        address_input = QLineEdit()
+        address_input.setPlaceholderText("Enter full business address")
+        form_grid.addWidget(address_input, 5, 1)
+
+        # NTN
+        form_grid.addWidget(QLabel("NTN:"), 6, 0)
+        ntn_input = QLineEdit()
+        ntn_input.setPlaceholderText("Enter 7-digit NTN (e.g. 1234567-8)")
+        form_grid.addWidget(ntn_input, 6, 1)
+
+        # Install event filters for sequential navigation
+        business_input.installEventFilter(EnterKeyFilter(business_input, name_input, dialog))
+        name_input.installEventFilter(EnterKeyFilter(name_input, father_input, dialog))
+        father_input.installEventFilter(EnterKeyFilter(father_input, cnic_input, dialog))
+        cnic_input.installEventFilter(EnterKeyFilter(cnic_input, phone_input, dialog))
+        phone_input.installEventFilter(EnterKeyFilter(phone_input, address_input, dialog))
+        address_input.installEventFilter(EnterKeyFilter(address_input, ntn_input, dialog))
+        ntn_input.installEventFilter(EnterKeyFilter(ntn_input, None, dialog))
+
+        layout.addLayout(form_grid)
+        layout.addStretch(1)
+
+        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        # Disable auto-default to prevent Enter key from triggering Save prematurely
+        save_btn = btn_box.button(QDialogButtonBox.StandardButton.Save)
+        if save_btn:
+            save_btn.setAutoDefault(False)
+            save_btn.setDefault(False)
+        
+        cancel_btn = btn_box.button(QDialogButtonBox.StandardButton.Cancel)
+        if cancel_btn:
+            cancel_btn.setAutoDefault(False)
+            
+        btn_box.accepted.connect(dialog.accept)
+        btn_box.rejected.connect(dialog.reject)
+        layout.addWidget(btn_box)
+        
+        # Initial Focus
+        business_input.setFocus()
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            biz_name = business_input.text().strip()
+            name = name_input.text().strip()
+            father = father_input.text().strip()
+            cnic = cnic_input.text().strip()
+            phone = phone_input.text().strip()
+            address = address_input.text().strip()
+            ntn = ntn_input.text().strip()
+
+            if not biz_name or not name or not cnic:
+                QMessageBox.warning(self, "Validation Error", "Business Name, Contact Name, and CNIC are required.")
+                return
+
+            db = SessionLocal()
+            try:
+                # Check for existing CNIC
+                existing = db.query(Customer).filter(Customer.cnic == cnic).first()
+                if existing:
+                    QMessageBox.critical(self, "Duplicate Error", f"A dealer or customer with CNIC {cnic} already exists.")
+                    return
+
+                new_dealer = Customer(
+                    business_name=biz_name.upper(),
+                    name=name.upper(),
+                    father_name=father.upper(),
+                    cnic=cnic,
+                    phone=phone,
+                    address=address.upper(),
+                    ntn=ntn.upper(),
+                    type=CustomerType.DEALER.value
+                )
+                db.add(new_dealer)
+                db.commit()
+                QMessageBox.information(self, "Success", "New dealer has been added successfully.")
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Error adding dealer: {e}")
+                QMessageBox.critical(self, "Error", f"Failed to add dealer: {e}")
+            finally:
+                db.close()
 
     def _on_edit_dealer_clicked(self) -> None:
         selection = self.dealers_table_view.selectionModel().selectedRows()

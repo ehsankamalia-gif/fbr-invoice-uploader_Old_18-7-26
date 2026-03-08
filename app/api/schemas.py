@@ -26,6 +26,7 @@ class InvoiceCreate(BaseModel):
     buyer_cnic: Optional[str] = Field(default=None)
     buyer_phone: Optional[str] = Field(default=None)
     buyer_address: Optional[str] = Field(default=None)
+    buyer_type: Optional[str] = Field(default="INDIVIDUAL") # Added for dealer support
     payment_mode: str = "Cash"
     discount: float = 0.0
     items: List[InvoiceItemCreate]

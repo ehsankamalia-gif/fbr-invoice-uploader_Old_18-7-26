@@ -136,6 +136,11 @@ class InvoiceService:
             if invoice_in.buyer_ntn: customer.ntn = (invoice_in.buyer_ntn or "").upper()
             if invoice_in.buyer_phone: customer.phone = invoice_in.buyer_phone
             if invoice_in.buyer_address: customer.address = invoice_in.buyer_address.upper()
+            
+            # If we explicitly pass DEALER type, ensure it stays/becomes DEALER
+            if invoice_in.buyer_type == CustomerType.DEALER:
+                customer.type = CustomerType.DEALER
+                
             # Reactivate if they were deleted
             customer.is_deleted = False
         else:
@@ -147,7 +152,7 @@ class InvoiceService:
                 ntn=(invoice_in.buyer_ntn or "").upper(),
                 phone=invoice_in.buyer_phone,
                 address=(invoice_in.buyer_address or "").upper(),
-                type=CustomerType.INDIVIDUAL
+                type=invoice_in.buyer_type or CustomerType.INDIVIDUAL
             )
             db.add(customer)
         

@@ -123,6 +123,7 @@ class App(ctk.CTk):
 
         # Define Menu Structure
         self.setup_navigation_structure()
+        self.is_dealer_selected = False
 
         # Create Navigation Bars
         self.create_menu_bar()
@@ -1264,7 +1265,8 @@ class App(ctk.CTk):
                 # Use exact values from Price Table as per requirement
                 # These are per-unit values from the database
                 tax_per_unit = self.current_price_obj.tax_amount
-                further_tax_per_unit = self.current_price_obj.levy_amount
+                # If dealer is selected, further tax is typically 0
+                further_tax_per_unit = 0.0 if self.is_dealer_selected else self.current_price_obj.levy_amount
                 
                 # Calculate totals based on quantity
                 tax_charged = tax_per_unit * qty
@@ -1282,9 +1284,12 @@ class App(ctk.CTk):
                 sale_value = amount_excl * qty
                 tax_charged = (sale_value * tax_rate) / 100
                 
-                # Preserver existing Further Tax in manual mode (don't force to 0)
+                # Preserver existing Further Tax in manual mode (don't force to 0 if not dealer)
                 try:
-                    total_further_tax = float(self.further_tax_entry.get() or 0)
+                    if self.is_dealer_selected:
+                        total_further_tax = 0.0
+                    else:
+                        total_further_tax = float(self.further_tax_entry.get() or 0)
                 except ValueError:
                     total_further_tax = 0.0
             
@@ -1418,29 +1423,48 @@ class App(ctk.CTk):
         if not dealer:
             return
             
+        self.is_dealer_selected = True
         # Populate fields
         self.buyer_cnic_var.set(dealer.cnic)
         self.father_name_var.set(dealer.father_name)
         self.buyer_cell_var.set(dealer.phone)
         self.buyer_address_var.set(dealer.address)
+        if hasattr(self, 'buyer_ntn_var') and dealer.ntn:
+            self.buyer_ntn_var.set(dealer.ntn)
+            
+        # Dealers are registered, reset Further Tax to 0
+        self.update_entry_value(self.further_tax_entry, "0.00")
+        self.calculate_totals()
 
     def validate_buyer_name(self, *args):
         self._validate_name(self.buyer_name_var)
         
-        # Auto-populate dealer info if found
+        # If user manually edits name, reset dealer selection flag
+        # We need to distinguish between manual edit and auto-populate
+        # For now, we'll just check if the name matches any dealer
+        
         name = self.buyer_name_var.get().strip()
         if name:
             # Check for dealer match
             dealer = dealer_service.get_dealer_by_business_name(name)
             if dealer:
+                self.is_dealer_selected = True
                 self.buyer_cnic_var.set(dealer.cnic)
                 self.father_name_var.set(dealer.father_name)
                 self.buyer_cell_var.set(dealer.phone)
                 self.buyer_address_var.set(dealer.address)
+                if hasattr(self, 'buyer_ntn_var') and dealer.ntn:
+                    self.buyer_ntn_var.set(dealer.ntn)
                 
                 # Replace Business Name with Dealer Name
                 if dealer.name and name != dealer.name.upper():
                     self.buyer_name_var.set(dealer.name.upper())
+                    
+                # Dealers are registered, reset Further Tax to 0
+                self.update_entry_value(self.further_tax_entry, "0.00")
+                self.calculate_totals()
+            else:
+                self.is_dealer_selected = False
 
     def validate_father_name(self, *args):
         self._validate_name(self.father_name_var)
@@ -1762,6 +1786,7 @@ class App(ctk.CTk):
         self.reset_form(clear_qr=True, force_reset=True)
 
     def reset_form(self, clear_qr=True, qr_data=None, force_reset=False):
+        self.is_dealer_selected = False
         logging.info(f"Resetting form. clear_qr={clear_qr}, qr_data={qr_data}, force_reset={force_reset}, preserve_buyer={self.preserve_buyer_details_var.get()}")
         self.generate_invoice_number() # Auto-generate next number
         
@@ -2862,6 +2887,7 @@ class App(ctk.CTk):
             buyer_phone=buyer_cell,
             buyer_address=buyer_address,
             buyer_ntn=final_ntn,
+            buyer_type=CustomerType.DEALER if self.is_dealer_selected else CustomerType.INDIVIDUAL,
             payment_mode=payment_mode,
             items=[item]
         )
