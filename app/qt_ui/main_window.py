@@ -1571,12 +1571,37 @@ class MainWindow(QMainWindow):
         # Invoice Number
         group1_layout.addWidget(QLabel("Invoice Number"), 1, 0)
         inv_num_layout = QHBoxLayout()
+        inv_num_layout.setSpacing(0)
         self.invoice_number_input = QLineEdit()
         self.invoice_number_input.setReadOnly(True)
         self.invoice_number_input.setPlaceholderText("Generating...")
+        self.invoice_number_input.setStyleSheet("border-top-right-radius: 0px; border-bottom-right-radius: 0px; border-right: none;")
+        
         generate_btn = QPushButton("↺")
-        generate_btn.setFixedWidth(40)
+        generate_btn.setFixedSize(40, 36)
         generate_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        generate_btn.setToolTip("Generate New Number")
+        generate_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f8f9fa;
+                color: #2c3e50;
+                border: 1px solid #ced4da;
+                border-top-left-radius: 0px;
+                border-bottom-left-radius: 0px;
+                border-top-right-radius: 4px;
+                border-bottom-right-radius: 4px;
+                font-size: 20px;
+                font-weight: bold;
+                padding: 0;
+            }
+            QPushButton:hover {
+                background-color: #e9ecef;
+                color: #3498db;
+            }
+            QPushButton:pressed {
+                background-color: #dee2e6;
+            }
+        """)
         generate_btn.clicked.connect(self._generate_invoice_number)  # type: ignore[arg-type]
         inv_num_layout.addWidget(self.invoice_number_input)
         inv_num_layout.addWidget(generate_btn)
@@ -1641,8 +1666,10 @@ class MainWindow(QMainWindow):
         group1_layout.addWidget(QLabel("Buyer Name"), 3, 0)
         
         buyer_name_layout = QHBoxLayout()
+        buyer_name_layout.setSpacing(0)
         self.invoice_buyer_name_input = AutocompleteLineEdit()
         self.invoice_buyer_name_input.setPlaceholderText("Full Name (F2 to search dealers)")
+        self.invoice_buyer_name_input.setStyleSheet("border-top-right-radius: 0px; border-bottom-right-radius: 0px; border-right: none;")
         buyer_name_layout.addWidget(self.invoice_buyer_name_input)
         
         # Allow only alphabetics and spaces for name
@@ -1654,9 +1681,30 @@ class MainWindow(QMainWindow):
         self.invoice_buyer_name_input.textChanged.connect(format_invoice_name_input)
 
         search_dealer_btn = QPushButton("🔍")
-        search_dealer_btn.setFixedWidth(40)
+        search_dealer_btn.setFixedSize(40, 36)
         search_dealer_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         search_dealer_btn.setToolTip("Search Dealers (F2)")
+        search_dealer_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f8f9fa;
+                color: #2c3e50;
+                border: 1px solid #ced4da;
+                border-top-left-radius: 0px;
+                border-bottom-left-radius: 0px;
+                border-top-right-radius: 4px;
+                border-bottom-right-radius: 4px;
+                font-size: 18px;
+                font-weight: bold;
+                padding: 0;
+            }
+            QPushButton:hover {
+                background-color: #e9ecef;
+                color: #3498db;
+            }
+            QPushButton:pressed {
+                background-color: #dee2e6;
+            }
+        """)
         search_dealer_btn.clicked.connect(self._open_dealer_search_dialog)
         buyer_name_layout.addWidget(search_dealer_btn)
         
@@ -3425,19 +3473,12 @@ class MainWindow(QMainWindow):
         header_layout.addLayout(header_v_box)
         header_layout.addStretch(1)
 
-        # Import Inventory Button (New)
-        import_btn = QPushButton("📦 Import Inventory")
-        import_btn.setStyleSheet("background-color: #e67e22; color: white; border: none; font-weight: bold; padding: 10px 20px; border-radius: 8px;")
-        import_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        import_btn.clicked.connect(self._on_import_inventory_clicked)
-        header_layout.addWidget(import_btn)
-
-        # Capture Actions
-        capture_btn = QPushButton("🚀 Launch Capture")
-        capture_btn.setStyleSheet("background-color: #3498db; color: white; border: none; font-weight: bold; padding: 10px 20px; border-radius: 8px;")
-        capture_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        capture_btn.clicked.connect(self._on_launch_capture_clicked)
-        header_layout.addWidget(capture_btn)
+        # Consolidated Sync & Capture Button
+        sync_capture_btn = QPushButton("🔄 Sync & Capture Data")
+        sync_capture_btn.setStyleSheet("background-color: #3498db; color: white; border: none; font-weight: bold; padding: 10px 20px; border-radius: 8px;")
+        sync_capture_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        sync_capture_btn.clicked.connect(self._on_sync_and_capture_clicked)
+        header_layout.addWidget(sync_capture_btn)
 
         view_cap_btn = QPushButton("📁 View Captured")
         view_cap_btn.setStyleSheet("background-color: #1abc9c; color: white; border: none; font-weight: bold; padding: 10px 20px; border-radius: 8px;")
@@ -3533,6 +3574,15 @@ class MainWindow(QMainWindow):
 
         return page
 
+    def _on_sync_and_capture_clicked(self) -> None:
+        """Sequential workflow: Import inventory then launch capture browser."""
+        # Step 1: Open the Import Dialog
+        dialog = WebImportDialog(self)
+        dialog.exec()
+        
+        # Step 2: Automatically trigger capture browser launch after import
+        self._on_launch_capture_clicked()
+
     def _on_launch_capture_clicked(self) -> None:
         """Launches the background capture browser."""
         try:
@@ -3542,11 +3592,6 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Browser Launched", "Capture browser has been launched.\nNavigate to the portal to begin capturing data.")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to launch browser: {e}")
-
-    def _on_import_inventory_clicked(self) -> None:
-        """Opens the web import dialog."""
-        dialog = WebImportDialog(self)
-        dialog.exec()
 
     def _on_view_captured_clicked(self) -> None:
         """Switches to the captured data page."""
