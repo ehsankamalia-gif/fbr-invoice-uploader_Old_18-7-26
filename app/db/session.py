@@ -24,6 +24,9 @@ def init_db():
     """Re-initialize the database engine. Useful after settings change."""
     global engine, SessionLocal
     
+    # Close existing connections first
+    close_all_db_connections()
+    
     # Configure connect_args based on DB type
     connect_args = {}
     if "sqlite" in config.settings.DB_URL:
@@ -35,6 +38,16 @@ def init_db():
         pool_pre_ping=True
     )
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+def close_all_db_connections():
+    """Professionally disposes of the SQLAlchemy engine and all pool connections."""
+    global engine
+    try:
+        if engine:
+            logger.info("Disposing of database engine and closing all connections...")
+            engine.dispose()
+    except Exception as e:
+        logger.error(f"Error during database engine disposal: {e}")
 
 def check_connection():
     """Check if the database connection is working."""

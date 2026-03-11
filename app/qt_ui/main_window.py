@@ -8,10 +8,25 @@ import re
 import requests
 import qrcode
 import datetime as dt
+import threading
+import os
+import sys
+import subprocess
 from PIL import Image
 from tenacity import RetryError
 
-from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QStringListModel, QTimer, QDate, pyqtSignal, QObject, QEvent
+from PyQt6.QtCore import (
+    Qt, 
+    QAbstractTableModel, 
+    QModelIndex, 
+    QStringListModel, 
+    QTimer, 
+    QDate, 
+    pyqtSignal, 
+    QObject, 
+    QEvent,
+    QThread
+)
 from PyQt6.QtGui import QPixmap, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QMainWindow,
@@ -40,9 +55,14 @@ from PyQt6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QTextEdit,
+    QFileDialog,
+    QTableWidget,
+    QTableWidgetItem,
+    QProgressDialog,
 )
 
-from app.db.session import SessionLocal
+from app.core.config import settings
+from app.db.session import SessionLocal, close_all_db_connections
 from app.services.report_service import report_service, SalesFilter
 from app.db.models import (
     Motorcycle,
@@ -60,6 +80,7 @@ from app.services.price_service import price_service
 from app.services.settings_service import settings_service
 from app.services.dealer_service import dealer_service
 from app.services.form_capture_service import form_capture_service
+from app.services.backup_service import backup_service
 from app.qt_ui.dealer_search_dialog import DealerSearchDialog
 from app.qt_ui.web_import_dialog import WebImportDialog
 from app.core.logger import logger
@@ -76,6 +97,40 @@ class CampaignRow:
     failed: int
     total: int
     created_at: dt.datetime
+
+
+class BackupWorker(QObject):
+    """Professional worker for background backup operations."""
+    finished = pyqtSignal(dict)
+    error = pyqtSignal(str)
+
+    def run(self):
+        try:
+            logger.info("BackupWorker started manual backup process.")
+            result = backup_service.create_backup(is_manual=True)
+            self.finished.emit(result)
+        except Exception as e:
+            logger.error(f"BackupWorker encountered a critical error: {e}", exc_info=True)
+            self.error.emit(str(e))
+
+
+class MySQLRestoreWorker(QObject):
+    """Professional worker for background MySQL restore operations."""
+    finished = pyqtSignal(dict)
+    error = pyqtSignal(str)
+
+    def __init__(self, backup_path: str):
+        super().__init__()
+        self.backup_path = backup_path
+
+    def run(self):
+        try:
+            logger.info("MySQLRestoreWorker started background restore.")
+            result = backup_service.restore_backup(self.backup_path)
+            self.finished.emit(result)
+        except Exception as e:
+            logger.error(f"MySQLRestoreWorker failed: {e}", exc_info=True)
+            self.error.emit(str(e))
     error_message: str = ""
 
 @dataclass
@@ -414,6 +469,32 @@ class MainWindow(QMainWindow):
         self._update_check_timer.setInterval(4 * 60 * 60 * 1000)
         self._update_check_timer.timeout.connect(self.updater_manager.check_for_updates_async)
         self._update_check_timer.start()
+
+        # Start backup scheduler if enabled
+        backup_service.start_scheduler()
+        
+        # Professional Auto-Backup on Startup (if it hasn't been done in the last 24h)
+        self._perform_startup_backup()
+
+    def _perform_startup_backup(self):
+        """Background backup on startup to ensure data safety."""
+        def run_backup():
+            try:
+                # Check if we should backup (last backup date)
+                backups = backup_service.list_backups()
+                should_backup = True
+                if backups:
+                    last_backup_date = dt.datetime.strptime(backups[0]["date"], "%Y-%m-%d %H:%M:%S")
+                    if (dt.datetime.now() - last_backup_date).total_seconds() < 12 * 3600: # 12 hours
+                        should_backup = False
+                
+                if should_backup:
+                    logger.info("Performing professional startup backup...")
+                    backup_service.create_backup(is_manual=False)
+            except Exception as e:
+                logger.error(f"Startup backup failed: {e}")
+
+        threading.Thread(target=run_backup, daemon=True).start()
 
     def _init_ui(self) -> None:
         central = QWidget(self)
@@ -2074,6 +2155,98 @@ class MainWindow(QMainWindow):
 
         container_layout.addWidget(update_group)
 
+        # --- Group 4: Database Backup & Restore ---
+        backup_group = QFrame()
+        backup_group.setObjectName("formGroup")
+        backup_layout = QVBoxLayout(backup_group)
+        backup_layout.setContentsMargins(20, 25, 20, 20)
+        backup_layout.setSpacing(15)
+
+        backup_title_layout = QHBoxLayout()
+        backup_title = QLabel("DATABASE BACKUP & RESTORE")
+        backup_title.setObjectName("groupTitle")
+        backup_title.setStyleSheet("color: #2c3e50; font-weight: bold;")
+        backup_title_layout.addWidget(backup_title)
+        backup_title_layout.addStretch(1)
+        
+        self.manual_backup_btn = QPushButton("💾 Create Backup Now")
+        self.manual_backup_btn.setStyleSheet("background-color: #27ae60; color: white; padding: 5px 15px;")
+        self.manual_backup_btn.clicked.connect(self._on_create_manual_backup)
+        backup_title_layout.addWidget(self.manual_backup_btn)
+
+        self.restore_external_btn = QPushButton("📂 Restore from File...")
+        self.restore_external_btn.setStyleSheet("background-color: #3498db; color: white; padding: 5px 15px;")
+        self.restore_external_btn.clicked.connect(self._on_restore_external_file)
+        backup_title_layout.addWidget(self.restore_external_btn)
+        
+        backup_layout.addLayout(backup_title_layout)
+
+        # Settings sub-layout
+        backup_settings_grid = QGridLayout()
+        backup_settings_grid.setSpacing(15)
+
+        backup_settings_grid.addWidget(QLabel("Backup Location:"), 0, 0)
+        backup_path_layout = QHBoxLayout()
+        self.backup_path_input = QLineEdit()
+        self.backup_path_input.setReadOnly(True)
+        backup_path_layout.addWidget(self.backup_path_input)
+        
+        self.browse_backup_btn = QPushButton("📂 Browse")
+        self.browse_backup_btn.setFixedWidth(80)
+        self.browse_backup_btn.clicked.connect(self._on_browse_backup_path)
+        backup_path_layout.addWidget(self.browse_backup_btn)
+        backup_settings_grid.addLayout(backup_path_layout, 0, 1)
+
+        self.backup_auto_enabled = QCheckBox("Enable Automatic Scheduled Backups")
+        self.backup_auto_enabled.stateChanged.connect(self._on_backup_settings_changed)
+        backup_settings_grid.addWidget(self.backup_auto_enabled, 1, 0, 1, 2)
+
+        backup_settings_grid.addWidget(QLabel("Backup Interval:"), 2, 0)
+        self.backup_interval_combo = QComboBox()
+        self.backup_interval_combo.addItems(["daily", "weekly", "monthly"])
+        self.backup_interval_combo.currentTextChanged.connect(self._on_backup_settings_changed)
+        backup_settings_grid.addWidget(self.backup_interval_combo, 2, 1)
+
+        backup_settings_grid.addWidget(QLabel("Backup Time (HH:MM):"), 3, 0)
+        self.backup_time_input = QLineEdit()
+        self.backup_time_input.setPlaceholderText("00:00")
+        self.backup_time_input.textChanged.connect(self._on_backup_settings_changed)
+        backup_settings_grid.addWidget(self.backup_time_input, 3, 1)
+
+        backup_settings_grid.addWidget(QLabel("Retention (Days):"), 4, 0)
+        self.backup_retention_spin = QSpinBox()
+        self.backup_retention_spin.setRange(1, 365)
+        self.backup_retention_spin.setValue(30)
+        self.backup_retention_spin.valueChanged.connect(self._on_backup_settings_changed)
+        backup_settings_grid.addWidget(self.backup_retention_spin, 4, 1)
+
+        self.backup_encrypt_enabled = QCheckBox("Encrypt Backup Files (Professional Security)")
+        self.backup_encrypt_enabled.setChecked(True)
+        self.backup_encrypt_enabled.stateChanged.connect(self._on_backup_settings_changed)
+        backup_settings_grid.addWidget(self.backup_encrypt_enabled, 5, 0, 1, 2)
+
+        backup_layout.addLayout(backup_settings_grid)
+
+        # Recent Backups Table
+        backup_list_label = QLabel("RECENT BACKUPS")
+        backup_list_label.setStyleSheet("font-weight: bold; color: #7f8c8d; font-size: 11px; margin-top: 10px;")
+        backup_layout.addWidget(backup_list_label)
+
+        self.backup_table = QTableWidget()
+        self.backup_table.setColumnCount(4)
+        self.backup_table.setHorizontalHeaderLabels(["Date", "File Name", "Size (MB)", "Actions"])
+        self.backup_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.backup_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.backup_table.verticalHeader().setVisible(False)
+        self.backup_table.setFixedHeight(200)
+        self.backup_table.setStyleSheet("""
+            QTableWidget { border: 1px solid #dee2e6; border-radius: 4px; background-color: #fcfcfc; }
+            QHeaderView::section { background-color: #f1f1f1; padding: 5px; border: none; font-weight: bold; }
+        """)
+        backup_layout.addWidget(self.backup_table)
+
+        container_layout.addWidget(backup_group)
+
         # Action Buttons
         btn_bar = QWidget()
         btn_layout = QHBoxLayout(btn_bar)
@@ -2092,6 +2265,7 @@ class MainWindow(QMainWindow):
         active_env = settings_service.get_active_environment()
         self.settings_env_combo.setCurrentText(active_env)
         self._load_settings_for_env(active_env)
+        self._load_backup_ui()
 
         return page
 
@@ -2135,6 +2309,293 @@ class MainWindow(QMainWindow):
             self._show_success("Settings Saved", f"Configuration for {env} has been updated and set as active.")
         except Exception as e:
             self._show_error("Save Error", str(e))
+
+    def _load_backup_ui(self):
+        """Load backup settings into UI elements."""
+        config = backup_service.config
+        self.backup_path_input.setText(config.local_path)
+        self.backup_auto_enabled.setChecked(config.enabled)
+        self.backup_interval_combo.setCurrentText(config.interval)
+        self.backup_time_input.setText(config.time_str)
+        self.backup_retention_spin.setValue(config.retention_days)
+        self.backup_encrypt_enabled.setChecked(config.encrypt)
+        self._reload_backup_list()
+
+    def _on_backup_settings_changed(self):
+        """Update backup service config when UI elements change."""
+        backup_service.config.enabled = self.backup_auto_enabled.isChecked()
+        backup_service.config.interval = self.backup_interval_combo.currentText()
+        backup_service.config.time_str = self.backup_time_input.text()
+        backup_service.config.retention_days = self.backup_retention_spin.value()
+        backup_service.config.encrypt = self.backup_encrypt_enabled.isChecked()
+        backup_service.save_config()
+        
+        # Restart scheduler if enabled
+        if backup_service.config.enabled:
+            backup_service.start_scheduler()
+        else:
+            backup_service.stop_scheduler()
+
+    def _on_browse_backup_path(self):
+        dir_path = QFileDialog.getExistingDirectory(self, "Select Backup Directory", self.backup_path_input.text())
+        if dir_path:
+            self.backup_path_input.setText(dir_path)
+            backup_service.config.local_path = dir_path
+            backup_service.save_config()
+            self._reload_backup_list()
+
+    def _on_create_manual_backup(self):
+        """Professionally launches a manual backup in a separate thread."""
+        self.manual_backup_btn.setEnabled(False)
+        self.manual_backup_btn.setText("⏳ Backing up...")
+        logger.info("Manual backup requested by user.")
+        
+        # 1. Setup Thread and Worker
+        self._backup_thread = QThread()
+        self._backup_worker = BackupWorker()
+        self._backup_worker.moveToThread(self._backup_thread)
+        
+        # 2. Connect Signals
+        self._backup_thread.started.connect(self._backup_worker.run)
+        self._backup_worker.finished.connect(self._handle_backup_result)
+        self._backup_worker.error.connect(lambda msg: self._handle_backup_result({"success": False, "message": msg}))
+        
+        # 3. Cleanup on completion
+        self._backup_worker.finished.connect(self._backup_thread.quit)
+        self._backup_worker.finished.connect(self._backup_worker.deleteLater)
+        self._backup_thread.finished.connect(self._backup_thread.deleteLater)
+        
+        # 4. Start Thread
+        self._backup_thread.start()
+
+    def _handle_backup_result(self, result: Dict):
+        """Restores the backup button state and provides user feedback."""
+        self.manual_backup_btn.setEnabled(True)
+        self.manual_backup_btn.setText("💾 Create Backup Now")
+        logger.info(f"Manual backup completed with success: {result.get('success', False)}")
+        
+        if result.get("success"):
+            self._show_success("Backup Successful", result.get("message", "Database backed up successfully."))
+            self._reload_backup_list()
+        else:
+            error_msg = result.get("message", "Unknown error occurred.")
+            logger.error(f"Manual backup failed: {error_msg}")
+            self._show_error("Backup Failed", error_msg)
+
+    def _reload_backup_list(self):
+        backups = backup_service.list_backups()
+        self.backup_table.setRowCount(len(backups))
+        
+        for i, b in enumerate(backups):
+            self.backup_table.setItem(i, 0, QTableWidgetItem(b["date"]))
+            self.backup_table.setItem(i, 1, QTableWidgetItem(b["name"]))
+            self.backup_table.setItem(i, 2, QTableWidgetItem(str(b["size_mb"])))
+            
+            # Action buttons
+            actions_widget = QWidget()
+            actions_layout = QHBoxLayout(actions_widget)
+            actions_layout.setContentsMargins(5, 2, 5, 2)
+            actions_layout.setSpacing(10)
+            
+            restore_btn = QPushButton("Restore")
+            restore_btn.setStyleSheet("background-color: #3498db; color: white; padding: 2px 8px; font-size: 11px;")
+            restore_btn.clicked.connect(lambda checked, path=b["path"]: self._on_restore_backup(path))
+            
+            delete_btn = QPushButton("Delete")
+            delete_btn.setStyleSheet("background-color: #e74c3c; color: white; padding: 2px 8px; font-size: 11px;")
+            delete_btn.clicked.connect(lambda checked, path=b["path"]: self._on_delete_backup(path))
+            
+            actions_layout.addWidget(restore_btn)
+            actions_layout.addWidget(delete_btn)
+            self.backup_table.setCellWidget(i, 3, actions_widget)
+
+    def _on_restore_external_file(self):
+        """Allows selecting an external backup file for restore."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, 
+            "Select Backup File", 
+            "", 
+            "Backup Files (*.zip *.enc);;All Files (*)"
+        )
+        if file_path:
+            self._on_restore_backup(file_path)
+
+    def _on_restore_backup(self, path: str):
+        """Professionally handles the restore process by launching an external utility."""
+        backup_file = os.path.basename(path)
+        
+        # Professional Custom Warning Dialog
+        msg = (
+            f"You are about to restore the database from: <b>{backup_file}</b><br><br>"
+            "<span style='color: #e74c3c;'><b>⚠️ CRITICAL WARNING:</b></span><br>"
+            "1. This will <b>COMPLETELY OVERWRITE</b> your current database.<br>"
+            "2. All current transactions, invoices, and customers will be replaced.<br>"
+            "3. This action is <b>IRREVERSIBLE</b>.<br><br>"
+            "The application will <b>CLOSE</b> now to perform the restore safely, and then restart automatically."
+        )
+        
+        reply = QMessageBox.warning(
+            self, 
+            "Database Restore Confirmation", 
+            msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            # Check if we are using MySQL or SQLite
+            is_mysql = "mysql" in settings.DB_URL.lower()
+            
+            if is_mysql:
+                # For MySQL, we don't need the external utility as much because there's no file lock
+                # We use the professional BackupWorker for MySQL as well
+                progress = QProgressDialog("Restoring MySQL Database...", None, 0, 0, self)
+                progress.setWindowTitle("Professional Database Restore")
+                progress.setWindowModality(Qt.WindowModality.WindowModal)
+                progress.setMinimumWidth(400)
+                progress.setCancelButton(None)
+                progress.setStyleSheet("""
+                    QProgressDialog {
+                        background-color: white;
+                        border: 1px solid #ced4da;
+                        border-radius: 8px;
+                    }
+                    QLabel {
+                        font-size: 14px;
+                        color: #2c3e50;
+                        padding: 10px;
+                    }
+                    QProgressBar {
+                        border: 1px solid #ced4da;
+                        border-radius: 4px;
+                        text-align: center;
+                        height: 20px;
+                    }
+                    QProgressBar::chunk {
+                        background-color: #3498db;
+                    }
+                """)
+                progress.show()
+                QApplication.processEvents()
+                
+                close_all_db_connections()
+                
+                # 1. Setup Thread and Worker
+                self._restore_thread = QThread()
+                self._restore_worker = MySQLRestoreWorker(path)
+                self._restore_worker.moveToThread(self._restore_thread)
+                
+                # 2. Connect Signals
+                self._restore_thread.started.connect(self._restore_worker.run)
+                self._restore_worker.finished.connect(lambda result: self._handle_restore_result(result, progress))
+                self._restore_worker.error.connect(lambda msg: self._handle_restore_result({"success": False, "message": msg}, progress))
+                
+                # 3. Cleanup
+                self._restore_worker.finished.connect(self._restore_thread.quit)
+                self._restore_worker.finished.connect(self._restore_worker.deleteLater)
+                self._restore_thread.finished.connect(self._restore_thread.deleteLater)
+                
+                # 4. Start Thread
+                self._restore_thread.start()
+                return
+
+            # SQLite logic (Use External Utility to avoid file locks)
+            db_path = backup_service.get_db_path()
+            if not db_path:
+                logger.error(f"Could not determine SQLite path from URL: {settings.DB_URL}")
+                self._show_error("Restore Error", 
+                    f"Could not determine database path.<br><br>"
+                    f"<b>Current DB URL:</b> {settings.DB_URL}<br><br>"
+                    "Please ensure your .env file is configured correctly for SQLite.")
+                return
+                
+            encryption_key = backup_service.config.encryption_key if backup_service.config.encrypt else "None"
+            
+            # Determine how to restart the main app
+            if getattr(sys, 'frozen', False):
+                main_app_entry = os.path.abspath(sys.executable)
+            else:
+                main_app_entry = os.path.abspath(sys.argv[0]) # Usually run.py or main.py
+            
+            # Path to the utility script
+            project_root = Path(__file__).resolve().parent.parent.parent
+            util_script = project_root / "restore_util.py"
+            
+            try:
+                # Launch the external restorer in a new terminal/window
+                if sys.platform == "win32":
+                    # Use sys.executable to ensure we use the same Python environment
+                    python_exe = os.path.abspath(sys.executable)
+                    cmd = f'"{python_exe}" "{util_script}" "{path}" "{db_path}" "{encryption_key}" "{main_app_entry}"'
+                    subprocess.Popen(f'start cmd /k {cmd}', shell=True)
+                else:
+                    subprocess.Popen([sys.executable, str(util_script), str(path), str(db_path), encryption_key, main_app_entry])
+                
+                # Exit the main process immediately to release ALL locks
+                os._exit(0)
+                
+            except Exception as e:
+                self._show_error("Restore Launch Failed", str(e))
+
+    def _handle_restore_result(self, result: Dict, progress_dialog: QProgressDialog):
+        # Close the progress dialog
+        progress_dialog.close()
+        
+        self.restore_external_btn.setEnabled(True)
+        self.restore_external_btn.setText("📂 Restore from File...")
+        
+        if result.get("success"):
+            QMessageBox.information(
+                self, 
+                "Restore Successful", 
+                "The database has been restored successfully.<br><br>The application will now restart."
+            )
+            self._restart_application()
+        else:
+            # Re-start background tasks if failed
+            if hasattr(self, '_update_check_timer'):
+                self._update_check_timer.start()
+            backup_service.start_scheduler()
+            
+            self._show_error("Restore Failed", result.get("message", "Unknown error during restore."))
+
+    def _restart_application(self):
+        """Robust application restart mechanism."""
+        try:
+            # Close application
+            QApplication.quit()
+            
+            # Prepare restart command
+            if getattr(sys, 'frozen', False):
+                # If packaged as exe
+                executable = sys.executable
+                os.startfile(executable)
+            else:
+                # If running as script, use module-based launch to avoid ModuleNotFoundError
+                python = sys.executable
+                # The root directory is the parent of the 'app' directory
+                project_root = Path(__file__).resolve().parent.parent.parent
+                subprocess.Popen([python, "-m", "app.main"], cwd=str(project_root))
+            
+            # Force immediate exit to release all file handles
+            os._exit(0)
+        except Exception as e:
+            logger.error(f"Restart failed: {e}")
+            # Fallback message
+            print(f"Please restart the application manually: {e}")
+
+    def _on_delete_backup(self, path: str):
+        reply = QMessageBox.question(
+            self, "Confirm Delete", 
+            "Are you sure you want to delete this backup file?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                os.remove(path)
+                self._reload_backup_list()
+            except Exception as e:
+                self._show_error("Delete Error", str(e))
 
     def _update_app_branding(self, business_name: str) -> None:
         """Dynamically update window title and sidebar branding."""

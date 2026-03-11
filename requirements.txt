@@ -17,4 +17,6 @@ cryptography
 openpyxl
 PyQt6
 pandas
+schedule
+platformdirs
 openpyxl
