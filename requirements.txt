@@ -19,4 +19,6 @@ PyQt6
 pandas
 schedule
 platformdirs
+jinja2
+PyQt6-WebEngine
 openpyxl
