@@ -1628,6 +1628,34 @@ class MainWindow(QMainWindow):
         fbr_stat_layout.addWidget(self.invoice_fbr_stat_value)
         header_layout.addWidget(fbr_stat_widget)
 
+        # Environment Badge (Green Rectangle Area)
+        self.invoice_env_badge = QFrame(header_widget)
+        self.invoice_env_badge.setFixedSize(160, 60)
+        self.invoice_env_badge.setStyleSheet("""
+            QFrame {
+                border: 2px solid #27ae60;
+                border-radius: 8px;
+                background-color: white;
+            }
+        """)
+        env_badge_layout = QVBoxLayout(self.invoice_env_badge)
+        env_badge_layout.setContentsMargins(10, 5, 10, 5)
+        env_badge_layout.setSpacing(2)
+
+        env_label_title = QLabel("ENVIRONMENT")
+        env_label_title.setStyleSheet("font-weight: bold; font-size: 10px; color: #7f8c8d; text-transform: uppercase;")
+        env_label_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.invoice_env_value_label = QLabel("UNKNOWN")
+        self.invoice_env_value_label.setStyleSheet("font-weight: bold; font-size: 18px; color: #2c3e50;")
+        self.invoice_env_value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        env_badge_layout.addWidget(env_label_title)
+        env_badge_layout.addWidget(self.invoice_env_value_label)
+        
+        # Insert before the FBR stat widget
+        header_layout.insertWidget(2, self.invoice_env_badge)
+
         root_layout.addWidget(header_widget)
 
         self.invoice_scroll_area = QScrollArea(page)
@@ -2022,13 +2050,12 @@ class MainWindow(QMainWindow):
         # Trigger data lookup when Enter is pressed on Chassis input
         self.invoice_chassis_input.returnPressed.connect(lambda: self._on_chassis_selected(self.invoice_chassis_input.text()))
 
-        # Reset Engine Number's Enter key behavior to not submit automatically
-        # Instead, it will move focus to the next logical widget (e.g. Quantity or Submit button)
+        # Engine Number triggers submission to FBR when Enter is pressed
         try:
-            self.invoice_engine_input.returnPressed.disconnect(self._submit_invoice)
+            self.invoice_engine_input.returnPressed.disconnect()
         except:
             pass
-        self.invoice_engine_input.returnPressed.connect(self.focusNextChild)
+        self.invoice_engine_input.returnPressed.connect(self._submit_invoice)  # type: ignore[arg-type]
 
         # Set explicit Tab Order for the entire invoice form (Visual top-to-bottom, left-to-right)
         self.setTabOrder(self.invoice_buyer_cnic_input, self.invoice_buyer_ntn_input)
@@ -2049,6 +2076,12 @@ class MainWindow(QMainWindow):
         self._invoice_current_price = None
         self._load_invoice_models()
         self._generate_invoice_number()
+
+        # Set initial environment badge
+        active_env = settings_service.get_active_environment()
+        self.invoice_env_value_label.setText(active_env.upper())
+        color = "#e67e22" if active_env.upper() == "SANDBOX" else "#27ae60"
+        self.invoice_env_badge.setStyleSheet(f"QFrame {{ border: 2px solid {color}; border-radius: 8px; background-color: white; }}")
 
         return page
 
@@ -2331,6 +2364,13 @@ class MainWindow(QMainWindow):
             )
             settings_service.set_active_environment(env)
             self._update_app_branding(business_name)
+            
+            # Update environment badge on invoice page if it exists
+            if hasattr(self, "invoice_env_value_label"):
+                self.invoice_env_value_label.setText(env.upper())
+                color = "#e67e22" if env.upper() == "SANDBOX" else "#27ae60"
+                self.invoice_env_badge.setStyleSheet(f"QFrame {{ border: 2px solid {color}; border-radius: 8px; background-color: white; }}")
+            
             self._show_success("Settings Saved", f"Configuration for {env} has been updated and set as active.")
         except Exception as e:
             self._show_error("Save Error", str(e))
