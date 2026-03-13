@@ -456,3 +456,531 @@ RAW DATA: {'selector': 'input#search_by_engine', 'value': '', 'type': 'text', 't
 2026-02-27 19:08:35.813804: Attempting save (try 1). Pages: 4
 RAW DATA: {'selector': 'input#search_by_engine', 'value': '', 'type': 'text', 'timestamp': 1772201315.808}
 2026-02-27 19:08:35.832607: Attempting save (try 1). Pages: 4
+RAW DATA: {'type': 'form_submission', 'source': 'form_submit_event', 'url': 'https://dealers.ahlportal.com/', 'timestamp': 1773071237.544, 'forced_capture': {'_debug_all_inputs': {'_token': 'ZdOD5FzLd0QZElSLK2kLeM8bW1Po2WjFIKeJZSa9', 'user_name': '101296', 'password': '95858260', 'captcha_code': '44415'}}}
+2026-03-09 20:47:17.567291: Attempting save (try 1). Pages: 4
+
+--- SUBMISSION START 2026-03-09 20:47:17.587800 ---
+Flat Data Keys: ['input#txt_engine_no', 'input#txt_chassis_no', 'input#txt_color', 'input#txt_model', 'input#nic1', 'input#nic2', 'input#nic3', 'input#txt_address', 'input#txt_cell_no', 'span#select2-cmb_city-container', '_debug_all_inputs', 'input#search_by_engine']
+Flat Data Content: {'input#txt_engine_no': '', 'input#txt_chassis_no': '', 'input#txt_color': '', 'input#txt_model': '', 'input#nic1': '', 'input#nic2': '', 'input#nic3': '', 'input#txt_address': '', 'input#txt_cell_no': '', 'span#select2-cmb_city-container': 'Search or Select City', '_debug_all_inputs': {'_token': 'ZdOD5FzLd0QZElSLK2kLeM8bW1Po2WjFIKeJZSa9', 'user_name': '101296', 'password': '95858260', 'captcha_code': '44415'}, 'input#search_by_engine': ''}
+Mapped Data: {'engine_number': '', 'chassis_number': '', 'color': '', 'model_name': '', 'buyer_cnic_part1': '', 'buyer_cnic_part2': '', 'buyer_cnic_part3': '', 'buyer_address': '', 'buyer_phone': '', 'city': 'Search or Select City', 'buyer_cnic': ''}
+RAW DATA: {'type': 'form_submission', 'source': 'button_click', 'url': 'https://dealers.ahlportal.com/', 'timestamp': 1773071237.628, 'forced_capture': {'_debug_all_inputs': {'_token': 'ZdOD5FzLd0QZElSLK2kLeM8bW1Po2WjFIKeJZSa9', 'user_name': '101296', 'password': '95858260', 'captcha_code': '44415'}}}
+2026-03-09 20:47:17.644536: Attempting save (try 1). Pages: 4
+
+--- SUBMISSION START 2026-03-09 20:47:17.661136 ---
+Flat Data Keys: ['input#txt_engine_no', 'input#txt_chassis_no', 'input#txt_color', 'input#txt_model', 'input#nic1', 'input#nic2', 'input#nic3', 'input#txt_address', 'input#txt_cell_no', 'span#select2-cmb_city-container', '_debug_all_inputs', 'input#search_by_engine']
+Flat Data Content: {'input#txt_engine_no': '', 'input#txt_chassis_no': '', 'input#txt_color': '', 'input#txt_model': '', 'input#nic1': '', 'input#nic2': '', 'input#nic3': '', 'input#txt_address': '', 'input#txt_cell_no': '', 'span#select2-cmb_city-container': 'Search or Select City', '_debug_all_inputs': {'_token': 'ZdOD5FzLd0QZElSLK2kLeM8bW1Po2WjFIKeJZSa9', 'user_name': '101296', 'password': '95858260', 'captcha_code': '44415'}, 'input#search_by_engine': ''}
+Mapped Data: {'engine_number': '', 'chassis_number': '', 'color': '', 'model_name': '', 'buyer_cnic_part1': '', 'buyer_cnic_part2': '', 'buyer_cnic_part3': '', 'buyer_address': '', 'buyer_phone': '', 'city': 'Search or Select City', 'buyer_cnic': ''}
+RAW DATA: {'selector': 'input#search_by_engine', 'value': '', 'type': 'text', 'timestamp': 1773071339.661}
+2026-03-09 20:48:59.671868: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#search_by_engine', 'value': '', 'type': 'text', 'timestamp': 1773071339.663}
+2026-03-09 20:48:59.700465: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_chassis_no', 'value': '', 'type': 'text', 'timestamp': 1773071593.456}
+2026-03-09 20:53:13.470700: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071593.458}
+2026-03-09 20:53:13.495210: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071593.459}
+2026-03-09 20:53:13.519938: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071593.46}
+2026-03-09 20:53:13.541707: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_color', 'value': '', 'type': 'text', 'timestamp': 1773071593.461}
+2026-03-09 20:53:13.564782: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_model', 'value': '', 'type': 'text', 'timestamp': 1773071593.461}
+2026-03-09 20:53:13.587639: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#nic1', 'value': '', 'type': 'text', 'timestamp': 1773071593.462}
+2026-03-09 20:53:13.609788: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#nic2', 'value': '', 'type': 'text', 'timestamp': 1773071593.466}
+2026-03-09 20:53:13.631509: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#nic3', 'value': '', 'type': 'text', 'timestamp': 1773071593.467}
+2026-03-09 20:53:13.653363: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_address', 'value': '', 'type': 'text', 'timestamp': 1773071593.468}
+2026-03-09 20:53:13.678008: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_cell_no', 'value': '', 'type': 'text', 'timestamp': 1773071593.468}
+2026-03-09 20:53:13.703076: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_chassis_no', 'value': '', 'type': 'text', 'timestamp': 1773071653.506}
+2026-03-09 20:54:13.521311: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071653.512}
+2026-03-09 20:54:13.558606: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071653.518}
+2026-03-09 20:54:13.590178: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071653.526}
+2026-03-09 20:54:13.622360: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_color', 'value': '', 'type': 'text', 'timestamp': 1773071653.526}
+2026-03-09 20:54:13.651872: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_model', 'value': '', 'type': 'text', 'timestamp': 1773071653.528}
+2026-03-09 20:54:13.694759: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#nic1', 'value': '', 'type': 'text', 'timestamp': 1773071653.529}
+2026-03-09 20:54:13.731953: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#nic2', 'value': '', 'type': 'text', 'timestamp': 1773071653.534}
+2026-03-09 20:54:13.765084: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#nic3', 'value': '', 'type': 'text', 'timestamp': 1773071653.535}
+2026-03-09 20:54:13.798823: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_address', 'value': '', 'type': 'text', 'timestamp': 1773071653.537}
+2026-03-09 20:54:13.831952: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_cell_no', 'value': '', 'type': 'text', 'timestamp': 1773071653.539}
+2026-03-09 20:54:13.865247: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'span#select2-cmb_city-container', 'value': 'Search or Select City', 'type': 'span', 'timestamp': 1773071653.542}
+2026-03-09 20:54:13.899114: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_chassis_no', 'value': '', 'type': 'text', 'timestamp': 1773071654.302}
+2026-03-09 20:54:14.308971: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_chassis_no', 'value': 'GH359836', 'type': 'text', 'timestamp': 1773071659.375}
+2026-03-09 20:54:19.381557: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_chassis_no', 'value': 'GH359836', 'type': 'text', 'timestamp': 1773071660.471}
+2026-03-09 20:54:20.482117: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_chassis_no', 'value': 'GH359836', 'type': 'text', 'timestamp': 1773071660.93}
+2026-03-09 20:54:20.939894: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_chassis_no', 'value': 'GH359836', 'type': 'text', 'timestamp': 1773071660.93}
+2026-03-09 20:54:20.968621: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_chassis_no', 'value': 'GH359836', 'type': 'text', 'timestamp': 1773071660.932}
+2026-03-09 20:54:20.995694: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071662.471}
+2026-03-09 20:54:22.484889: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071662.473}
+2026-03-09 20:54:22.510779: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#nic1', 'value': '', 'type': 'text', 'timestamp': 1773071663.445}
+2026-03-09 20:54:23.454991: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071664.478}
+2026-03-09 20:54:24.488843: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071664.48}
+2026-03-09 20:54:24.518500: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#nic1', 'value': '33', 'type': 'text', 'timestamp': 1773071665.561}
+2026-03-09 20:54:25.571723: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#nic1', 'value': '330', 'type': 'text', 'timestamp': 1773071665.884}
+2026-03-09 20:54:25.894489: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#nic1', 'value': '33025', 'type': 'text', 'timestamp': 1773071666.311}
+2026-03-09 20:54:26.324101: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#nic1', 'value': '33025', 'type': 'text', 'timestamp': 1773071666.312}
+2026-03-09 20:54:26.357958: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#nic1', 'value': '33025', 'type': 'text', 'timestamp': 1773071666.313}
+2026-03-09 20:54:26.383043: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071666.473}
+2026-03-09 20:54:26.489615: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071666.475}
+2026-03-09 20:54:26.514519: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#nic1', 'value': '33025', 'type': 'text', 'timestamp': 1773071666.476}
+2026-03-09 20:54:26.537832: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#nic2', 'value': '4', 'type': 'text', 'timestamp': 1773071666.478}
+2026-03-09 20:54:26.560723: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#nic1', 'value': '33025', 'type': 'text', 'timestamp': 1773071666.502}
+2026-03-09 20:54:26.581113: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#nic2', 'value': '4', 'type': 'text', 'timestamp': 1773071666.733}
+2026-03-09 20:54:26.741770: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#nic2', 'value': '4632521', 'type': 'text', 'timestamp': 1773071668.042}
+2026-03-09 20:54:28.052138: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#nic2', 'value': '4632521', 'type': 'text', 'timestamp': 1773071668.042}
+2026-03-09 20:54:28.078612: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#nic2', 'value': '4632521', 'type': 'text', 'timestamp': 1773071668.044}
+2026-03-09 20:54:28.100747: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#nic2', 'value': '4632521', 'type': 'text', 'timestamp': 1773071668.251}
+2026-03-09 20:54:28.257425: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#nic3', 'value': '1', 'type': 'text', 'timestamp': 1773071668.423}
+2026-03-09 20:54:28.429269: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071668.471}
+2026-03-09 20:54:28.484096: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071668.473}
+2026-03-09 20:54:28.506933: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#nic2', 'value': '4632521', 'type': 'text', 'timestamp': 1773071668.474}
+2026-03-09 20:54:28.531375: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#nic3', 'value': '1', 'type': 'text', 'timestamp': 1773071668.475}
+2026-03-09 20:54:28.554759: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#nic3', 'value': '1', 'type': 'text', 'timestamp': 1773071669.806}
+2026-03-09 20:54:29.820796: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#nic3', 'value': '1', 'type': 'text', 'timestamp': 1773071669.807}
+2026-03-09 20:54:29.846841: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#nic3', 'value': '1', 'type': 'text', 'timestamp': 1773071669.808}
+2026-03-09 20:54:29.871142: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071670.472}
+2026-03-09 20:54:30.493243: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071670.475}
+2026-03-09 20:54:30.519941: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071672.477}
+2026-03-09 20:54:32.496037: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071672.478}
+2026-03-09 20:54:32.529009: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071674.471}
+2026-03-09 20:54:34.481563: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071674.472}
+2026-03-09 20:54:34.504071: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_full_name', 'value': '', 'type': 'text', 'timestamp': 1773071674.69}
+2026-03-09 20:54:34.702267: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071676.483}
+2026-03-09 20:54:36.493534: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071676.484}
+2026-03-09 20:54:36.518550: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_full_name', 'value': 'a', 'type': 'text', 'timestamp': 1773071677.15}
+2026-03-09 20:54:37.160651: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_full_name', 'value': '', 'type': 'text', 'timestamp': 1773071677.907}
+2026-03-09 20:54:37.915766: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071678.48}
+2026-03-09 20:54:38.492400: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071678.482}
+2026-03-09 20:54:38.521481: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_full_name', 'value': 'ta', 'type': 'text', 'timestamp': 1773071678.484}
+2026-03-09 20:54:38.552198: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_full_name', 'value': 'tabish', 'type': 'text', 'timestamp': 1773071679.332}
+2026-03-09 20:54:39.338381: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_full_name', 'value': 'tabish khan', 'type': 'text', 'timestamp': 1773071680.341}
+2026-03-09 20:54:40.350702: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_full_name', 'value': 'tabish khan', 'type': 'text', 'timestamp': 1773071680.342}
+2026-03-09 20:54:40.379660: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_full_name', 'value': 'tabish khan', 'type': 'text', 'timestamp': 1773071680.343}
+2026-03-09 20:54:40.414071: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_full_name', 'value': 'tabish khan', 'type': 'text', 'timestamp': 1773071680.413}
+2026-03-09 20:54:40.454279: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071680.471}
+2026-03-09 20:54:40.496231: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071680.473}
+2026-03-09 20:54:40.530694: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_full_name', 'value': 'tabish khan', 'type': 'text', 'timestamp': 1773071680.473}
+2026-03-09 20:54:40.557720: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_father_name', 'value': 'a', 'type': 'text', 'timestamp': 1773071681.768}
+2026-03-09 20:54:41.775302: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071682.481}
+2026-03-09 20:54:42.497559: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071682.483}
+2026-03-09 20:54:42.523407: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_father_name', 'value': 'am', 'type': 'text', 'timestamp': 1773071682.483}
+2026-03-09 20:54:42.552043: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_father_name', 'value': 'aman', 'type': 'text', 'timestamp': 1773071683.133}
+2026-03-09 20:54:43.139700: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_father_name', 'value': 'amana', 'type': 'text', 'timestamp': 1773071684.143}
+2026-03-09 20:54:44.149821: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071684.472}
+2026-03-09 20:54:44.482865: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071684.473}
+2026-03-09 20:54:44.508529: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_father_name', 'value': 'amana', 'type': 'text', 'timestamp': 1773071684.475}
+2026-03-09 20:54:44.531340: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_father_name', 'value': 'amanat ali', 'type': 'text', 'timestamp': 1773071685.616}
+2026-03-09 20:54:45.623165: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_father_name', 'value': 'amanat ali', 'type': 'text', 'timestamp': 1773071686.083}
+2026-03-09 20:54:46.091602: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_father_name', 'value': 'amanat ali', 'type': 'text', 'timestamp': 1773071686.084}
+2026-03-09 20:54:46.119177: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_father_name', 'value': 'amanat ali', 'type': 'text', 'timestamp': 1773071686.086}
+2026-03-09 20:54:46.145395: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071686.472}
+2026-03-09 20:54:46.484738: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071686.474}
+2026-03-09 20:54:46.517579: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_father_name', 'value': 'amanat ali', 'type': 'text', 'timestamp': 1773071686.475}
+2026-03-09 20:54:46.546078: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071688.479}
+2026-03-09 20:54:48.491031: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071688.48}
+2026-03-09 20:54:48.521524: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071690.475}
+2026-03-09 20:54:50.486993: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071690.478}
+2026-03-09 20:54:50.517057: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071692.473}
+2026-03-09 20:54:52.486255: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071692.475}
+2026-03-09 20:54:52.514945: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_address', 'value': 'chak n', 'type': 'text', 'timestamp': 1773071692.477}
+2026-03-09 20:54:52.541660: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_address', 'value': 'chak no ', 'type': 'text', 'timestamp': 1773071693.06}
+2026-03-09 20:54:53.068711: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071694.474}
+2026-03-09 20:54:54.484475: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071694.476}
+2026-03-09 20:54:54.509524: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_address', 'value': 'chak no 714', 'type': 'text', 'timestamp': 1773071694.477}
+2026-03-09 20:54:54.532108: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_address', 'value': 'chak no 714', 'type': 'text', 'timestamp': 1773071694.519}
+2026-03-09 20:54:54.555186: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_address', 'value': 'chak no 714 gb', 'type': 'text', 'timestamp': 1773071695.495}
+2026-03-09 20:54:55.503544: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_address', 'value': 'chak no 714 gb', 'type': 'text', 'timestamp': 1773071695.495}
+2026-03-09 20:54:55.533934: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_address', 'value': 'chak no 714 gb', 'type': 'text', 'timestamp': 1773071695.497}
+2026-03-09 20:54:55.565313: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_address', 'value': 'chak no 714 gb', 'type': 'text', 'timestamp': 1773071695.512}
+2026-03-09 20:54:55.592703: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071696.488}
+2026-03-09 20:54:56.498962: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071696.49}
+2026-03-09 20:54:56.525953: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_address', 'value': 'chak no 714 gb', 'type': 'text', 'timestamp': 1773071696.491}
+2026-03-09 20:54:56.548483: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071698.473}
+2026-03-09 20:54:58.484100: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071698.475}
+2026-03-09 20:54:58.509652: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_cell_no', 'value': '302145896', 'type': 'text', 'timestamp': 1773071698.476}
+2026-03-09 20:54:58.530099: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_cell_no', 'value': '30214589632', 'type': 'text', 'timestamp': 1773071699.107}
+2026-03-09 20:54:59.119277: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_cell_no', 'value': '30214589632', 'type': 'text', 'timestamp': 1773071699.726}
+2026-03-09 20:54:59.734872: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_cell_no', 'value': '30214589632', 'type': 'text', 'timestamp': 1773071699.727}
+2026-03-09 20:54:59.762511: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_cell_no', 'value': '30214589632', 'type': 'text', 'timestamp': 1773071699.729}
+2026-03-09 20:54:59.788293: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071700.486}
+2026-03-09 20:55:00.500351: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071700.488}
+2026-03-09 20:55:00.526949: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_cell_no', 'value': '30214589632', 'type': 'text', 'timestamp': 1773071700.49}
+2026-03-09 20:55:00.557163: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071702.904}
+2026-03-09 20:55:02.915834: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071702.911}
+2026-03-09 20:55:02.975078: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071704.486}
+2026-03-09 20:55:04.495951: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071704.488}
+2026-03-09 20:55:04.529928: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071706.478}
+2026-03-09 20:55:06.493239: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071706.48}
+2026-03-09 20:55:06.530540: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071708.48}
+2026-03-09 20:55:08.491473: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071708.481}
+2026-03-09 20:55:08.523752: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'span#select2-cmb_city-container', 'value': 'Toba Tek Singh', 'type': 'span', 'timestamp': 1773071708.483}
+2026-03-09 20:55:08.560501: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071710.472}
+2026-03-09 20:55:10.482253: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071710.474}
+2026-03-09 20:55:10.509321: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071712.477}
+2026-03-09 20:55:12.488158: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071712.48}
+2026-03-09 20:55:12.511337: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071714.485}
+2026-03-09 20:55:14.498551: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071714.487}
+2026-03-09 20:55:14.536601: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071716.477}
+2026-03-09 20:55:16.488200: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071716.48}
+2026-03-09 20:55:16.516680: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071718.472}
+2026-03-09 20:55:18.483250: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071718.474}
+2026-03-09 20:55:18.521764: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071720.477}
+2026-03-09 20:55:20.490602: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071720.478}
+2026-03-09 20:55:20.525257: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071722.472}
+2026-03-09 20:55:22.483956: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071722.474}
+2026-03-09 20:55:22.513636: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071724.474}
+2026-03-09 20:55:24.485194: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071724.476}
+2026-03-09 20:55:24.507940: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071726.473}
+2026-03-09 20:55:26.485947: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071726.476}
+2026-03-09 20:55:26.514774: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071728.476}
+2026-03-09 20:55:28.491701: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071728.479}
+2026-03-09 20:55:28.514859: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071730.474}
+2026-03-09 20:55:30.484005: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071730.475}
+2026-03-09 20:55:30.508219: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071732.479}
+2026-03-09 20:55:32.489974: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071732.481}
+2026-03-09 20:55:32.644580: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071734.481}
+2026-03-09 20:55:34.490892: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071734.483}
+2026-03-09 20:55:34.515397: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071736.479}
+2026-03-09 20:55:36.489519: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071736.481}
+2026-03-09 20:55:36.515228: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071738.478}
+2026-03-09 20:55:38.489185: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071738.48}
+2026-03-09 20:55:38.515900: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071740.472}
+2026-03-09 20:55:40.483449: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071740.475}
+2026-03-09 20:55:40.509389: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071742.475}
+2026-03-09 20:55:42.486053: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071742.477}
+2026-03-09 20:55:42.512847: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071744.483}
+2026-03-09 20:55:44.493693: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071744.485}
+2026-03-09 20:55:44.521166: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071746.515}
+2026-03-09 20:55:46.524451: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071746.95}
+2026-03-09 20:55:46.990826: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071748.486}
+2026-03-09 20:55:48.497125: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071748.488}
+2026-03-09 20:55:48.528525: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071750.484}
+2026-03-09 20:55:50.511479: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071750.486}
+2026-03-09 20:55:50.556461: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071752.483}
+2026-03-09 20:55:52.496588: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071752.486}
+2026-03-09 20:55:52.525043: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071754.546}
+2026-03-09 20:55:54.556264: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071754.587}
+2026-03-09 20:55:54.597447: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071756.485}
+2026-03-09 20:55:56.506056: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071756.488}
+2026-03-09 20:55:56.542792: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071758.479}
+2026-03-09 20:55:58.489998: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071758.481}
+2026-03-09 20:55:58.518882: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071760.483}
+2026-03-09 20:56:00.498419: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071760.487}
+2026-03-09 20:56:00.527735: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071762.48}
+2026-03-09 20:56:02.496247: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071762.484}
+2026-03-09 20:56:02.528656: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071764.495}
+2026-03-09 20:56:04.503636: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071764.515}
+2026-03-09 20:56:04.536286: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071766.482}
+2026-03-09 20:56:06.492107: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071766.484}
+2026-03-09 20:56:06.519250: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071768.486}
+2026-03-09 20:56:08.499352: Attempting save (try 1). Pages: 4
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071768.492}
+2026-03-09 20:56:08.531438: Attempting save (try 1). Pages: 4
+RAW DATA: {'type': 'form_submission', 'source': 'form_submit_event', 'url': 'https://dealers.ahlportal.com/dealersv2/dealers/alloc_and_dispatches', 'timestamp': 1773071769.854, 'forced_capture': {'_debug_all_inputs': {'_token': 'ZdOD5FzLd0QZElSLK2kLeM8bW1Po2WjFIKeJZSa9'}, '#txt_model': 'Wise'}}
+2026-03-09 20:56:09.890377: Attempting save (try 1). Pages: 5
+
+--- SUBMISSION START 2026-03-09 20:56:09.924361 ---
+Flat Data Keys: ['input#txt_engine_no', 'input#txt_chassis_no', 'input#txt_color', 'input#txt_model', 'input#nic1', 'input#nic2', 'input#nic3', 'input#txt_address', 'input#txt_cell_no', 'span#select2-cmb_city-container', 'input#txt_full_name', 'input#txt_father_name', '_debug_all_inputs', 'input#search_by_engine', '#txt_model']
+Flat Data Content: {'input#txt_engine_no': '', 'input#txt_chassis_no': '', 'input#txt_color': '', 'input#txt_model': '', 'input#nic1': '', 'input#nic2': '', 'input#nic3': '', 'input#txt_address': '', 'input#txt_cell_no': '', 'span#select2-cmb_city-container': 'Search or Select City', 'input#txt_full_name': 'tabish khan', 'input#txt_father_name': 'amanat ali', '_debug_all_inputs': {'_token': 'ZdOD5FzLd0QZElSLK2kLeM8bW1Po2WjFIKeJZSa9'}, 'input#search_by_engine': '', '#txt_model': 'Wise'}
+Mapped Data: {'engine_number': '', 'chassis_number': '', 'color': '', 'model_name': 'Wise', 'buyer_cnic_part1': '', 'buyer_cnic_part2': '', 'buyer_cnic_part3': '', 'buyer_address': '', 'buyer_phone': '', 'city': 'Search or Select City', 'buyer_name': 'tabish khan', 'buyer_father_name': 'amanat ali', 'buyer_cnic': ''}
+RAW DATA: {'type': 'form_submission', 'source': 'button_click', 'url': 'https://dealers.ahlportal.com/dealersv2/dealers/alloc_and_dispatches', 'timestamp': 1773071770.479, 'forced_capture': {'_debug_all_inputs': {'_token': 'ZdOD5FzLd0QZElSLK2kLeM8bW1Po2WjFIKeJZSa9'}, '#txt_model': 'Wise'}}
+2026-03-09 20:56:10.508623: Attempting save (try 1). Pages: 5
+
+--- SUBMISSION START 2026-03-09 20:56:10.582773 ---
+Flat Data Keys: ['input#txt_engine_no', 'input#txt_chassis_no', 'input#txt_color', 'input#txt_model', 'input#nic1', 'input#nic2', 'input#nic3', 'input#txt_address', 'input#txt_cell_no', 'span#select2-cmb_city-container', 'input#txt_full_name', 'input#txt_father_name', '_debug_all_inputs', 'input#search_by_engine', '#txt_model']
+Flat Data Content: {'input#txt_engine_no': '', 'input#txt_chassis_no': '', 'input#txt_color': '', 'input#txt_model': '', 'input#nic1': '', 'input#nic2': '', 'input#nic3': '', 'input#txt_address': '', 'input#txt_cell_no': '', 'span#select2-cmb_city-container': 'Search or Select City', 'input#txt_full_name': 'tabish khan', 'input#txt_father_name': 'amanat ali', '_debug_all_inputs': {'_token': 'ZdOD5FzLd0QZElSLK2kLeM8bW1Po2WjFIKeJZSa9'}, 'input#search_by_engine': '', '#txt_model': 'Wise'}
+Mapped Data: {'engine_number': '', 'chassis_number': '', 'color': '', 'model_name': 'Wise', 'buyer_cnic_part1': '', 'buyer_cnic_part2': '', 'buyer_cnic_part3': '', 'buyer_address': '', 'buyer_phone': '', 'city': 'Search or Select City', 'buyer_name': 'tabish khan', 'buyer_father_name': 'amanat ali', 'buyer_cnic': ''}
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071770.644}
+2026-03-09 20:56:10.653691: Attempting save (try 1). Pages: 5
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071770.65}
+2026-03-09 20:56:10.687187: Attempting save (try 1). Pages: 5
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071772.476}
+2026-03-09 20:56:12.485817: Attempting save (try 1). Pages: 5
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071772.478}
+2026-03-09 20:56:12.510495: Attempting save (try 1). Pages: 5
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071774.519}
+2026-03-09 20:56:14.528776: Attempting save (try 1). Pages: 5
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071774.537}
+2026-03-09 20:56:14.568241: Attempting save (try 1). Pages: 5
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071776.513}
+2026-03-09 20:56:16.545816: Attempting save (try 1). Pages: 5
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071776.514}
+2026-03-09 20:56:16.585204: Attempting save (try 1). Pages: 5
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071778.499}
+2026-03-09 20:56:18.515161: Attempting save (try 1). Pages: 5
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071778.515}
+2026-03-09 20:56:18.546457: Attempting save (try 1). Pages: 5
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071780.488}
+2026-03-09 20:56:20.498345: Attempting save (try 1). Pages: 5
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071780.491}
+2026-03-09 20:56:20.531706: Attempting save (try 1). Pages: 5
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071782.484}
+2026-03-09 20:56:22.500895: Attempting save (try 1). Pages: 5
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071782.486}
+2026-03-09 20:56:22.535774: Attempting save (try 1). Pages: 5
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071784.484}
+2026-03-09 20:56:24.493678: Attempting save (try 1). Pages: 5
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071784.487}
+2026-03-09 20:56:24.543031: Attempting save (try 1). Pages: 5
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071786.486}
+2026-03-09 20:56:26.495576: Attempting save (try 1). Pages: 5
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071786.492}
+2026-03-09 20:56:26.529091: Attempting save (try 1). Pages: 5
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071788.501}
+2026-03-09 20:56:28.513923: Attempting save (try 1). Pages: 5
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071788.549}
+2026-03-09 20:56:28.563862: Attempting save (try 1). Pages: 5
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071790.484}
+2026-03-09 20:56:30.494072: Attempting save (try 1). Pages: 5
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071790.486}
+2026-03-09 20:56:30.521210: Attempting save (try 1). Pages: 5
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071792.472}
+2026-03-09 20:56:32.482280: Attempting save (try 1). Pages: 5
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071792.474}
+2026-03-09 20:56:32.507564: Attempting save (try 1). Pages: 5
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071794.478}
+2026-03-09 20:56:34.491328: Attempting save (try 1). Pages: 5
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071794.483}
+2026-03-09 20:56:34.521526: Attempting save (try 1). Pages: 5
+RAW DATA: {'type': 'form_submission', 'source': 'button_click', 'url': 'https://dealers.ahlportal.com/dealersv2/dealers/customer_profile', 'timestamp': 1773071795.201, 'forced_capture': {'#txt_chassis_no': 'GH359836', '#txt_engine_no': 'D627298', '#engine_no': 'D627298', '#txt_color': 'Purchase Date\n                                    \n                                        \n                                        \n                                    \n                                    Engine No', '#txt_model': 'Purchase Date\n                                    \n                                        \n                                        \n                                    \n                                    Engine No', '#nic1': '33025', '#nic2': '4632521', '#nic3': '1', '#txt_full_name': 'tabish khan', '#txt_father_name': 'amanat ali', '#txt_address': 'chak no 714 gb', '#txt_cell_no': '30214589632', '#select2-cmb_city-container': 'Toba Tek Singh', '_debug_all_inputs': {'_token': 'ZdOD5FzLd0QZElSLK2kLeM8bW1Po2WjFIKeJZSa9', 'chassis_no': 'GH359836', 'engine_no': 'D627298', 'product_id': '', 'model_id': '', 'sub_model_id': '', 'dealer_code': '', 'stock_type': 'stock', 'txt_chassis_no': 'GH359836', 'txt_sale_dealer': '101296', 'txt_model': '', 'txt_color': '', 'txt_purchase_date': '09-MAR-2026', 'txt_engine_no': '', 'txt_regd_name': '', 'txt_inv_number': '', 'nic1': '33025', 'nic2': '4632521', 'nic3': '1', 'customer_id': '7375117', 'profile_id': '', 'operation': '1', 'profile_source_id': '1', 'profile_made_by': '4942', 'cmb_agegroup': '13', 'txt_email_address': '', 'cmb_education': '', 'cmb_purch_reason': '0', 'cmb_family_others': '', 'cmb_colour_reason': '', 'cmb_prev_mc_brand': '', 'cmb_family_bike_id': '', 'family_bike_year': '', 'cmb_mc_id': '', 'prev_mc_year': '', 'prev_mc_colour': '', 'cmb_prev_mc_sold': '', 'cmb_selling_area': '', 'prev_mc_sold_amount': '', 'cnic': '3302546325211', 'txt_full_name': 'tabish khan', 'txt_father_name': 'amanat ali', 'cmbGender': 'M', 'txt_date_of_birth': '1966-10-29', 'txt_address': 'chak no 714 gb', 'txt_cell_no': '30214589632', 'cmb_city': '522', 'cmb_profession': '184', 'cmb_personal_income': '141', 'cmb_purch_mode': '123', 'cmb_info_source': '3', 'cmb_purchase_type': '1', 'cmb_mc_usage': '4', 'cmb_pdsa': '1'}}}
+2026-03-09 20:56:35.339965: Attempting save (try 1). Pages: 5
+
+--- SUBMISSION START 2026-03-09 20:56:35.409376 ---
+Flat Data Keys: ['input#txt_engine_no', 'input#txt_chassis_no', 'input#txt_color', 'input#txt_model', 'input#nic1', 'input#nic2', 'input#nic3', 'input#txt_address', 'input#txt_cell_no', 'span#select2-cmb_city-container', 'input#txt_full_name', 'input#txt_father_name', '#txt_chassis_no', '#txt_engine_no', '#engine_no', '#txt_color', '#txt_model', '#nic1', '#nic2', '#nic3', '#txt_full_name', '#txt_father_name', '#txt_address', '#txt_cell_no', '#select2-cmb_city-container', '_debug_all_inputs', 'input#search_by_engine']
+Flat Data Content: {'input#txt_engine_no': '', 'input#txt_chassis_no': '', 'input#txt_color': '', 'input#txt_model': '', 'input#nic1': '', 'input#nic2': '', 'input#nic3': '', 'input#txt_address': '', 'input#txt_cell_no': '', 'span#select2-cmb_city-container': 'Search or Select City', 'input#txt_full_name': 'tabish khan', 'input#txt_father_name': 'amanat ali', '#txt_chassis_no': 'GH359836', '#txt_engine_no': 'D627298', '#engine_no': 'D627298', '#txt_color': 'Purchase Date\n                                    \n                                        \n                                        \n                                    \n                                    Engine No', '#txt_model': 'Wise', '#nic1': '33025', '#nic2': '4632521', '#nic3': '1', '#txt_full_name': 'tabish khan', '#txt_father_name': 'amanat ali', '#txt_address': 'chak no 714 gb', '#txt_cell_no': '30214589632', '#select2-cmb_city-container': 'Toba Tek Singh', '_debug_all_inputs': {'_token': 'ZdOD5FzLd0QZElSLK2kLeM8bW1Po2WjFIKeJZSa9'}, 'input#search_by_engine': ''}
+Mapped Data: {'engine_number': 'D627298', 'chassis_number': 'GH359836', 'color': 'Purchase Date\n                                    \n                                        \n                                        \n                                    \n                                    Engine No', 'model_name': 'Wise', 'buyer_cnic_part1': '33025', 'buyer_cnic_part2': '4632521', 'buyer_cnic_part3': '1', 'buyer_address': 'chak no 714 gb, Toba Tek Singh', 'buyer_phone': '30214589632', 'city': 'Toba Tek Singh', 'buyer_name': 'tabish khan', 'buyer_father_name': 'amanat ali', 'buyer_cnic': '33025-4632521-1'}
+2026-03-09 20:56:35.524279: Attempting save (try 1). Pages: 0
+RAW DATA: {'selector': 'input#txt_cell_no', 'value': '30214589632', 'type': 'text', 'timestamp': 1773071796.334}
+2026-03-09 20:56:36.343256: Attempting save (try 1). Pages: 1
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071796.472}
+2026-03-09 20:56:36.492231: Attempting save (try 1). Pages: 1
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071796.484}
+2026-03-09 20:56:36.552368: Attempting save (try 1). Pages: 1
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071798.541}
+2026-03-09 20:56:38.564339: Attempting save (try 1). Pages: 1
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071798.543}
+2026-03-09 20:56:38.599039: Attempting save (try 1). Pages: 1
+RAW DATA: {'selector': 'input#txt_cell_no', 'value': '03', 'type': 'text', 'timestamp': 1773071798.544}
+2026-03-09 20:56:38.625869: Attempting save (try 1). Pages: 1
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071800.484}
+2026-03-09 20:56:40.495296: Attempting save (try 1). Pages: 1
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071800.485}
+2026-03-09 20:56:40.517505: Attempting save (try 1). Pages: 1
+RAW DATA: {'selector': 'input#txt_cell_no', 'value': '03025478522', 'type': 'text', 'timestamp': 1773071800.486}
+2026-03-09 20:56:40.539963: Attempting save (try 1). Pages: 1
+RAW DATA: {'selector': 'input#txt_cell_no', 'value': '03025478522', 'type': 'text', 'timestamp': 1773071800.537}
+2026-03-09 20:56:40.563020: Attempting save (try 1). Pages: 1
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071802.477}
+2026-03-09 20:56:42.492379: Attempting save (try 1). Pages: 1
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071802.479}
+2026-03-09 20:56:42.521155: Attempting save (try 1). Pages: 1
+RAW DATA: {'selector': 'input#txt_cell_no', 'value': '03025478522', 'type': 'text', 'timestamp': 1773071802.844}
+2026-03-09 20:56:42.852324: Attempting save (try 1). Pages: 1
+RAW DATA: {'selector': 'input#txt_cell_no', 'value': '03025478522', 'type': 'text', 'timestamp': 1773071802.845}
+2026-03-09 20:56:42.879963: Attempting save (try 1). Pages: 1
+RAW DATA: {'selector': 'input#txt_cell_no', 'value': '03025478522', 'type': 'text', 'timestamp': 1773071802.846}
+2026-03-09 20:56:42.902191: Attempting save (try 1). Pages: 1
+RAW DATA: {'type': 'form_submission', 'source': 'form_submit_event', 'url': 'https://dealers.ahlportal.com/dealersv2/dealers/customer_profile', 'timestamp': 1773071804.019, 'forced_capture': {'#txt_chassis_no': 'GH359836', '#txt_engine_no': 'D627298', '#engine_no': 'D627298', '#txt_color': 'Purchase Date\n                                    \n                                        \n                                        \n                                    \n                                    Engine No', '#txt_model': 'Purchase Date\n                                    \n                                        \n                                        \n                                    \n                                    Engine No', '#nic1': '33025', '#nic2': '4632521', '#nic3': '1', '#txt_full_name': 'tabish khan', '#txt_father_name': 'amanat ali', '#txt_address': 'chak no 714 gb', '#txt_cell_no': '03025478522', '#select2-cmb_city-container': 'Toba Tek Singh', '_debug_all_inputs': {'_token': 'ZdOD5FzLd0QZElSLK2kLeM8bW1Po2WjFIKeJZSa9', 'chassis_no': 'GH359836', 'engine_no': 'D627298', 'product_id': '', 'model_id': '', 'sub_model_id': '', 'dealer_code': '', 'stock_type': 'stock', 'txt_chassis_no': 'GH359836', 'txt_sale_dealer': '101296', 'txt_model': '', 'txt_color': '', 'txt_purchase_date': '09-MAR-2026', 'txt_engine_no': '', 'txt_regd_name': '', 'txt_inv_number': '', 'nic1': '33025', 'nic2': '4632521', 'nic3': '1', 'customer_id': '7375117', 'profile_id': '', 'operation': '1', 'profile_source_id': '1', 'profile_made_by': '4942', 'cmb_agegroup': '13', 'txt_email_address': '', 'cmb_education': '', 'cmb_purch_reason': '0', 'cmb_family_others': '', 'cmb_colour_reason': '', 'cmb_prev_mc_brand': '', 'cmb_family_bike_id': '', 'family_bike_year': '', 'cmb_mc_id': '', 'prev_mc_year': '', 'prev_mc_colour': '', 'cmb_prev_mc_sold': '', 'cmb_selling_area': '', 'prev_mc_sold_amount': '', 'cnic': '3302546325211', 'txt_full_name': 'tabish khan', 'txt_father_name': 'amanat ali', 'cmbGender': 'M', 'txt_date_of_birth': '1966-10-29', 'txt_address': 'chak no 714 gb', 'txt_cell_no': '03025478522', 'cmb_city': '522', 'cmb_profession': '184', 'cmb_personal_income': '141', 'cmb_purch_mode': '123', 'cmb_info_source': '3', 'cmb_purchase_type': '1', 'cmb_mc_usage': '4', 'cmb_pdsa': '1'}}}
+2026-03-09 20:56:44.094985: Attempting save (try 1). Pages: 1
+
+--- SUBMISSION START 2026-03-09 20:56:44.114261 ---
+Flat Data Keys: ['input#txt_cell_no', 'input#txt_engine_no', '#txt_chassis_no', '#txt_engine_no', '#engine_no', '#txt_color', '#txt_model', '#nic1', '#nic2', '#nic3', '#txt_full_name', '#txt_father_name', '#txt_address', '#txt_cell_no', '#select2-cmb_city-container', '_debug_all_inputs']
+Flat Data Content: {'input#txt_cell_no': '03025478522', 'input#txt_engine_no': '', '#txt_chassis_no': 'GH359836', '#txt_engine_no': 'D627298', '#engine_no': 'D627298', '#txt_color': 'Purchase Date\n                                    \n                                        \n                                        \n                                    \n                                    Engine No', '#txt_model': 'Purchase Date\n                                    \n                                        \n                                        \n                                    \n                                    Engine No', '#nic1': '33025', '#nic2': '4632521', '#nic3': '1', '#txt_full_name': 'tabish khan', '#txt_father_name': 'amanat ali', '#txt_address': 'chak no 714 gb', '#txt_cell_no': '03025478522', '#select2-cmb_city-container': 'Toba Tek Singh', '_debug_all_inputs': {'_token': 'ZdOD5FzLd0QZElSLK2kLeM8bW1Po2WjFIKeJZSa9', 'chassis_no': 'GH359836', 'engine_no': 'D627298', 'product_id': '', 'model_id': '', 'sub_model_id': '', 'dealer_code': '', 'stock_type': 'stock', 'txt_chassis_no': 'GH359836', 'txt_sale_dealer': '101296', 'txt_model': '', 'txt_color': '', 'txt_purchase_date': '09-MAR-2026', 'txt_engine_no': '', 'txt_regd_name': '', 'txt_inv_number': '', 'nic1': '33025', 'nic2': '4632521', 'nic3': '1', 'customer_id': '7375117', 'profile_id': '', 'operation': '1', 'profile_source_id': '1', 'profile_made_by': '4942', 'cmb_agegroup': '13', 'txt_email_address': '', 'cmb_education': '', 'cmb_purch_reason': '0', 'cmb_family_others': '', 'cmb_colour_reason': '', 'cmb_prev_mc_brand': '', 'cmb_family_bike_id': '', 'family_bike_year': '', 'cmb_mc_id': '', 'prev_mc_year': '', 'prev_mc_colour': '', 'cmb_prev_mc_sold': '', 'cmb_selling_area': '', 'prev_mc_sold_amount': '', 'cnic': '3302546325211', 'txt_full_name': 'tabish khan', 'txt_father_name': 'amanat ali', 'cmbGender': 'M', 'txt_date_of_birth': '1966-10-29', 'txt_address': 'chak no 714 gb', 'txt_cell_no': '03025478522', 'cmb_city': '522', 'cmb_profession': '184', 'cmb_personal_income': '141', 'cmb_purch_mode': '123', 'cmb_info_source': '3', 'cmb_purchase_type': '1', 'cmb_mc_usage': '4', 'cmb_pdsa': '1'}}
+Mapped Data: {'buyer_phone': '03025478522', 'engine_number': 'D627298', 'chassis_number': 'GH359836', 'color': 'Purchase Date\n                                    \n                                        \n                                        \n                                    \n                                    Engine No', 'model_name': 'Purchase Date\n                                    \n                                        \n                                        \n                                    \n                                    Engine No', 'buyer_cnic_part1': '33025', 'buyer_cnic_part2': '4632521', 'buyer_cnic_part3': '1', 'buyer_name': 'tabish khan', 'buyer_father_name': 'amanat ali', 'buyer_address': 'chak no 714 gb, Toba Tek Singh', 'city': 'Toba Tek Singh', 'buyer_cnic': '33025-4632521-1'}
+2026-03-09 20:56:44.163168: Attempting save (try 1). Pages: 0
+RAW DATA: {'type': 'form_submission', 'source': 'button_click', 'url': 'https://dealers.ahlportal.com/dealersv2/dealers/customer_profile', 'timestamp': 1773071804.1, 'forced_capture': {'#txt_chassis_no': 'GH359836', '#txt_engine_no': 'D627298', '#engine_no': 'D627298', '#txt_color': 'Purchase Date\n                                    \n                                        \n                                        \n                                    \n                                    Engine No', '#txt_model': 'Purchase Date\n                                    \n                                        \n                                        \n                                    \n                                    Engine No', '#nic1': '33025', '#nic2': '4632521', '#nic3': '1', '#txt_full_name': 'tabish khan', '#txt_father_name': 'amanat ali', '#txt_address': 'chak no 714 gb', '#txt_cell_no': '03025478522', '#select2-cmb_city-container': 'Toba Tek Singh', '_debug_all_inputs': {'_token': 'ZdOD5FzLd0QZElSLK2kLeM8bW1Po2WjFIKeJZSa9', 'chassis_no': 'GH359836', 'engine_no': 'D627298', 'product_id': '', 'model_id': '', 'sub_model_id': '', 'dealer_code': '', 'stock_type': 'stock', 'txt_chassis_no': 'GH359836', 'txt_sale_dealer': '101296', 'txt_model': '', 'txt_color': '', 'txt_purchase_date': '09-MAR-2026', 'txt_engine_no': '', 'txt_regd_name': '', 'txt_inv_number': '', 'nic1': '33025', 'nic2': '4632521', 'nic3': '1', 'customer_id': '7375117', 'profile_id': '', 'operation': '1', 'profile_source_id': '1', 'profile_made_by': '4942', 'cmb_agegroup': '13', 'txt_email_address': '', 'cmb_education': '', 'cmb_purch_reason': '0', 'cmb_family_others': '', 'cmb_colour_reason': '', 'cmb_prev_mc_brand': '', 'cmb_family_bike_id': '', 'family_bike_year': '', 'cmb_mc_id': '', 'prev_mc_year': '', 'prev_mc_colour': '', 'cmb_prev_mc_sold': '', 'cmb_selling_area': '', 'prev_mc_sold_amount': '', 'cnic': '3302546325211', 'txt_full_name': 'tabish khan', 'txt_father_name': 'amanat ali', 'cmbGender': 'M', 'txt_date_of_birth': '1966-10-29', 'txt_address': 'chak no 714 gb', 'txt_cell_no': '03025478522', 'cmb_city': '522', 'cmb_profession': '184', 'cmb_personal_income': '141', 'cmb_purch_mode': '123', 'cmb_info_source': '3', 'cmb_purchase_type': '1', 'cmb_mc_usage': '4', 'cmb_pdsa': '1'}}}
+2026-03-09 20:56:44.287559: Attempting save (try 1). Pages: 1
+
+--- SUBMISSION START 2026-03-09 20:56:44.304926 ---
+Flat Data Keys: ['#txt_chassis_no', '#txt_engine_no', '#engine_no', '#txt_color', '#txt_model', '#nic1', '#nic2', '#nic3', '#txt_full_name', '#txt_father_name', '#txt_address', '#txt_cell_no', '#select2-cmb_city-container', '_debug_all_inputs']
+Flat Data Content: {'#txt_chassis_no': 'GH359836', '#txt_engine_no': 'D627298', '#engine_no': 'D627298', '#txt_color': 'Purchase Date\n                                    \n                                        \n                                        \n                                    \n                                    Engine No', '#txt_model': 'Purchase Date\n                                    \n                                        \n                                        \n                                    \n                                    Engine No', '#nic1': '33025', '#nic2': '4632521', '#nic3': '1', '#txt_full_name': 'tabish khan', '#txt_father_name': 'amanat ali', '#txt_address': 'chak no 714 gb', '#txt_cell_no': '03025478522', '#select2-cmb_city-container': 'Toba Tek Singh', '_debug_all_inputs': {'_token': 'ZdOD5FzLd0QZElSLK2kLeM8bW1Po2WjFIKeJZSa9', 'chassis_no': 'GH359836', 'engine_no': 'D627298', 'product_id': '', 'model_id': '', 'sub_model_id': '', 'dealer_code': '', 'stock_type': 'stock', 'txt_chassis_no': 'GH359836', 'txt_sale_dealer': '101296', 'txt_model': '', 'txt_color': '', 'txt_purchase_date': '09-MAR-2026', 'txt_engine_no': '', 'txt_regd_name': '', 'txt_inv_number': '', 'nic1': '33025', 'nic2': '4632521', 'nic3': '1', 'customer_id': '7375117', 'profile_id': '', 'operation': '1', 'profile_source_id': '1', 'profile_made_by': '4942', 'cmb_agegroup': '13', 'txt_email_address': '', 'cmb_education': '', 'cmb_purch_reason': '0', 'cmb_family_others': '', 'cmb_colour_reason': '', 'cmb_prev_mc_brand': '', 'cmb_family_bike_id': '', 'family_bike_year': '', 'cmb_mc_id': '', 'prev_mc_year': '', 'prev_mc_colour': '', 'cmb_prev_mc_sold': '', 'cmb_selling_area': '', 'prev_mc_sold_amount': '', 'cnic': '3302546325211', 'txt_full_name': 'tabish khan', 'txt_father_name': 'amanat ali', 'cmbGender': 'M', 'txt_date_of_birth': '1966-10-29', 'txt_address': 'chak no 714 gb', 'txt_cell_no': '03025478522', 'cmb_city': '522', 'cmb_profession': '184', 'cmb_personal_income': '141', 'cmb_purch_mode': '123', 'cmb_info_source': '3', 'cmb_purchase_type': '1', 'cmb_mc_usage': '4', 'cmb_pdsa': '1'}}
+Mapped Data: {'chassis_number': 'GH359836', 'engine_number': 'D627298', 'color': 'Purchase Date\n                                    \n                                        \n                                        \n                                    \n                                    Engine No', 'model_name': 'Purchase Date\n                                    \n                                        \n                                        \n                                    \n                                    Engine No', 'buyer_cnic_part1': '33025', 'buyer_cnic_part2': '4632521', 'buyer_cnic_part3': '1', 'buyer_name': 'tabish khan', 'buyer_father_name': 'amanat ali', 'buyer_address': 'chak no 714 gb, Toba Tek Singh', 'buyer_phone': '03025478522', 'city': 'Toba Tek Singh', 'buyer_cnic': '33025-4632521-1'}
+2026-03-09 20:56:44.333233: Attempting save (try 1). Pages: 0
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071804.476}
+2026-03-09 20:56:44.488781: Attempting save (try 1). Pages: 1
+RAW DATA: {'selector': 'input#txt_engine_no', 'value': '', 'type': 'text', 'timestamp': 1773071804.479}
+2026-03-09 20:56:44.511493: Attempting save (try 1). Pages: 1
