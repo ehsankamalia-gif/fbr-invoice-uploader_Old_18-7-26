@@ -1719,13 +1719,37 @@ class MainWindow(QMainWindow):
         inv_num_layout.addWidget(generate_btn)
         group1_layout.addLayout(inv_num_layout, 1, 1)
 
-        # QR Code Placeholder (Now properly placed without overlap)
+        # QR Code & FBR Invoice Number Layout
+        qr_fbr_layout = QHBoxLayout()
+        qr_fbr_layout.setSpacing(15)
+        qr_fbr_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        # QR Code Placeholder
         self.invoice_qr_label = QLabel()
         self.invoice_qr_label.setFixedSize(100, 100)
         self.invoice_qr_label.setStyleSheet("border: 1px dashed #ced4da; border-radius: 4px; background: #fdfdfd;")
         self.invoice_qr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.invoice_qr_label.setText("QR CODE")
-        group1_layout.addWidget(self.invoice_qr_label, 1, 3)
+        qr_fbr_layout.addWidget(self.invoice_qr_label)
+
+        # FBR Invoice Number Display (Red Rectangle Area)
+        self.invoice_fbr_number_display = QLabel("")
+        self.invoice_fbr_number_display.setStyleSheet("""
+            QLabel {
+                font-weight: bold;
+                font-size: 14px;
+                color: #c0392b;
+                border: 1px solid #e0e0e0;
+                border-radius: 4px;
+                padding: 10px;
+                background-color: #fcfcfc;
+            }
+        """)
+        self.invoice_fbr_number_display.setMinimumWidth(250)
+        self.invoice_fbr_number_display.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        qr_fbr_layout.addWidget(self.invoice_fbr_number_display)
+        
+        group1_layout.addLayout(qr_fbr_layout, 1, 3)
 
         # CNIC
         group1_layout.addWidget(QLabel("ID Card (CNIC)"), 2, 0)
@@ -5302,7 +5326,10 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(1000, sms_service.process_queue)
 
             if created.fbr_invoice_number:
+                self.invoice_fbr_number_display.setText(f"FBR INV: {created.fbr_invoice_number}")
                 self._display_invoice_qr(created.fbr_invoice_number)
+            else:
+                self.invoice_fbr_number_display.setText("FBR SYNC PENDING")
         except RetryError as exc:
             try:
                 last_exc = exc.last_attempt.exception()
@@ -5342,6 +5369,7 @@ class MainWindow(QMainWindow):
         self.invoice_tax_spin.setValue(0.0)
         self.invoice_further_tax_spin.setValue(0.0)
         self.invoice_total_spin.setValue(0.0)
+        self.invoice_fbr_number_display.setText("")
         self._display_invoice_qr(None)
 
     def _create_customers_page(self) -> QWidget:
