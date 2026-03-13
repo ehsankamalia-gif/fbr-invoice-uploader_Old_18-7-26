@@ -320,9 +320,12 @@ class AutocompleteLineEdit(QLineEdit):
                         if isinstance(value, str) and self.on_completion_accept is not None:
                             self.on_completion_accept(value)
                     popup.hide()
+                    # Explicitly emit returnPressed after completion
+                    self.returnPressed.emit()
                     event.accept()
                     return
-            # If no popup is visible, allow the Enter key to trigger returnPressed for navigation
+            
+            # Allow the Enter key to trigger returnPressed for navigation
             super().keyPressEvent(event)
             return
 
@@ -2012,14 +2015,36 @@ class MainWindow(QMainWindow):
             self.invoice_color_combo,
             self.invoice_payment_mode_combo,
             self.invoice_chassis_input,
+            self.invoice_engine_input,
         ]:
             setup_enter_nav(widget)
 
         # Trigger data lookup when Enter is pressed on Chassis input
         self.invoice_chassis_input.returnPressed.connect(lambda: self._on_chassis_selected(self.invoice_chassis_input.text()))
 
-        # Engine Number triggers submission when Enter is pressed
-        self.invoice_engine_input.returnPressed.connect(self._submit_invoice)  # type: ignore[arg-type]
+        # Reset Engine Number's Enter key behavior to not submit automatically
+        # Instead, it will move focus to the next logical widget (e.g. Quantity or Submit button)
+        try:
+            self.invoice_engine_input.returnPressed.disconnect(self._submit_invoice)
+        except:
+            pass
+        self.invoice_engine_input.returnPressed.connect(self.focusNextChild)
+
+        # Set explicit Tab Order for the entire invoice form (Visual top-to-bottom, left-to-right)
+        self.setTabOrder(self.invoice_buyer_cnic_input, self.invoice_buyer_ntn_input)
+        self.setTabOrder(self.invoice_buyer_ntn_input, self.invoice_buyer_name_input)
+        self.setTabOrder(self.invoice_buyer_name_input, self.invoice_buyer_father_input)
+        self.setTabOrder(self.invoice_buyer_father_input, self.invoice_buyer_phone_input)
+        self.setTabOrder(self.invoice_buyer_phone_input, self.invoice_buyer_address_input)
+        self.setTabOrder(self.invoice_buyer_address_input, self.invoice_model_combo)
+        self.setTabOrder(self.invoice_model_combo, self.invoice_color_combo)
+        # Move from Color (Row 1 Right) to Chassis (Row 2 Left)
+        self.setTabOrder(self.invoice_color_combo, self.invoice_chassis_input)
+        self.setTabOrder(self.invoice_chassis_input, self.invoice_engine_input)
+        # Move from Engine (Row 2 Right) to Payment Mode (Row 3 Left)
+        self.setTabOrder(self.invoice_engine_input, self.invoice_payment_mode_combo)
+        self.setTabOrder(self.invoice_payment_mode_combo, self.invoice_quantity_spin)
+        self.setTabOrder(self.invoice_quantity_spin, self.invoice_submit_btn)
 
         self._invoice_current_price = None
         self._load_invoice_models()
