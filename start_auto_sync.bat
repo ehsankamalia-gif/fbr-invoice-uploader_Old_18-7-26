@@ -26,7 +26,7 @@ echo Attempting to run with system Python...
 :START_SERVICE
 echo.
 echo [INFO] Installing/Verifying watchdog dependency...
-pip install watchdog >nul 2>&1
+python -m pip install watchdog >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
     echo [WARNING] Could not install watchdog. Python might not be in PATH.
 )

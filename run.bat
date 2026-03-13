@@ -21,9 +21,12 @@ call venv\Scripts\activate
 
 :: Check for dependency updates
 echo Checking for dependency updates...
-pip install -r requirements.txt --quiet
+echo This may take a moment if packages are being updated.
+venv\Scripts\python -m pip install -r requirements.txt
 
 :: Run Application
+echo.
+echo Launching application...
 venv\Scripts\python -m app.main
 
 if %errorlevel% neq 0 (
