@@ -1026,6 +1026,7 @@ class MainWindow(QMainWindow):
         self.dash_table_view.setAlternatingRowColors(True)
         self.dash_table_view.verticalHeader().setVisible(False)
         self.dash_table_view.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
+        self.dash_table_view.doubleClicked.connect(self._on_dash_row_double_clicked)
         
         layout.addWidget(self.dash_table_view, 1)
 
@@ -1128,6 +1129,12 @@ class MainWindow(QMainWindow):
             logger.error(f"Dashboard refresh error: {e}", exc_info=True)
         finally:
             db.close()
+
+    def _on_dash_row_double_clicked(self, index: QModelIndex) -> None:
+        if not index.isValid():
+            return
+        row_data = self.dash_table_model._rows[index.row()]
+        self._open_invoice_detail_dialog(row_data)
 
     def _create_reports_page(self) -> QWidget:
         page = QWidget(self)
@@ -1491,6 +1498,31 @@ class MainWindow(QMainWindow):
             
             info_layout.addLayout(info_grid)
             content_layout.addWidget(info_card)
+
+            # --- Action Buttons Card ---
+            action_card = QFrame()
+            action_card.setProperty("class", "detailCard")
+            action_card.setObjectName("actionCard")
+            action_card.setStyleSheet("QFrame#actionCard { background-color: white; border: 1px solid #e0e0e0; border-radius: 12px; }")
+            action_layout = QHBoxLayout(action_card)
+            action_layout.setContentsMargins(20, 15, 20, 15)
+            action_layout.setSpacing(15)
+            
+            print_inv_btn = QPushButton("🖨️ Print Invoice")
+            print_inv_btn.setObjectName("primaryButton")
+            print_inv_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            print_inv_btn.clicked.connect(lambda: self._print_invoice_standalone(invoice))
+            
+            print_al_btn = QPushButton("📄 Authority Letter")
+            print_al_btn.setObjectName("primaryButton")
+            print_al_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            print_al_btn.clicked.connect(lambda: self._print_authority_letter_standalone(invoice))
+            
+            action_layout.addWidget(print_inv_btn)
+            action_layout.addWidget(print_al_btn)
+            action_layout.addStretch(1)
+            
+            content_layout.addWidget(action_card)
 
             # --- Product Details Card ---
             items_card = QFrame()
