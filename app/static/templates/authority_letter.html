@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Authority Letter - {{ customer_name }}</title>
+    <style>
+        body { font-family: 'Times New Roman', serif; margin: 0; padding: 40px; color: #000; line-height: 1.6; }
+        .letter-container { max-width: 800px; margin: auto; padding: 40px; border: 1px solid #ddd; }
+        .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 20px; margin-bottom: 30px; }
+        .business-info h1 { margin: 0; font-size: 28px; text-transform: uppercase; }
+        .business-info p { margin: 5px 0; font-size: 14px; }
+        .letter-meta { display: flex; justify-content: space-between; margin-bottom: 40px; font-weight: bold; }
+        .letter-title { text-align: center; text-decoration: underline; font-size: 20px; font-weight: bold; margin-bottom: 40px; text-transform: uppercase; }
+        .content { margin-bottom: 50px; text-align: justify; }
+        .content p { margin-bottom: 20px; }
+        .details-table { width: 100%; border-collapse: collapse; margin: 30px 0; }
+        .details-table th, .details-table td { border: 1px solid #000; padding: 10px; text-align: left; }
+        .details-table th { background: #f2f2f2; }
+        .signatures { display: flex; justify-content: space-between; margin-top: 100px; }
+        .signature-block { width: 200px; border-top: 1px solid #000; text-align: center; padding-top: 10px; font-weight: bold; }
+        .footer { margin-top: 100px; text-align: center; font-size: 10px; color: #777; border-top: 1px solid #ddd; padding-top: 10px; }
+        @media print {
+            body { padding: 0; }
+            .letter-container { border: none; width: 100%; max-width: none; }
+            .no-print { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <div class="letter-container">
+        <div class="header">
+            <div class="business-info">
+                <h1>{{ business_name }}</h1>
+                <p>{{ business_address }}</p>
+                <p>Phone: {{ business_phone }} | NTN: {{ business_ntn }}</p>
+            </div>
+        </div>
+
+        <div class="letter-meta">
+            <span>Ref: AL/{{ year }}/{{ serial_number }}</span>
+            <span>Date: {{ date }}</span>
+        </div>
+
+        <div class="letter-title">TO WHOM IT MAY CONCERN</div>
+
+        <div class="content">
+            <p>This is to certify that we have sold the following vehicle to <strong>Mr./Ms. {{ customer_name }}</strong>, 
+               S/O D/O W/O <strong>{{ father_name }}</strong>, resident of <strong>{{ customer_address }}</strong>, 
+               holding CNIC # <strong>{{ customer_cnic }}</strong>.</p>
+            
+            <p>The details of the vehicle are as follows:</p>
+
+            <table class="details-table">
+                <tr>
+                    <th>Model / Type</th>
+                    <td>{{ product_model }}</td>
+                </tr>
+                <tr>
+                    <th>Color</th>
+                    <td>{{ product_color }}</td>
+                </tr>
+                <tr>
+                    <th>Chassis Number</th>
+                    <td><strong>{{ chassis_number }}</strong></td>
+                </tr>
+                <tr>
+                    <th>Engine Number</th>
+                    <td><strong>{{ engine_number }}</strong></td>
+                </tr>
+                <tr>
+                    <th>Invoice Number</th>
+                    <td>{{ invoice_number }}</td>
+                </tr>
+            </table>
+
+            <p>We have no objection if the above-mentioned vehicle is registered in the name of the purchaser 
+               with the Excise & Taxation Department.</p>
+            
+            <p>This authority letter is valid for registration purposes only.</p>
+        </div>
+
+        <div class="signatures">
+            <div class="signature-block">For {{ business_name }}<br>(Proprietor/Manager)</div>
+            <div class="signature-block">Purchaser Signature<br>({{ customer_name }})</div>
+        </div>
+
+        <div class="footer">
+            <p>This document is issued based on our sales records and remains subject to full payment realization.</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -81,6 +81,7 @@ from app.services.settings_service import settings_service
 from app.services.dealer_service import dealer_service
 from app.services.form_capture_service import form_capture_service
 from app.services.backup_service import backup_service
+from app.services.print_service_v2 import print_service_v2
 from app.qt_ui.dealer_search_dialog import DealerSearchDialog
 from app.qt_ui.web_import_dialog import WebImportDialog
 from app.core.logger import logger
@@ -5319,6 +5320,9 @@ class MainWindow(QMainWindow):
             self._generate_invoice_number()
             self._update_fbr_submitted_counter() # Update counter after submission
             
+            # Independent Printing logic
+            self._handle_post_submission_print(created)
+            
             # Queue SMS if enabled
             from app.services.sms_service import sms_service
             sms_service.queue_invoice_sms(db, created)
@@ -5371,6 +5375,101 @@ class MainWindow(QMainWindow):
         self.invoice_total_spin.setValue(0.0)
         self.invoice_fbr_number_display.setText("")
         self._display_invoice_qr(None)
+
+    def _handle_post_submission_print(self, invoice: Invoice) -> None:
+        """Independent print handler that offers printing options without blocking UI."""
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Print Options")
+        msg.setText("Invoice created successfully! Would you like to print now?")
+        msg.setIcon(QMessageBox.Icon.Question)
+        
+        print_invoice_btn = msg.addButton("Print Invoice", QMessageBox.ButtonRole.ActionRole)
+        print_letter_btn = msg.addButton("Print Authority Letter", QMessageBox.ButtonRole.ActionRole)
+        cancel_btn = msg.addButton("Later", QMessageBox.ButtonRole.RejectRole)
+        
+        msg.exec()
+        
+        clicked = msg.clickedButton()
+        if clicked == print_invoice_btn:
+            self._print_invoice_standalone(invoice)
+        elif clicked == print_letter_btn:
+            self._print_authority_letter_standalone(invoice)
+
+    def _print_invoice_standalone(self, invoice: Invoice) -> None:
+        """Populates and displays the standalone invoice print template."""
+        try:
+            items = []
+            total = 0.0
+            for item in invoice.items:
+                items.append({
+                    "description": item.item_name,
+                    "model": item.model_name,
+                    "color": item.color,
+                    "chassis": item.chassis_number,
+                    "engine": item.engine_number,
+                    "price": f"{item.sale_value + item.tax_charged + item.further_tax:,.2f}"
+                })
+                total += (item.sale_value + item.tax_charged + item.further_tax)
+
+            # Generate QR Base64
+            qr_base64 = ""
+            if invoice.fbr_invoice_number:
+                qr = qrcode.QRCode(version=1, box_size=10, border=2)
+                qr.add_data(invoice.fbr_invoice_number)
+                qr.make(fit=True)
+                img = qr.make_image(fill_color="black", back_color="white")
+                buffered = io.BytesIO()
+                img.save(buffered, format="PNG")
+                qr_base64 = base64.b64encode(buffered.getvalue()).decode()
+
+            data = {
+                "invoice_number": invoice.invoice_number,
+                "date": invoice.created_at,
+                "customer_name": invoice.buyer_name,
+                "father_name": invoice.buyer_father_name or "-",
+                "customer_cnic": invoice.buyer_cnic,
+                "customer_phone": invoice.buyer_phone or "-",
+                "customer_address": invoice.buyer_address or "-",
+                "customer_ntn": invoice.buyer_ntn or "-",
+                "items": items,
+                "total_amount": f"{total:,.2f}",
+                "amount_in_words": "N/A", # Optional: add number-to-words utility
+                "fbr_invoice_number": invoice.fbr_invoice_number or "PENDING",
+                "qr_code_base64": qr_base64
+            }
+            
+            html = print_service_v2.render_invoice(data)
+            print_service_v2.print_html(html, f"Invoice {invoice.invoice_number}")
+        except Exception as e:
+            logger.error(f"Standalone print failed: {e}", exc_info=True)
+            self._show_error("Print Error", f"Failed to generate print: {e}")
+
+    def _print_authority_letter_standalone(self, invoice: Invoice) -> None:
+        """Populates and displays the standalone authority letter template."""
+        try:
+            # Take the first item for the letter (standard for vehicle registration)
+            item = invoice.items[0] if invoice.items else None
+            if not item: return
+
+            data = {
+                "serial_number": invoice.id,
+                "date": invoice.created_at,
+                "customer_name": invoice.buyer_name,
+                "father_name": invoice.buyer_father_name or "-",
+                "customer_cnic": invoice.buyer_cnic,
+                "customer_address": invoice.buyer_address or "-",
+                "product_model": item.model_name,
+                "product_color": item.color,
+                "chassis_number": item.chassis_number,
+                "engine_number": item.engine_number,
+                "invoice_number": invoice.invoice_number
+            }
+            
+            html = print_service_v2.render_authority_letter(data)
+            print_service_v2.print_html(html, f"Authority Letter - {invoice.buyer_name}")
+        except Exception as e:
+            logger.error(f"Authority letter print failed: {e}", exc_info=True)
+            self._show_error("Print Error", f"Failed to generate authority letter: {e}")
 
     def _create_customers_page(self) -> QWidget:
         page = QWidget(self)

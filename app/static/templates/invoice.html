@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Invoice - {{ invoice_number }}</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; color: #333; }
+        .invoice-container { max-width: 800px; margin: auto; border: 1px solid #eee; padding: 30px; box-shadow: 0 0 10px rgba(0,0,0,0.05); }
+        .header { display: flex; justify-content: space-between; border-bottom: 2px solid #3498db; padding-bottom: 20px; margin-bottom: 20px; }
+        .business-info h1 { margin: 0; color: #2c3e50; font-size: 24px; }
+        .business-info p { margin: 5px 0; color: #7f8c8d; font-size: 14px; }
+        .invoice-meta { text-align: right; }
+        .invoice-meta h2 { margin: 0; color: #3498db; }
+        .invoice-meta p { margin: 5px 0; font-weight: bold; }
+        .section-title { background: #f8f9fa; padding: 8px 15px; font-weight: bold; text-transform: uppercase; border-left: 4px solid #3498db; margin: 20px 0 10px 0; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .info-block p { margin: 5px 0; font-size: 14px; }
+        .info-label { color: #95a5a6; width: 120px; display: inline-block; }
+        .info-value { color: #2c3e50; font-weight: 500; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th { background: #34495e; color: white; text-align: left; padding: 12px; }
+        td { padding: 12px; border-bottom: 1px solid #eee; }
+        .totals { margin-top: 30px; text-align: right; }
+        .total-row { display: flex; justify-content: flex-end; margin-bottom: 10px; }
+        .total-label { font-weight: bold; width: 150px; }
+        .total-value { width: 120px; font-size: 18px; color: #2c3e50; }
+        .grand-total { border-top: 2px solid #2c3e50; padding-top: 10px; font-size: 22px; color: #e74c3c; }
+        .footer { margin-top: 50px; text-align: center; font-size: 12px; color: #bdc3c7; border-top: 1px solid #eee; padding-top: 20px; }
+        .qr-section { margin-top: 20px; display: flex; align-items: center; gap: 20px; }
+        .qr-code { width: 100px; height: 100px; border: 1px solid #eee; }
+        .fbr-info { font-size: 12px; }
+        @media print {
+            body { padding: 0; }
+            .invoice-container { border: none; box-shadow: none; width: 100%; max-width: none; }
+            .no-print { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <div class="invoice-container">
+        <div class="header">
+            <div class="business-info">
+                <h1>{{ business_name }}</h1>
+                <p>{{ business_address }}</p>
+                <p>Phone: {{ business_phone }} | NTN: {{ business_ntn }}</p>
+            </div>
+            <div class="invoice-meta">
+                <h2>INVOICE</h2>
+                <p># {{ invoice_number }}</p>
+                <p>Date: {{ date }}</p>
+            </div>
+        </div>
+
+        <div class="section-title">Customer Information</div>
+        <div class="grid">
+            <div class="info-block">
+                <p><span class="info-label">Name:</span> <span class="info-value">{{ customer_name }}</span></p>
+                <p><span class="info-label">Father Name:</span> <span class="info-value">{{ father_name }}</span></p>
+                <p><span class="info-label">CNIC:</span> <span class="info-value">{{ customer_cnic }}</span></p>
+            </div>
+            <div class="info-block">
+                <p><span class="info-label">Phone:</span> <span class="info-value">{{ customer_phone }}</span></p>
+                <p><span class="info-label">Address:</span> <span class="info-value">{{ customer_address }}</span></p>
+                <p><span class="info-label">NTN:</span> <span class="info-value">{{ customer_ntn }}</span></p>
+            </div>
+        </div>
+
+        <div class="section-title">Product Details</div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Description</th>
+                    <th>Model</th>
+                    <th>Color</th>
+                    <th>Chassis #</th>
+                    <th>Engine #</th>
+                    <th style="text-align: right;">Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in items %}
+                <tr>
+                    <td>{{ item.description }}</td>
+                    <td>{{ item.model }}</td>
+                    <td>{{ item.color }}</td>
+                    <td>{{ item.chassis }}</td>
+                    <td>{{ item.engine }}</td>
+                    <td style="text-align: right;">Rs. {{ item.price }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <div class="totals">
+            <div class="total-row grand-total">
+                <div class="total-label">Total Amount:</div>
+                <div class="total-value">Rs. {{ total_amount }}</div>
+            </div>
+            <p style="font-size: 12px; margin-top: 5px;">Amount in words: <i>{{ amount_in_words }} only</i></p>
+        </div>
+
+        <div class="qr-section">
+            {% if qr_code_base64 %}
+            <img src="data:image/png;base64,{{ qr_code_base64 }}" class="qr-code" alt="FBR QR Code">
+            {% endif %}
+            <div class="fbr-info">
+                <p><strong>FBR Invoice Number:</strong> {{ fbr_invoice_number }}</p>
+                <p>Verified by Federal Board of Revenue, Pakistan</p>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>This is a computer-generated invoice and does not require a physical signature.</p>
+            <p>Thank you for your business!</p>
+        </div>
+    </div>
+</body>
+</html>
