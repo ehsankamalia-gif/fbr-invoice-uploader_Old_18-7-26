@@ -7,6 +7,7 @@ import io
 import re
 import requests
 import qrcode
+import base64
 import datetime as dt
 import threading
 import os
@@ -61,6 +62,8 @@ from PyQt6.QtWidgets import (
     QProgressDialog,
 )
 
+from sqlalchemy.orm import joinedload
+
 from app.core.config import settings
 from app.db.session import SessionLocal, close_all_db_connections
 from app.services.report_service import report_service, SalesFilter
@@ -70,6 +73,7 @@ from app.db.models import (
     Price,
     Customer,
     Invoice,
+    InvoiceItem,
     SpareLedgerTransaction,
     CustomerType,
     CapturedData,
@@ -643,6 +647,7 @@ class MainWindow(QMainWindow):
         self._add_page("dashboard", self._create_dashboard_page(), "Dashboard")
         self._add_page("reports", self._create_reports_page(), "Reports")
         self._add_page("invoice", self._create_invoice_page(), "Invoice")
+        self._add_page("print_document", self._create_print_document_page(), "Print Document")
         self._add_page("inventory", self._create_inventory_page(), "Inventory")
         self._add_page("captured_data", self._create_captured_data_page(), "Captured Data")
         self._add_page("prices", self._create_prices_page(), "Prices")
@@ -668,11 +673,12 @@ class MainWindow(QMainWindow):
             "settings": "⚙️",
             "welcome": "👋",
             "captured_data": "📁",
+            "print_document": "🖨️",
         }
 
         self.menu_groups = {
             "GENERAL": ["dashboard", "welcome"],
-            "SALES": ["invoice", "reports"],
+            "SALES": ["invoice", "reports", "print_document"],
             "INVENTORY": ["inventory", "prices", "spare_ledger", "captured_data"],
             "DIRECTORY": ["customers", "dealers"],
             "SYSTEM": ["sms", "settings"]
@@ -1135,6 +1141,160 @@ class MainWindow(QMainWindow):
             return
         row_data = self.dash_table_model._rows[index.row()]
         self._open_invoice_detail_dialog(row_data)
+
+    def _create_print_document_page(self) -> QWidget:
+        """Creates a standalone page for printing existing FBR-submitted invoices by Chassis Number."""
+        page = QWidget(self)
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(40, 40, 40, 40)
+        layout.setSpacing(25)
+
+        # Header
+        header = QLabel("Print Documents")
+        header.setObjectName("pageHeader")
+        layout.addWidget(header)
+
+        # Search Card
+        search_card = QFrame()
+        search_card.setObjectName("formGroup")
+        search_card.setStyleSheet("QFrame#formGroup { background-color: white; border-radius: 12px; }")
+        search_layout = QVBoxLayout(search_card)
+        search_layout.setContentsMargins(30, 25, 30, 25)
+        search_layout.setSpacing(15)
+
+        title = QLabel("SEARCH BY CHASSIS NUMBER")
+        title.setObjectName("groupTitle")
+        search_layout.addWidget(title)
+
+        input_layout = QHBoxLayout()
+        self.print_search_input = QLineEdit()
+        self.print_search_input.setPlaceholderText("Enter Chassis Number...")
+        self.print_search_input.setMinimumHeight(45)
+        self.print_search_input.setStyleSheet("font-size: 16px; padding: 0 15px;")
+        self.print_search_input.returnPressed.connect(self._on_print_search_clicked)
+        
+        search_btn = QPushButton("🔍 Search Invoice")
+        search_btn.setObjectName("primaryButton")
+        search_btn.setMinimumHeight(45)
+        search_btn.setFixedWidth(200)
+        search_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        search_btn.clicked.connect(self._on_print_search_clicked)
+        
+        input_layout.addWidget(self.print_search_input, 1)
+        input_layout.addWidget(search_btn)
+        search_layout.addLayout(input_layout)
+        
+        layout.addWidget(search_card)
+
+        # Results Area (Initially Hidden)
+        self.print_results_card = QFrame()
+        self.print_results_card.setObjectName("formGroup")
+        self.print_results_card.setStyleSheet("QFrame#formGroup { background-color: white; border-radius: 12px; }")
+        self.print_results_card.setVisible(False)
+        results_layout = QVBoxLayout(self.print_results_card)
+        results_layout.setContentsMargins(30, 25, 30, 25)
+        results_layout.setSpacing(20)
+
+        # "Editable" Form Fields
+        form_grid = QGridLayout()
+        form_grid.setSpacing(15)
+
+        def add_field(row, col, label_text):
+            lbl = QLabel(label_text)
+            lbl.setStyleSheet("font-weight: bold; color: #7f8c8d;")
+            edit = QLineEdit()
+            edit.setMinimumHeight(35)
+            edit.setStyleSheet("background-color: #f9f9f9; border: 1px solid #ddd; padding: 0 10px;")
+            form_grid.addWidget(lbl, row, col)
+            form_grid.addWidget(edit, row + 1, col)
+            return edit
+
+        self.print_field_invoice = add_field(0, 0, "Invoice Number")
+        self.print_field_fbr = add_field(0, 1, "FBR Number")
+        self.print_field_date = add_field(2, 0, "Date")
+        self.print_field_customer = add_field(2, 1, "Customer Name")
+        self.print_field_cnic = add_field(4, 0, "Customer CNIC")
+        self.print_field_motorcycle = add_field(4, 1, "Motorcycle Model")
+        
+        results_layout.addLayout(form_grid)
+
+        # Action Buttons for Printing
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(15)
+        
+        self.print_page_inv_btn = QPushButton("🖨️ Print Invoice")
+        self.print_page_inv_btn.setObjectName("primaryButton")
+        self.print_page_inv_btn.setMinimumHeight(50)
+        
+        self.print_page_al_btn = QPushButton("📄 Authority Letter")
+        self.print_page_al_btn.setObjectName("primaryButton")
+        self.print_page_al_btn.setMinimumHeight(50)
+        
+        btn_layout.addWidget(self.print_page_inv_btn)
+        btn_layout.addWidget(self.print_page_al_btn)
+        btn_layout.addStretch(1)
+        results_layout.addLayout(btn_layout)
+
+        layout.addWidget(self.print_results_card)
+        layout.addStretch(1)
+
+        return page
+
+    def _on_print_search_clicked(self) -> None:
+        """Handles searching for an invoice by chassis number for printing."""
+        chassis = self.print_search_input.text().strip().upper()
+        
+        if not chassis:
+            self._show_error("Validation Error", "Please enter a Chassis Number.")
+            return
+
+        db = SessionLocal()
+        try:
+            # Search for invoice item with matching chassis that belongs to an FBR submitted invoice
+            # We use joinedload to eagerly load related customer, items, and motorcycles
+            # This prevents "DetachedInstanceError" when the session is closed.
+            query = db.query(Invoice).join(InvoiceItem).join(Motorcycle).options(
+                joinedload(Invoice.customer),
+                joinedload(Invoice.items).joinedload(InvoiceItem.motorcycle).joinedload(Motorcycle.product_model)
+            ).filter(
+                Motorcycle.chassis_number == chassis,
+                Invoice.fbr_invoice_number.isnot(None)
+            ).order_by(Invoice.datetime.desc())
+            
+            invoice = query.first()
+            
+            if not invoice:
+                self.print_results_card.setVisible(False)
+                self._show_error("Not Found", f"No FBR-submitted invoice found for chassis: {chassis}")
+                return
+
+            # Display Results in "Editable" fields
+            self.current_print_invoice = invoice # Store for button actions
+            cust = invoice.customer
+            
+            self.print_field_invoice.setText(invoice.invoice_number or "")
+            self.print_field_fbr.setText(invoice.fbr_invoice_number or "")
+            self.print_field_date.setText(invoice.datetime.strftime('%Y-%m-%d %H:%M') if invoice.datetime else "")
+            self.print_field_customer.setText(cust.name if cust else "")
+            self.print_field_cnic.setText(cust.cnic if cust else "")
+            self.print_field_motorcycle.setText(invoice.items[0].item_name if invoice.items else "")
+            
+            # Connect actions (disconnect first to avoid multiple triggers)
+            try: self.print_page_inv_btn.clicked.disconnect()
+            except: pass
+            try: self.print_page_al_btn.clicked.disconnect()
+            except: pass
+            
+            self.print_page_inv_btn.clicked.connect(lambda: self._print_invoice_standalone(self.current_print_invoice))
+            self.print_page_al_btn.clicked.connect(lambda: self._print_authority_letter_standalone(self.current_print_invoice))
+            
+            self.print_results_card.setVisible(True)
+
+        except Exception as e:
+            logger.error(f"Search error: {e}", exc_info=True)
+            self._show_error("Search Error", f"An error occurred while searching: {e}")
+        finally:
+            db.close()
 
     def _create_reports_page(self) -> QWidget:
         page = QWidget(self)
@@ -5433,12 +5593,13 @@ class MainWindow(QMainWindow):
             items = []
             total = 0.0
             for item in invoice.items:
+                bike = item.motorcycle
                 items.append({
                     "description": item.item_name,
-                    "model": item.model_name,
-                    "color": item.color,
-                    "chassis": item.chassis_number,
-                    "engine": item.engine_number,
+                    "model": bike.model if bike else item.item_name,
+                    "color": bike.color if bike else "-",
+                    "chassis": bike.chassis_number if bike else "-",
+                    "engine": bike.engine_number if bike else "-",
                     "price": f"{item.sale_value + item.tax_charged + item.further_tax:,.2f}"
                 })
                 total += (item.sale_value + item.tax_charged + item.further_tax)
@@ -5454,15 +5615,16 @@ class MainWindow(QMainWindow):
                 img.save(buffered, format="PNG")
                 qr_base64 = base64.b64encode(buffered.getvalue()).decode()
 
+            cust = invoice.customer
             data = {
                 "invoice_number": invoice.invoice_number,
-                "date": invoice.created_at,
-                "customer_name": invoice.buyer_name,
-                "father_name": invoice.buyer_father_name or "-",
-                "customer_cnic": invoice.buyer_cnic,
-                "customer_phone": invoice.buyer_phone or "-",
-                "customer_address": invoice.buyer_address or "-",
-                "customer_ntn": invoice.buyer_ntn or "-",
+                "date": invoice.datetime,
+                "customer_name": cust.name if cust else "-",
+                "father_name": (cust.father_name if cust else "-") or "-",
+                "customer_cnic": cust.cnic if cust else "-",
+                "customer_phone": (cust.phone if cust else "-") or "-",
+                "customer_address": (cust.address if cust else "-") or "-",
+                "customer_ntn": (cust.ntn if cust else "-") or "-",
                 "items": items,
                 "total_amount": f"{total:,.2f}",
                 "amount_in_words": "N/A", # Optional: add number-to-words utility
@@ -5483,17 +5645,19 @@ class MainWindow(QMainWindow):
             item = invoice.items[0] if invoice.items else None
             if not item: return
 
+            bike = item.motorcycle
+            cust = invoice.customer
             data = {
                 "serial_number": invoice.id,
-                "date": invoice.created_at,
-                "customer_name": invoice.buyer_name,
-                "father_name": invoice.buyer_father_name or "-",
-                "customer_cnic": invoice.buyer_cnic,
-                "customer_address": invoice.buyer_address or "-",
-                "product_model": item.model_name,
-                "product_color": item.color,
-                "chassis_number": item.chassis_number,
-                "engine_number": item.engine_number,
+                "date": invoice.datetime,
+                "customer_name": cust.name if cust else "-",
+                "father_name": (cust.father_name if cust else "-") or "-",
+                "customer_cnic": cust.cnic if cust else "-",
+                "customer_address": (cust.address if cust else "-") or "-",
+                "product_model": bike.model if bike else item.item_name,
+                "product_color": bike.color if bike else "-",
+                "chassis_number": bike.chassis_number if bike else "-",
+                "engine_number": bike.engine_number if bike else "-",
                 "invoice_number": invoice.invoice_number
             }
             

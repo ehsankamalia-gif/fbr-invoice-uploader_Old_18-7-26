@@ -7,7 +7,7 @@ from typing import Dict, Any, List, Optional
 from jinja2 import Environment, FileSystemLoader
 from PyQt6.QtWebEngineCore import QWebEnginePage
 from PyQt6.QtWebEngineWidgets import QWebEngineView
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QPushButton, QHBoxLayout, QMessageBox, QApplication
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QPushButton, QHBoxLayout, QMessageBox, QApplication, QWidget
 from PyQt6.QtCore import Qt, QUrl
 
 from app.core.logger import logger
