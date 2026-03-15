@@ -5662,7 +5662,7 @@ class MainWindow(QMainWindow):
             }
             
             html = print_service_v2.render_authority_letter(data)
-            print_service_v2.print_html(html, f"Authority Letter - {invoice.buyer_name}")
+            print_service_v2.print_html(html, f"Authority Letter - {cust.name if cust else 'Unknown'}")
         except Exception as e:
             logger.error(f"Authority letter print failed: {e}", exc_info=True)
             self._show_error("Print Error", f"Failed to generate authority letter: {e}")
