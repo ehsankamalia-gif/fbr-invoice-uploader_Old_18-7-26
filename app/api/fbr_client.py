@@ -73,7 +73,7 @@ class FBRClient:
         Validates the generated payload against FBR specifications.
         Raises ValueError if validation fails.
         """
-        required_fields = ["POSID", "USIN", "DateTime", "items", "TotalBillAmount", "PaymentMode", "InvoiceType"]
+        required_fields = ["POSID", "USIN", "DateTime", "Items", "TotalBillAmount", "PaymentMode", "InvoiceType"]
         for field in required_fields:
             if field not in payload:
                 raise ValueError(f"Missing required field in FBR payload: {field}")
@@ -83,7 +83,7 @@ class FBRClient:
         if not isinstance(payload["POSID"], int):
             raise ValueError(f"POSID must be an integer, got {type(payload['POSID'])}")
 
-        if not payload["items"]:
+        if not payload["Items"]:
             raise ValueError("Invoice must have at least one item")
 
         if payload["TotalBillAmount"] <= 0:
@@ -93,7 +93,7 @@ class FBRClient:
              raise ValueError(f"Invalid PaymentMode: {payload['PaymentMode']}. Must be 1-5.")
 
         # Validate items
-        for i, item in enumerate(payload["items"]):
+        for i, item in enumerate(payload["Items"]):
             if not item.get("ItemCode"):
                  raise ValueError(f"Item {i} missing ItemCode")
             if not item.get("ItemName"):
@@ -193,23 +193,22 @@ class FBRClient:
             buyer_cnic = "1234512345678" # Sample fallback (13 digits)
 
         return {
-            "InvoiceNumber": data.get("invoice_number", ""), # Use the generated Invoice Number
+            "InvoiceNumber": data.get("invoice_number", ""),
             "POSID": pos_id,
-            "USIN": data.get("invoice_number", ""), # User Req: Invoice number should also go into USIN column (and payload likely)
+            "USIN": data.get("invoice_number", ""),
             "DateTime": dt_str,
-            "BuyerNTN": data.get("buyer_ntn") or "1234567-8", # Sample fallback
+            "BuyerNTN": data.get("buyer_ntn") or "1234567-8",
             "BuyerCNIC": buyer_cnic,
             "BuyerName": data.get("buyer_name") or "Buyer Name",
             "BuyerPhoneNumber": data.get("buyer_phone") or "0000-0000000",
-            "items": items, # Lowercase 'items' per sample
             "TotalBillAmount": data.get("total_amount"),
             "TotalQuantity": data.get("total_quantity"),
             "TotalSaleValue": data.get("total_sale_value"),
             "TotalTaxCharged": data.get("total_tax_charged"),
             "TotalFurtherTax": data.get("total_further_tax", 0.0),
-            "FurtherTax": data.get("total_further_tax", 0.0), # Added explicit FurtherTax field as per FBR requirements
             "PaymentMode": mode_int,
-            "InvoiceType": 1
+            "InvoiceType": 1,
+            "Items": items
         }
 
 fbr_client = FBRClient()

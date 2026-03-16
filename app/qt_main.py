@@ -4,9 +4,7 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
-from app.qt_ui.main_window import MainWindow
 from app.db.session import check_connection, init_db
-
 
 def main() -> None:
     # --- Fix for QWebEngine GPU Crash on some Windows machines ---
@@ -19,7 +17,9 @@ def main() -> None:
     if str(base_dir) not in sys.path:
         sys.path.append(str(base_dir))
 
-    # Initialize database and run migrations
+    # Initialize database and run migrations FIRST
+    # This ensures that when services are imported later (via MainWindow),
+    # SessionLocal is already configured to the real DB.
     try:
         init_db()
         # Initialize default settings if DB is ready
@@ -27,6 +27,9 @@ def main() -> None:
         settings_service.initialize_if_connected()
     except Exception as e:
         print(f"Database initialization failed: {e}")
+
+    # NOW import MainWindow
+    from app.qt_ui.main_window import MainWindow
 
     # Add Chromium flags to further ensure stability
     sys_args = sys.argv

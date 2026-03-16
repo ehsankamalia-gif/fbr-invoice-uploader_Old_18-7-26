@@ -2,7 +2,22 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import OperationalError
 from app.core import config
-from app.db.models import Base
+from app.db.models import (
+    Base, 
+    Customer, 
+    Invoice, 
+    InvoiceItem, 
+    Motorcycle, 
+    ProductModel, 
+    Price,
+    SpareLedgerTransaction,
+    CapturedData,
+    FBRConfiguration,
+    AppConfiguration,
+    MigrationHistory,
+    SMSQueue,
+    SMSConfiguration
+)
 import logging
 
 logger = logging.getLogger(__name__)
@@ -13,12 +28,41 @@ connect_args = {}
 if "sqlite" in db_url:
     connect_args["check_same_thread"] = False
 
+def _ensure_critical_tables(target_engine):
+    """Verifies and creates missing critical tables if create_all failed."""
+    try:
+        # Check if engine is SQLite or MySQL
+        is_sqlite = "sqlite" in str(target_engine.url)
+        
+        with target_engine.connect() as conn:
+            if is_sqlite:
+                # SQLite specific check
+                result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='customers'")).fetchone()
+            else:
+                # MySQL specific check
+                result = conn.execute(text("SHOW TABLES LIKE 'customers'")).fetchone()
+                
+            if not result:
+                logger.error(f"CRITICAL: 'customers' table was NOT created by create_all on {target_engine.url}!")
+                # Force creation of customers table if missing
+                Customer.__table__.create(bind=target_engine)
+                # Commit if it's MySQL
+                if not is_sqlite:
+                    conn.commit()
+                logger.info("'customers' table created manually as fallback.")
+            else:
+                logger.info(f"'customers' table exists on {target_engine.url}.")
+    except Exception as e:
+        logger.error(f"Error verifying critical tables on {target_engine.url}: {e}")
+
 # Global engine and SessionLocal placeholders
 # We start with a memory sqlite engine so that imports and initial UI loads don't crash.
 engine = create_engine("sqlite:///:memory:")
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-# Initialize the memory DB schema immediately
+
+# Initialize the memory DB schema immediately with all tables
 Base.metadata.create_all(bind=engine)
+_ensure_critical_tables(engine)
 
 def init_db():
     """Re-initialize the database engine. Useful after settings change."""
@@ -37,6 +81,11 @@ def init_db():
         # 2. Probing for existence using a totally separate, short-lived connection
         try:
             logger.info(f"Probing database: {new_db_url}")
+            
+            # For MySQL, we need to ensure the database exists before probing
+            if "mysql" in new_db_url:
+                create_mysql_db_if_missing()
+
             probe_engine = create_engine(new_db_url, connect_args={"connect_timeout": 5})
             with probe_engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
@@ -56,6 +105,7 @@ def init_db():
             
             # 4. Create tables and run migrations on the verified engine
             Base.metadata.create_all(bind=engine)
+            _ensure_critical_tables(engine)
             run_migrations()
             logger.info("Database initialized successfully.")
             
@@ -68,6 +118,7 @@ def init_db():
             
             # Ensure SessionLocal is bound to the fallback engine if it wasn't already
             SessionLocal.configure(bind=engine)
+            _ensure_critical_tables(engine)
             
     except Exception as e:
         logger.error(f"Critical error in init_db: {e}")
@@ -108,46 +159,30 @@ def check_connection() -> tuple[bool, str]:
 def create_mysql_db_if_missing():
     """
     Checks if the MySQL database exists, and creates it if not.
-    This requires parsing the DB_URL to connect to the server without a DB first.
     """
-    if "mysql" not in config.settings.DB_URL:
+    db_url = config.get_database_url()
+    if "mysql" not in db_url:
         return
 
     try:
-        # Try connecting normally
-        with engine.connect() as conn:
-            pass
-    except OperationalError as e:
-        if "Unknown database" in str(e):
-            logger.info("Database does not exist. Attempting to create it...")
-            # Parse URL to get base connection string (remove DB name)
-            # Assumption: DB_URL format is mysql+pymysql://user:pass@host:port/dbname
-            try:
-                from sqlalchemy.engine.url import make_url
-                url = make_url(config.settings.DB_URL)
-                db_name = url.database
-                
-                # Create a URL without the database name to connect to the server
-                # We can't modify the url object directly easily in all versions, 
-                # but we can replace the database component
-                server_url = url.set(database="")
-                
-                # Create temporary engine
-                tmp_engine = create_engine(server_url)
-                with tmp_engine.connect() as conn:
-                    conn.execute(text(f"CREATE DATABASE IF NOT EXISTS {db_name}"))
-                    logger.info(f"Database '{db_name}' created successfully.")
-            except Exception as create_error:
-                logger.error(f"Failed to create database: {create_error}")
-                # Re-raise original error if creation fails
-                raise e
-        else:
-            raise e
+        # Parse URL to get base connection string (remove DB name)
+        from sqlalchemy.engine.url import make_url
+        url = make_url(db_url)
+        db_name = url.database
+        
+        # Create a URL without the database name to connect to the server
+        server_url = url.set(database="")
+        
+        # Create temporary engine
+        tmp_engine = create_engine(server_url)
+        with tmp_engine.connect() as conn:
+            conn.execute(text(f"CREATE DATABASE IF NOT EXISTS {db_name}"))
+            logger.info(f"Database '{db_name}' verified/created successfully.")
+        tmp_engine.dispose()
+    except Exception as e:
+        logger.error(f"Failed to check/create MySQL database: {e}")
 
 from app.utils.string_utils import normalize_business_name
-from app.db.models import Base, Customer, MigrationHistory
-
-# ... (existing imports)
 
 def run_migrations():
     """
