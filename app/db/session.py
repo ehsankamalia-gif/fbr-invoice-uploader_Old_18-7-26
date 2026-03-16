@@ -49,15 +49,21 @@ def close_all_db_connections():
     except Exception as e:
         logger.error(f"Error during database engine disposal: {e}")
 
-def check_connection():
-    """Check if the database connection is working."""
+def check_connection() -> tuple[bool, str]:
+    """
+    Check if the database connection is working.
+    Returns (Success, Error Message).
+    """
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
-        return True
+        return True, ""
     except Exception as e:
-        logger.error(f"DB Connection check failed: {e}")
-        return False
+        err_msg = str(e)
+        logger.error(f"DB Connection check failed: {err_msg}")
+        if "Unknown database" in err_msg:
+            return False, "DATABASE_MISSING"
+        return False, err_msg
 
 def create_mysql_db_if_missing():
     """
@@ -201,9 +207,23 @@ def _migration_v3_add_app_configs(conn) -> bool:
 
 
 def init_db():
-    create_mysql_db_if_missing()
-    Base.metadata.create_all(bind=engine)
-    run_migrations()
+    """
+    Initializes the database. 
+    NOTE: Automatic creation of MySQL databases is disabled as per user requirement.
+    """
+    try:
+        # Check if database exists before trying to create tables
+        success, status = check_connection()
+        if success:
+            Base.metadata.create_all(bind=engine)
+            run_migrations()
+            logger.info("Database initialized successfully.")
+        elif status == "DATABASE_MISSING":
+            logger.warning("Database does not exist. Skipping table creation and migrations.")
+        else:
+            logger.error(f"Database initialization skipped due to connection error: {status}")
+    except Exception as e:
+        logger.error(f"Critical error during init_db: {e}")
 
 def get_db():
     db = SessionLocal()

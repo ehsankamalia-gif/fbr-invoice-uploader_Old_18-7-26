@@ -349,10 +349,11 @@ class MainWindow(QMainWindow):
     campaign_progress_signal = pyqtSignal(int, int, int, int) # camp_id, sent, failed, total
     campaign_complete_signal = pyqtSignal(int, bool, str) # camp_id, success, message
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, db_status: str = "") -> None:
         super().__init__(parent)
         self.setWindowTitle("Ehsan Trader FBR System")
         self.resize(1100, 700)
+        self.db_status = db_status # Store DB status to show warning if missing
 
         self._pages: Dict[str, QWidget] = {}
         self._nav_buttons: Dict[str, NavigationButton] = {}
@@ -790,6 +791,20 @@ class MainWindow(QMainWindow):
         # Ensure the dashboard and welcome stats refresh their data once the application is fully ready
         QTimer.singleShot(100, self._refresh_dashboard)
         QTimer.singleShot(100, self._refresh_welcome_stats)
+        
+        # --- Handle Missing Database Notification ---
+        if self.db_status == "DATABASE_MISSING":
+            QTimer.singleShot(500, self._show_db_missing_warning)
+
+    def _show_db_missing_warning(self):
+        """Professionally warns the user that the selected database does not exist."""
+        QMessageBox.warning(
+            self,
+            "Database Not Found",
+            "The database specified in your settings does not exist on the server.\n\n"
+            "Please go to Settings > Database Connection and select an existing database or check your connection details.",
+        )
+        self._select_page("settings")
 
     def _on_nav_clicked(self, checked: bool) -> None:
         button = self.sender()
@@ -2430,6 +2445,47 @@ class MainWindow(QMainWindow):
 
         container_layout.addWidget(update_group)
 
+        # --- Group 3.5: Database Connection ---
+        db_group = QFrame()
+        db_group.setObjectName("formGroup")
+        db_layout = QGridLayout(db_group)
+        db_layout.setContentsMargins(20, 25, 20, 20)
+        db_layout.setHorizontalSpacing(20)
+        db_layout.setVerticalSpacing(15)
+
+        db_title = QLabel("DATABASE CONNECTION")
+        db_title.setObjectName("groupTitle")
+        db_layout.addWidget(db_title, 0, 0, 1, 4)
+
+        db_layout.addWidget(QLabel("Server (Host)"), 1, 0)
+        self.settings_db_server = QLineEdit()
+        db_layout.addWidget(self.settings_db_server, 1, 1)
+
+        db_layout.addWidget(QLabel("Port"), 1, 2)
+        self.settings_db_port = QLineEdit()
+        self.settings_db_port.setPlaceholderText("3306")
+        db_layout.addWidget(self.settings_db_port, 1, 3)
+
+        db_layout.addWidget(QLabel("Database Name"), 2, 0)
+        self.settings_db_name = QLineEdit()
+        db_layout.addWidget(self.settings_db_name, 2, 1)
+
+        db_layout.addWidget(QLabel("Username"), 2, 2)
+        self.settings_db_user = QLineEdit()
+        db_layout.addWidget(self.settings_db_user, 2, 3)
+
+        db_layout.addWidget(QLabel("Password"), 3, 0)
+        self.settings_db_password = QLineEdit()
+        self.settings_db_password.setEchoMode(QLineEdit.EchoMode.PasswordEchoOnEdit)
+        db_layout.addWidget(self.settings_db_password, 3, 1)
+
+        self.test_db_btn = QPushButton("🔌 Test Connection")
+        self.test_db_btn.setFixedWidth(150)
+        self.test_db_btn.clicked.connect(self._on_test_db_connection)
+        db_layout.addWidget(self.test_db_btn, 3, 2, 1, 2)
+
+        container_layout.addWidget(db_group)
+
         # --- Group 4: Database Backup & Restore ---
         backup_group = QFrame()
         backup_group.setObjectName("formGroup")
@@ -2540,9 +2596,52 @@ class MainWindow(QMainWindow):
         active_env = settings_service.get_active_environment()
         self.settings_env_combo.setCurrentText(active_env)
         self._load_settings_for_env(active_env)
+        
+        # Load Database Settings
+        db_settings = settings_service.get_db_settings()
+        self.settings_db_server.setText(db_settings.get("server", "localhost"))
+        self.settings_db_port.setText(db_settings.get("port", "3306"))
+        self.settings_db_name.setText(db_settings.get("name", "honda_fbr"))
+        self.settings_db_user.setText(db_settings.get("user", "root"))
+        self.settings_db_password.setText(db_settings.get("password", ""))
+
         self._load_backup_ui()
 
         return page
+
+    def _on_test_db_connection(self) -> None:
+        """Professionally tests the database connection with current UI values."""
+        server = self.settings_db_server.text().strip()
+        port = self.settings_db_port.text().strip() or "3306"
+        name = self.settings_db_name.text().strip()
+        user = self.settings_db_user.text().strip()
+        pwd = self.settings_db_password.text().strip()
+
+        if not all([server, name, user]):
+            self._show_error("Validation Error", "Server, Database Name, and Username are required.")
+            return
+
+        self.test_db_btn.setEnabled(False)
+        self.test_db_btn.setText("⏳ Testing...")
+        QApplication.processEvents()
+
+        try:
+            from sqlalchemy import create_engine, text
+            # Construct temporary URL for testing
+            # We assume MySQL as per standard
+            db_url = f"mysql+pymysql://{user}:{pwd}@{server}:{port}/{name}"
+            test_engine = create_engine(db_url, connect_args={"connect_timeout": 5})
+            
+            with test_engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            
+            self._show_success("Connection Successful", f"Successfully connected to database '{name}' on {server}:{port}.")
+        except Exception as e:
+            logger.error(f"DB Test Connection failed: {e}")
+            self._show_error("Connection Failed", f"Unable to connect to database:\n{str(e)}")
+        finally:
+            self.test_db_btn.setEnabled(True)
+            self.test_db_btn.setText("🔌 Test Connection")
 
     def _load_settings_for_env(self, env: str) -> None:
         data = settings_service.get_environment(env)
@@ -2564,7 +2663,16 @@ class MainWindow(QMainWindow):
     def _save_settings(self) -> None:
         env = self.settings_env_combo.currentText()
         business_name = self.settings_business_name.text().strip() or "Ehsan Trader"
+        
+        # Database Settings
+        db_server = self.settings_db_server.text().strip()
+        db_port = self.settings_db_port.text().strip() or "3306"
+        db_name = self.settings_db_name.text().strip()
+        db_user = self.settings_db_user.text().strip()
+        db_password = self.settings_db_password.text().strip()
+
         try:
+            # 1. Save Environment Settings
             settings_service.save_environment(
                 env=env,
                 base_url=self.settings_api_url.text(),
@@ -2580,6 +2688,24 @@ class MainWindow(QMainWindow):
                 business_name=business_name
             )
             settings_service.set_active_environment(env)
+            
+            # 2. Save Database Settings
+            settings_service.save_db_settings(
+                server=db_server,
+                port=db_port,
+                name=db_name,
+                user=db_user,
+                password=db_password
+            )
+
+            # 3. Reload Config & Re-initialize DB Connection
+            from app.core.config import reload_settings
+            from app.db.session import init_db
+            
+            reload_settings()
+            init_db()
+            
+            # Update UI Branding
             self._update_app_branding(business_name)
             
             # Update environment badge on invoice page if it exists
@@ -2588,9 +2714,10 @@ class MainWindow(QMainWindow):
                 color = "#e67e22" if env.upper() == "SANDBOX" else "#27ae60"
                 self.invoice_env_badge.setStyleSheet(f"QFrame {{ border: 2px solid {color}; border-radius: 8px; background-color: white; }}")
             
-            self._show_success("Settings Saved", f"Configuration for {env} has been updated and set as active.")
+            self._show_success("Settings Saved", f"Configuration updated successfully. Database connection has been re-initialized to '{db_name}'.")
         except Exception as e:
-            self._show_error("Save Error", str(e))
+            logger.error(f"Failed to save settings: {e}", exc_info=True)
+            self._show_error("Save Error", f"An error occurred while saving settings:\n{str(e)}")
 
     def _load_backup_ui(self):
         """Load backup settings into UI elements."""

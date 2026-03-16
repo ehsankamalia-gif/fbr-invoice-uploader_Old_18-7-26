@@ -97,10 +97,15 @@ settings = Settings()
 
 def reload_settings():
     """Reload settings from .env and re-apply environment selection."""
+    global settings, FBR_ENV, SANDBOX, PRODUCTION
+    
     load_dotenv(dotenv_path=env_path, override=True)
-    global FBR_ENV, SANDBOX, PRODUCTION, settings
+    
+    # Re-read global env vars
     FBR_ENV = os.getenv("FBR_ENV", "SANDBOX").upper()
-    SANDBOX = {
+    
+    # Re-construct SANDBOX/PRODUCTION dicts
+    SANDBOX.update({
         "FBR_API_BASE_URL": os.getenv("FBR_SANDBOX_API_BASE_URL", "https://esp.fbr.gov.pk:8243/PT/v1"),
         "FBR_POS_ID": os.getenv("FBR_SANDBOX_POS_ID", os.getenv("FBR_POS_ID", "")),
         "FBR_USIN": os.getenv("FBR_SANDBOX_USIN", os.getenv("FBR_USIN", "")),
@@ -111,8 +116,9 @@ def reload_settings():
         "FBR_DISCOUNT": os.getenv("FBR_SANDBOX_DISCOUNT", "0.0"),
         "FBR_ITEM_CODE": os.getenv("FBR_SANDBOX_ITEM_CODE", ""),
         "FBR_ITEM_NAME": os.getenv("FBR_SANDBOX_ITEM_NAME", ""),
-    }
-    PRODUCTION = {
+    })
+    
+    PRODUCTION.update({
         "FBR_API_BASE_URL": os.getenv("FBR_PROD_API_BASE_URL", "https://esp.fbr.gov.pk:8243/PT/v1"),
         "FBR_POS_ID": os.getenv("FBR_PROD_POS_ID", os.getenv("FBR_POS_ID", "")),
         "FBR_USIN": os.getenv("FBR_PROD_USIN", os.getenv("FBR_USIN", "")),
@@ -123,5 +129,8 @@ def reload_settings():
         "FBR_DISCOUNT": os.getenv("FBR_PROD_DISCOUNT", "0.0"),
         "FBR_ITEM_CODE": os.getenv("FBR_PROD_ITEM_CODE", ""),
         "FBR_ITEM_NAME": os.getenv("FBR_PROD_ITEM_NAME", ""),
-    }
+    })
+
+    # Re-initialize the settings object
     settings = Settings()
+    return settings

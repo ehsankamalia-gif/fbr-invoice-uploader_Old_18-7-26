@@ -33,15 +33,16 @@ def main() -> None:
     
     app = QApplication(sys_args)
 
-    if not check_connection():
+    db_success, db_status = check_connection()
+    if not db_success and db_status != "DATABASE_MISSING":
         QMessageBox.critical(
             None,
             "Connection Error",
-            "Database connection failed.\nPlease update your connection settings and restart the application.",
+            f"Database connection failed:\n{db_status}\n\nPlease check your server and restart the application.",
         )
         sys.exit(1)
 
-    window = MainWindow()
+    window = MainWindow(db_status=db_status)
     window.show()
     sys.exit(app.exec())
 
