@@ -22,6 +22,9 @@ def main() -> None:
     # Initialize database and run migrations
     try:
         init_db()
+        # Initialize default settings if DB is ready
+        from app.services.settings_service import settings_service
+        settings_service.initialize_if_connected()
     except Exception as e:
         print(f"Database initialization failed: {e}")
 

@@ -13,7 +13,15 @@ ENV_FILE = Path(__file__).resolve().parent.parent.parent / ".env"
 class SettingsService:
     def __init__(self):
         self.env_path = ENV_FILE
-        self._initialize_defaults()
+        # Removed _initialize_defaults() from __init__ to prevent crash during import
+        # It will be called manually after DB connection is verified.
+
+    def initialize_if_connected(self):
+        """Public method to safely initialize defaults after DB is ready."""
+        try:
+            self._initialize_defaults()
+        except Exception as e:
+            logger.error(f"Safe initialization failed: {e}")
 
     def _initialize_defaults(self):
         """Initialize default configurations in DB if they don't exist."""
@@ -182,32 +190,53 @@ class SettingsService:
     
     def get_active_settings(self) -> dict:
         """Get the full configuration for the currently active environment."""
-        db = SessionLocal()
         try:
-            config = db.query(FBRConfiguration).filter_by(is_active=True).first()
-            if not config:
-                # Fallback to SANDBOX if no active env found
-                config = db.query(FBRConfiguration).filter_by(environment="SANDBOX").first()
-            
-            if not config:
-                return {}
+            db = SessionLocal()
+            try:
+                config = db.query(FBRConfiguration).filter_by(is_active=True).first()
+                if not config:
+                    # Fallback to SANDBOX if no active env found
+                    config = db.query(FBRConfiguration).filter_by(environment="SANDBOX").first()
+                
+                if not config:
+                    return self._get_fallback_settings()
+                
+                return {
+                    "env": config.environment,
+                    "base_url": config.api_base_url,
+                    "pos_id": config.pos_id,
+                    "usin": config.usin,
+                    "token": config.auth_token,
+                    "tax_rate": str(config.tax_rate),
+                    "pct_code": config.pct_code,
+                    "invoice_type": config.invoice_type,
+                    "discount": str(config.discount),
+                    "item_code": config.item_code,
+                    "item_name": config.item_name,
+                    "business_name": config.business_name or "Ehsan Trader",
+                }
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error(f"Failed to get active settings: {e}")
+            return self._get_fallback_settings()
 
-            return {
-                "env": config.environment,
-                "api_base_url": config.api_base_url,
-                "pos_id": config.pos_id,
-                "usin": config.usin,
-                "auth_token": config.auth_token,
-                "tax_rate": config.tax_rate,
-                "pct_code": config.pct_code,
-                "invoice_type": config.invoice_type,
-                "discount": config.discount,
-                "item_code": config.item_code,
-                "item_name": config.item_name,
-                "business_name": config.business_name or "Ehsan Trader",
-            }
-        finally:
-            db.close()
+    def _get_fallback_settings(self) -> dict:
+        """Returns standard default settings when DB is unavailable."""
+        return {
+            "env": "SANDBOX",
+            "base_url": "https://esp.fbr.gov.pk:8243/PT/v1",
+            "pos_id": "",
+            "usin": "",
+            "token": "",
+            "tax_rate": "18.0",
+            "pct_code": "8711.2010",
+            "invoice_type": "Standard",
+            "discount": "0.0",
+            "item_code": "",
+            "item_name": "",
+            "business_name": "Ehsan Trader",
+        }
 
     def get_all_settings(self) -> dict:
         return {

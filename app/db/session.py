@@ -8,36 +8,69 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Configure connect_args based on DB type
+db_url = config.get_database_url()
 connect_args = {}
-if "sqlite" in config.settings.DB_URL:
+if "sqlite" in db_url:
     connect_args["check_same_thread"] = False
 
-engine = create_engine(
-    config.settings.DB_URL, 
-    connect_args=connect_args,
-    pool_pre_ping=True # Helps with MySQL connection drops
-)
-
+# Global engine and SessionLocal placeholders
+# We start with a memory sqlite engine so that imports and initial UI loads don't crash.
+engine = create_engine("sqlite:///:memory:")
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# Initialize the memory DB schema immediately
+Base.metadata.create_all(bind=engine)
 
 def init_db():
     """Re-initialize the database engine. Useful after settings change."""
     global engine, SessionLocal
     
-    # Close existing connections first
-    close_all_db_connections()
-    
-    # Configure connect_args based on DB type
-    connect_args = {}
-    if "sqlite" in config.settings.DB_URL:
-        connect_args["check_same_thread"] = False
+    try:
+        # 1. Prepare new URL and config
+        new_db_url = config.get_database_url()
+        if not new_db_url:
+            new_db_url = "sqlite:///:memory:"
+        
+        new_connect_args = {}
+        if "sqlite" in new_db_url:
+            new_connect_args["check_same_thread"] = False
 
-    engine = create_engine(
-        config.settings.DB_URL, 
-        connect_args=connect_args,
-        pool_pre_ping=True
-    )
-    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+        # 2. Probing for existence using a totally separate, short-lived connection
+        try:
+            logger.info(f"Probing database: {new_db_url}")
+            probe_engine = create_engine(new_db_url, connect_args={"connect_timeout": 5})
+            with probe_engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            probe_engine.dispose()
+            
+            # 3. If probe succeeds, update global engine and SessionLocal
+            logger.info("Probe successful. Updating global database engine...")
+            close_all_db_connections()
+            
+            engine = create_engine(
+                new_db_url, 
+                connect_args=new_connect_args,
+                pool_recycle=3600
+            )
+            # Use configure() to update existing sessionmaker reference globally
+            SessionLocal.configure(bind=engine)
+            
+            # 4. Create tables and run migrations on the verified engine
+            Base.metadata.create_all(bind=engine)
+            run_migrations()
+            logger.info("Database initialized successfully.")
+            
+        except Exception as e:
+            err_msg = str(e)
+            if "Unknown database" in err_msg:
+                logger.warning(f"Database does not exist ({new_db_url}). Staying on safe defaults.")
+            else:
+                logger.error(f"Database probe failed: {err_msg}")
+            
+            # Ensure SessionLocal is bound to the fallback engine if it wasn't already
+            SessionLocal.configure(bind=engine)
+            
+    except Exception as e:
+        logger.error(f"Critical error in init_db: {e}")
 
 def close_all_db_connections():
     """Professionally disposes of the SQLAlchemy engine and all pool connections."""
@@ -55,8 +88,15 @@ def check_connection() -> tuple[bool, str]:
     Returns (Success, Error Message).
     """
     try:
-        with engine.connect() as conn:
+        # Create a fresh engine for connection test to ensure it reflects current .env
+        test_db_url = config.get_database_url()
+        if not test_db_url:
+            return False, "DATABASE_MISSING"
+            
+        test_engine = create_engine(test_db_url, connect_args={"connect_timeout": 5})
+        with test_engine.connect() as conn:
             conn.execute(text("SELECT 1"))
+        test_engine.dispose()
         return True, ""
     except Exception as e:
         err_msg = str(e)
@@ -205,25 +245,6 @@ def _migration_v3_add_app_configs(conn) -> bool:
         logger.error(f"Migration v3 failed: {e}")
         return False
 
-
-def init_db():
-    """
-    Initializes the database. 
-    NOTE: Automatic creation of MySQL databases is disabled as per user requirement.
-    """
-    try:
-        # Check if database exists before trying to create tables
-        success, status = check_connection()
-        if success:
-            Base.metadata.create_all(bind=engine)
-            run_migrations()
-            logger.info("Database initialized successfully.")
-        elif status == "DATABASE_MISSING":
-            logger.warning("Database does not exist. Skipping table creation and migrations.")
-        else:
-            logger.error(f"Database initialization skipped due to connection error: {status}")
-    except Exception as e:
-        logger.error(f"Critical error during init_db: {e}")
 
 def get_db():
     db = SessionLocal()
