@@ -1,9 +1,13 @@
 import requests
 import json
+import urllib3
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from app.core.logger import logger
 from app.api.schemas import InvoiceCreate
 from app.services.settings_service import settings_service
+
+# Suppress only the single InsecureRequestWarning from urllib3 needed for FBR Sandbox
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class FBRClient:
     def __init__(self):
@@ -20,9 +24,15 @@ class FBRClient:
         """
         # Get latest settings dynamically
         settings = settings_service.get_active_settings()
-        base_url = settings.get("api_base_url", "")
-        auth_token = settings.get("auth_token", "")
         
+        # MAPPING FIX: Use correct keys as returned by settings_service.get_active_settings()
+        base_url = settings.get("base_url", "")
+        auth_token = settings.get("token", "")
+        
+        if not base_url:
+             logger.error("FBR API Base URL is not configured in settings!")
+             raise Exception("FBR API URL is missing. Please check FBR Configuration settings.")
+
         headers = {
             "Authorization": f"Bearer {auth_token}",
             "Content-Type": "application/json"
@@ -34,6 +44,9 @@ class FBRClient:
         else:
              url = f"{base_url.rstrip('/')}/PostData"
         
+        if not url.startswith("http"):
+             logger.error(f"Invalid FBR API URL: {url}")
+             raise Exception(f"Invalid FBR API URL: {url}. Ensure it starts with http:// or https://")
         try:
             # FBR usually expects a specific JSON structure.
             # We map our internal structure to FBR's expected structure here.
@@ -42,19 +55,18 @@ class FBRClient:
             # Validate payload before sending
             self._validate_payload(payload)
             
-            logger.info(f"Sending invoice {invoice_data.get('invoiceNumber')} to FBR...")
+            logger.info(f"Sending invoice {invoice_data.get('invoice_number')} to FBR...")
             logger.debug(f"FBR Payload: {json.dumps(payload, default=str)}")
             
-            # In a real scenario, we would make the request.
-            # For now, if base_url is a placeholder or localhost, it might fail if not running.
-            # I'll implement the actual request but catch errors.
+            # Determine if SSL verification should be enabled (Enabled for Production, Disabled for Sandbox)
+            is_production = settings.get("env", "SANDBOX").upper() == "PRODUCTION"
             
             response = requests.post(
                 url, 
                 json=payload, 
                 headers=headers, 
                 timeout=10,
-                verify=False # FBR often uses self-signed certs in test envs, but in prod should be True
+                verify=is_production # FBR uses self-signed certs in SANDBOX but valid certs in PRODUCTION
             )
             
             response.raise_for_status()
@@ -141,18 +153,17 @@ class FBRClient:
             pct_code = self._validate_pct_code(raw_pct)
             
             items.append({
-                "ItemCode": item.get("item_code"),
-                "ItemName": item.get("item_name"),
-                "Quantity": item.get("quantity"),
+                "ItemCode": str(item.get("item_code")),
+                "ItemName": str(item.get("item_name")),
+                "Quantity": round(float(item.get("quantity", 0.0)), 2),
                 "PCTCode": pct_code,
-                "TaxRate": item.get("tax_rate"),
-                "SaleValue": item.get("sale_value"),
-                "TotalAmount": item.get("total_amount"),
-                "TaxCharged": item.get("tax_charged"),
-                "Discount": item.get("discount", 0.0),
-                "FurtherTax": item.get("further_tax", 0.0),
-                "InvoiceType": 1,
-                "RefUSIN": None
+                "TaxRate": round(float(item.get("tax_rate", 0.0)), 2),
+                "SaleValue": round(float(item.get("sale_value", 0.0)), 2),
+                "TotalAmount": round(float(item.get("total_amount", 0.0)), 2),
+                "TaxCharged": round(float(item.get("tax_charged", 0.0)), 2),
+                "Discount": round(float(item.get("discount", 0.0)), 2),
+                "FurtherTax": round(float(item.get("further_tax", 0.0)), 2),
+                "InvoiceType": 1
             })
 
         # Map Payment Mode string to Integer
@@ -190,22 +201,35 @@ class FBRClient:
         if buyer_cnic:
             buyer_cnic = str(buyer_cnic).replace("-", "").strip()
         else:
-            buyer_cnic = "1234512345678" # Sample fallback (13 digits)
+            buyer_cnic = None # FBR allows null for CNIC if NTN is provided
+
+        buyer_ntn = data.get("buyer_ntn")
+        if buyer_ntn:
+            buyer_ntn = str(buyer_ntn).replace("-", "").strip()
+        else:
+            buyer_ntn = None # FBR allows null for NTN if CNIC is provided
+
+        # FBR Requirement: At least one of BuyerCNIC or BuyerNTN must be provided.
+        # If both are missing, use a generic fallback or log warning.
+        if not buyer_cnic and not buyer_ntn:
+             logger.warning(f"Both BuyerCNIC and BuyerNTN are missing for invoice {data.get('invoice_number')}")
+             # Use a generic fallback CNIC if absolutely necessary, but better to let FBR fail and report it
+             # buyer_cnic = "0000000000000" 
 
         return {
             "InvoiceNumber": data.get("invoice_number", ""),
             "POSID": pos_id,
             "USIN": data.get("invoice_number", ""),
             "DateTime": dt_str,
-            "BuyerNTN": data.get("buyer_ntn") or "1234567-8",
+            "BuyerNTN": buyer_ntn,
             "BuyerCNIC": buyer_cnic,
             "BuyerName": data.get("buyer_name") or "Buyer Name",
-            "BuyerPhoneNumber": data.get("buyer_phone") or "0000-0000000",
-            "TotalBillAmount": data.get("total_amount"),
-            "TotalQuantity": data.get("total_quantity"),
-            "TotalSaleValue": data.get("total_sale_value"),
-            "TotalTaxCharged": data.get("total_tax_charged"),
-            "TotalFurtherTax": data.get("total_further_tax", 0.0),
+            "BuyerPhoneNumber": data.get("buyer_phone") or None,
+            "TotalBillAmount": round(float(data.get("total_amount", 0.0)), 2),
+            "TotalQuantity": round(float(data.get("total_quantity", 0.0)), 2),
+            "TotalSaleValue": round(float(data.get("total_sale_value", 0.0)), 2),
+            "TotalTaxCharged": round(float(data.get("total_tax_charged", 0.0)), 2),
+            "TotalFurtherTax": round(float(data.get("total_further_tax", 0.0)), 2),
             "PaymentMode": mode_int,
             "InvoiceType": 1,
             "Items": items

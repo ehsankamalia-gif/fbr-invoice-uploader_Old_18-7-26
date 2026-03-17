@@ -35,8 +35,8 @@ def test_transform_to_fbr_format(invoice_data):
     fbr_data = client._transform_to_fbr_format(invoice_data, settings)
     
     assert fbr_data["InvoiceNumber"] == "INV-001"
-    assert len(fbr_data["items"]) == 1 # Was "Items"
-    assert fbr_data["items"][0]["ItemCode"] == "1" # Was "Items"
+    assert len(fbr_data["Items"]) == 1 # Was "items"
+    assert fbr_data["Items"][0]["ItemCode"] == "1" # Was "items"
 
 @patch("requests.post")
 def test_post_invoice_success(mock_post, invoice_data):

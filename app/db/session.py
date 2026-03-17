@@ -192,16 +192,19 @@ def run_migrations():
     try:
         with engine.connect() as conn:
             # 1. Ensure migration_history table exists
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS migration_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    version INTEGER UNIQUE NOT NULL,
-                    description VARCHAR(255),
-                    applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            """))
-            conn.commit()
+            # We use cross-platform check for table existence
+            is_sqlite = "sqlite" in str(engine.url)
+            if is_sqlite:
+                table_check = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='migration_history'")).fetchone()
+            else:
+                table_check = conn.execute(text("SHOW TABLES LIKE 'migration_history'")).fetchone()
 
+            if not table_check:
+                logger.info("Creating migration_history table...")
+                MigrationHistory.__table__.create(bind=engine)
+                if not is_sqlite:
+                    conn.commit()
+            
             # 2. Get current DB version
             result = conn.execute(text("SELECT MAX(version) FROM migration_history")).fetchone()
             current_db_version = result[0] if result[0] is not None else 0
@@ -267,14 +270,16 @@ def _migration_v2_add_https(conn) -> bool:
 def _migration_v3_add_app_configs(conn) -> bool:
     """Creates the app_configurations table if it doesn't exist."""
     try:
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS app_configurations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                auto_push_enabled BOOLEAN DEFAULT 0,
-                auto_push_interval INTEGER DEFAULT 5,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """))
+        # Check if table exists
+        is_sqlite = "sqlite" in str(engine.url)
+        if is_sqlite:
+            table_check = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='app_configurations'")).fetchone()
+        else:
+            table_check = conn.execute(text("SHOW TABLES LIKE 'app_configurations'")).fetchone()
+
+        if not table_check:
+            logger.info("Creating app_configurations table...")
+            AppConfiguration.__table__.create(bind=conn)
         return True
     except Exception as e:
         logger.error(f"Migration v3 failed: {e}")

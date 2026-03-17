@@ -257,12 +257,16 @@ class InvoiceService:
             # This might raise requests.RequestException if offline
             response = fbr_client.post_invoice(invoice_data)
             
-            if response and "InvoiceNumber" in response:
+            # FBR Success is indicated by Code 100
+            response_code = str(response.get("Code")) if response and response.get("Code") else None
+            is_success = response_code == "100"
+            
+            if is_success and "InvoiceNumber" in response:
                 invoice.fbr_invoice_number = response.get("InvoiceNumber")
                 invoice.is_fiscalized = True
                 invoice.sync_status = "SYNCED"
                 invoice.status_updated_at = datetime.utcnow()
-                invoice.fbr_response_code = str(response.get("Code")) if response.get("Code") else None
+                invoice.fbr_response_code = response_code
                 invoice.fbr_response_message = "Success"
                 invoice.fbr_full_response = response
 
