@@ -102,6 +102,7 @@ class CampaignRow:
     failed: int
     total: int
     created_at: dt.datetime
+    error_message: str = ""
 
 
 class BackupWorker(QObject):
@@ -3886,7 +3887,7 @@ class MainWindow(QMainWindow):
         """Deletes the selected campaign after confirmation."""
         from app.services.bulk_sms_service import bulk_sms_service
         
-        selected = self.campaign_table_view.selectionModel().selectedRows() if hasattr(self, 'campaign_table_view') else self.campaigns_table_view.selectionModel().selectedRows()
+        selected = self.campaigns_table_view.selectionModel().selectedRows()
         if not selected:
             QMessageBox.warning(self, "Selection Required / انتخاب ضروری ہے", "Please select a campaign to delete.")
             return
