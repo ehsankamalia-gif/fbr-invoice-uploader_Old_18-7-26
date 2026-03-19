@@ -289,9 +289,9 @@ class SMSService:
             db.close()
 
     def queue_invoice_sms(self, db, invoice):
-        """Queues an SMS for a new invoice."""
+        """Queues an SMS and/or WhatsApp for a new invoice."""
         config = db.query(SMSConfiguration).first()
-        if not config or not config.is_enabled:
+        if not config:
             return
 
         customer_name = invoice.customer.name if invoice.customer else "Customer"
@@ -308,12 +308,69 @@ class SMSService:
             fbr_id=invoice.fbr_invoice_number or "Pending"
         )
 
-        new_sms = SMSQueue(
-            phone_number=phone,
-            message=message,
-            invoice_id=invoice.id
-        )
-        db.add(new_sms)
+        # Queue SMS if enabled
+        if config.is_enabled:
+            new_sms = SMSQueue(
+                phone_number=phone,
+                message=message,
+                invoice_id=invoice.id,
+                channel="SMS"
+            )
+            db.add(new_sms)
+
+        # Queue WhatsApp if enabled
+        if config.whatsapp_enabled:
+            new_wa = SMSQueue(
+                phone_number=phone,
+                message=message,
+                invoice_id=invoice.id,
+                channel="WHATSAPP"
+            )
+            db.add(new_wa)
+            
         db.commit()
+
+    def send_whatsapp_via_gateway(self, ip: str, port: str, phone_number: str, msg_content: str,
+                                  instance_id: Optional[str] = None,
+                                  api_key: Optional[str] = None) -> tuple[bool, str]:
+        """
+        Sends a WhatsApp message using an Android Gateway App (Option 2).
+        Supports common gateway formats.
+        """
+        tx_id = str(uuid.uuid4())[:8]
+        logger.info(f"[WA:{tx_id}] Attempting WhatsApp to {phone_number} via {ip}:{port}")
+        
+        try:
+            # Common payload for WA gateways
+            payload = {
+                "number": phone_number,
+                "message": msg_content,
+                "instance_id": instance_id
+            }
+            
+            headers = {"Content-Type": "application/json"}
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+                headers["X-API-KEY"] = api_key
+
+            # Try common endpoints for WA gateways
+            endpoints = ["/send-message", "/whatsapp/send", "/api/sendText"]
+            
+            for ep in endpoints:
+                try:
+                    url = f"http://{ip}:{port}{ep}"
+                    logger.info(f"[WA:{tx_id}] Probing endpoint: {url}")
+                    response = self.session.post(url, json=payload, headers=headers, timeout=10.0)
+                    
+                    if response.status_code in [200, 201, 202]:
+                        return True, f"WhatsApp Success via {ep}"
+                except:
+                    continue
+                    
+            return False, "Could not reach WhatsApp gateway on any common endpoint."
+            
+        except Exception as e:
+            logger.error(f"[WA:{tx_id}] WhatsApp Gateway Error: {e}")
+            return False, str(e)
 
 sms_service = SMSService()

@@ -85,6 +85,49 @@ class BackupService:
         self.stop_event = threading.Event()
         self._operation_lock = threading.Lock() # Prevent simultaneous backup/restore operations
 
+    def get_config(self) -> Dict:
+        """Returns the current configuration as a dictionary."""
+        return {
+            "backup_path": self.config.local_path,
+            "auto_backup": self.config.enabled,
+            "interval": self.config.interval,
+            "backup_time": self.config.time_str,
+            "retention_days": self.config.retention_days,
+            "encrypt": self.config.encrypt
+        }
+
+    def update_config(self, backup_path: str = None, auto_backup: bool = None, 
+                      interval: str = None, backup_time: str = None, 
+                      retention_days: int = None, encrypt: bool = None):
+        """Updates and saves the configuration."""
+        if backup_path is not None: self.config.local_path = backup_path
+        if auto_backup is not None: self.config.enabled = auto_backup
+        if interval is not None: self.config.interval = interval
+        if backup_time is not None: self.config.time_str = backup_time
+        if retention_days is not None: self.config.retention_days = retention_days
+        if encrypt is not None: self.config.encrypt = encrypt
+        
+        self.save_config()
+        
+        # Restart scheduler if needed
+        if self.config.enabled:
+            self.start_scheduler()
+        else:
+            self.stop_scheduler()
+
+    def delete_backup(self, path_str: str) -> bool:
+        """Deletes a backup file."""
+        try:
+            path = Path(path_str)
+            if path.exists():
+                os.remove(path)
+                logger.info(f"Deleted backup: {path.name}")
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Failed to delete backup {path_str}: {e}")
+            return False
+
     def load_config(self) -> BackupConfig:
         if self.config_file.exists():
             try:
