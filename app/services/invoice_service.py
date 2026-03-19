@@ -257,7 +257,12 @@ class InvoiceService:
             logger.info(f"Syncing invoice {invoice.invoice_number} to FBR...")
             
             # This might raise requests.RequestException if offline
-            response = fbr_client.post_invoice(invoice_data)
+            try:
+                response = fbr_client.post_invoice(invoice_data)
+                logger.info(f"FBR API Raw Response for {invoice.invoice_number}: {response}")
+            except Exception as sync_err:
+                logger.error(f"FBR API Call failed for {invoice.invoice_number}: {sync_err}", exc_info=True)
+                raise sync_err
             
             # FBR Success is indicated by Code 100
             response_code = str(response.get("Code")) if response and response.get("Code") else None
