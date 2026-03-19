@@ -265,11 +265,11 @@ class BusinessPreferencesDialog(BaseSettingsDialog):
         env = settings_service.get_active_environment()
         data = settings_service.get_environment(env)
         if data:
-            self.business_name.setText(data.get("business_name", "Ehsan Trader"))
+            self.business_name.setText(data.get("business_name", "Ehsan Trader Kamalia Pakistan"))
             self.tax_rate.setValue(float(data.get("tax_rate", 18.0)))
             self.pct_code.setText(data.get("pct_code", "8711.2010"))
-            self.item_code.setText(data.get("item_code", "MOTO"))
-            self.item_name.setText(data.get("item_name", "Motorcycle"))
+            self.item_code.setText(data.get("item_code", "ITEMCODE"))
+            self.item_name.setText(data.get("item_name", "Honda"))
             self.invoice_type.setCurrentText(data.get("invoice_type", "Standard"))
             self.discount.setValue(float(data.get("discount", 0.0)))
 

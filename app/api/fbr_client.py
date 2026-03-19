@@ -52,6 +52,11 @@ class FBRClient:
             # We map our internal structure to FBR's expected structure here.
             payload = self._transform_to_fbr_format(invoice_data, settings)
             
+            # Log the settings used for this transmission as requested by user
+            logger.info(f"FBR Sync: Using Business Rules - Name: {settings.get('business_name')}, "
+                        f"Tax: {settings.get('tax_rate')}%, PCT: {settings.get('pct_code')}, "
+                        f"Type: {settings.get('invoice_type')}, Discount: {settings.get('discount')}%")
+            
             # Validate payload before sending
             self._validate_payload(payload)
             
@@ -143,6 +148,17 @@ class FBRClient:
         """
         Transforms internal invoice data to FBR compliant JSON.
         """
+        # Map Invoice Type string to Integer for FBR
+        invoice_type_map = {
+            "Standard": 1,
+            "Debit Note": 2,
+            "Credit Note": 3
+        }
+        
+        # Get default invoice type from settings or fall back to Standard (1)
+        setting_invoice_type = settings.get("invoice_type", "Standard")
+        default_invoice_type_int = invoice_type_map.get(setting_invoice_type, 1)
+
         items = []
         for item in data.get("items", []):
             # Prioritize item-level PCT, then settings-level if available
@@ -151,6 +167,9 @@ class FBRClient:
                 raw_pct = settings.get("pct_code")
                 
             pct_code = self._validate_pct_code(raw_pct)
+            
+            # Use item discount if provided, otherwise default to settings discount
+            discount = float(item.get("discount", settings.get("discount", 0.0)))
             
             items.append({
                 "ItemCode": str(item.get("item_code")),
@@ -161,9 +180,9 @@ class FBRClient:
                 "SaleValue": round(float(item.get("sale_value", 0.0)), 2),
                 "TotalAmount": round(float(item.get("total_amount", 0.0)), 2),
                 "TaxCharged": round(float(item.get("tax_charged", 0.0)), 2),
-                "Discount": round(float(item.get("discount", 0.0)), 2),
+                "Discount": round(discount, 2),
                 "FurtherTax": round(float(item.get("further_tax", 0.0)), 2),
-                "InvoiceType": 1
+                "InvoiceType": default_invoice_type_int
             })
 
         # Map Payment Mode string to Integer
@@ -231,7 +250,7 @@ class FBRClient:
             "TotalTaxCharged": round(float(data.get("total_tax_charged", 0.0)), 2),
             "TotalFurtherTax": round(float(data.get("total_further_tax", 0.0)), 2),
             "PaymentMode": mode_int,
-            "InvoiceType": 1,
+            "InvoiceType": default_invoice_type_int,
             "Items": items
         }
 

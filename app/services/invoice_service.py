@@ -119,6 +119,7 @@ class InvoiceService:
                 further_tax=further_tax,
                 tax_charged=tax_charged,
                 total_amount=line_total,
+                discount=item.discount,
                 motorcycle_id=motorcycle_id
                 # Removed chassis_number, engine_number from InvoiceItem
             )
@@ -178,6 +179,7 @@ class InvoiceService:
             total_further_tax=total_further_tax,
             total_quantity=total_quantity,
             total_amount=total_amount,
+            discount=invoice_in.discount,
             payment_mode=invoice_in.payment_mode,
             items=db_items,
             
