@@ -145,7 +145,28 @@ class MySQLRestoreWorker(QObject):
         except Exception as e:
             logger.error(f"MySQLRestoreWorker failed: {e}", exc_info=True)
             self.error.emit(str(e))
-    error_message: str = ""
+
+
+class InvoiceSubmissionWorker(QThread):
+    """Background worker for invoice creation and sync to prevent UI freezing."""
+    finished = pyqtSignal(object)
+    error = pyqtSignal(str)
+    
+    def __init__(self, invoice_in: InvoiceCreate):
+        super().__init__()
+        self.invoice_in = invoice_in
+        
+    def run(self):
+        db = SessionLocal()
+        try:
+            logger.info(f"Background SubmissionWorker started for invoice {self.invoice_in.invoice_number}")
+            created = invoice_service.create_invoice(db, self.invoice_in)
+            self.finished.emit(created)
+        except Exception as e:
+            logger.error(f"Background SubmissionWorker failed: {e}", exc_info=True)
+            self.error.emit(str(e))
+        finally:
+            db.close()
 
 @dataclass
 class CapturedDataRow:
@@ -5062,7 +5083,8 @@ class MainWindow(QMainWindow):
         
         # Disable button during submission to prevent double-clicks
         self.invoice_submit_btn.setEnabled(False)
-        self.invoice_submit_btn.setText("Submitting...")
+        self.invoice_submit_btn.setText("⏳ Submitting...")
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         QApplication.processEvents() # Ensure UI updates
 
         inv_num = self.invoice_number_input.text().strip()
@@ -5082,13 +5104,16 @@ class MainWindow(QMainWindow):
         engine = self.invoice_engine_input.text().strip().upper()
         model_name = self.invoice_model_combo.currentText().strip()
         color = self.invoice_color_combo.currentText().strip()
+        
         settings = settings_service.get_active_settings()
         sales_tax_rate = float(settings.get("tax_rate", 18.0))
         fbr_item_name_base = settings.get("item_name", "Motorcycle") or "Motorcycle"
         fbr_item_code_base = settings.get("item_code", "MOTO") or "MOTO"
         fbr_pct_code = settings.get("pct_code", "8711.2010") or "8711.2010"
+        
         final_item_name = f"{fbr_item_name_base} {model_name} {color}"
         final_item_code = f"{fbr_item_code_base}-{model_name}-{color}"
+        
         item = InvoiceItemCreate(
             item_code=final_item_code,
             item_name=final_item_name,
@@ -5103,7 +5128,8 @@ class MainWindow(QMainWindow):
             model_name=model_name,
             color=color,
         )
-        inv = InvoiceCreate(
+        
+        inv_data = InvoiceCreate(
             invoice_number=inv_num,
             buyer_cnic=buyer_cnic,
             buyer_name=buyer_name,
@@ -5115,53 +5141,73 @@ class MainWindow(QMainWindow):
             payment_mode=payment_mode,
             items=[item],
         )
+
+        # Start background worker
+        self._submission_worker = InvoiceSubmissionWorker(inv_data)
+        self._submission_worker.finished.connect(self._handle_submission_success)
+        self._submission_worker.error.connect(self._handle_submission_error)
+        self._submission_worker.start()
+
+    def _handle_submission_success(self, created: Invoice) -> None:
+        """Called when background invoice submission succeeds."""
+        QApplication.restoreOverrideCursor()
+        self.invoice_submit_btn.setEnabled(True)
+        self.invoice_submit_btn.setText("Submit to FBR")
+        
+        inv_num = created.invoice_number
+        fbr_id = created.fbr_invoice_number or "N/A"
+        
+        self._show_success(
+            "Submission Success",
+            f"Invoice {inv_num} has been successfully created and queued for FBR sync.\n\nFBR ID: {fbr_id}"
+        )
+        
+        self._reset_invoice_form()
+        self._generate_invoice_number()
+        self._update_fbr_submitted_counter()
+        
+        # Independent Printing logic
+        self._handle_post_submission_print(created)
+        
+        # Queue SMS if enabled (using fresh DB session)
         db = SessionLocal()
         try:
-            logger.info("Submitting invoice %s for %s", inv_num, buyer_name)
-            created = invoice_service.create_invoice(db, inv)
-            fbr_id = created.fbr_invoice_number or "N/A"
-            self._show_success(
-                "Submission Success",
-                f"Invoice {inv_num} has been successfully created and queued for FBR sync.\n\nFBR ID: {fbr_id}"
-            )
-            self._reset_invoice_form()
-            self._generate_invoice_number()
-            self._update_fbr_submitted_counter() # Update counter after submission
-            
-            # Independent Printing logic
-            self._handle_post_submission_print(created)
-            
-            # Queue SMS if enabled
             from app.services.sms_service import sms_service
-            sms_service.queue_invoice_sms(db, created)
+            # Need to re-merge or re-fetch the invoice into the new session
+            merged_invoice = db.merge(created)
+            sms_service.queue_invoice_sms(db, merged_invoice)
+            db.commit()
             # Start background processing of SMS queue
             QTimer.singleShot(1000, sms_service.process_queue)
-
-            if created.fbr_invoice_number:
-                self.invoice_fbr_number_display.setText(f"FBR INV: {created.fbr_invoice_number}")
-                self._display_invoice_qr(created.fbr_invoice_number)
-            else:
-                self.invoice_fbr_number_display.setText("FBR SYNC PENDING")
-        except RetryError as exc:
-            try:
-                last_exc = exc.last_attempt.exception()
-                if isinstance(last_exc, requests.exceptions.ConnectionError):
-                    msg = "Could not connect to FBR server. Check internet connection or FBR URL settings."
-                elif isinstance(last_exc, requests.exceptions.Timeout):
-                    msg = "Connection to FBR server timed out."
-                else:
-                    msg = f"FBR submission failed: {str(last_exc)}"
-            except Exception:
-                msg = f"FBR submission error: {str(exc)}"
-            logger.error("FBR RetryError: %s", msg)
-            self._show_error("FBR Connection Error", msg)
-        except Exception as exc:
-            logger.error("Unexpected error during invoice submission: %s", exc, exc_info=True)
-            self._show_error("System Error", f"An unexpected error occurred during submission:\n\n{str(exc)}")
+        except Exception as e:
+            logger.error(f"Error queuing SMS: {e}")
         finally:
-            self.invoice_submit_btn.setText("Submit to FBR")
-            self._check_invoice_form_completeness() # Re-evaluate state
             db.close()
+
+        if created.fbr_invoice_number:
+            self.invoice_fbr_number_display.setText(f"FBR INV: {created.fbr_invoice_number}")
+            self._display_invoice_qr(created.fbr_invoice_number)
+        else:
+            self.invoice_fbr_number_display.setText("FBR SYNC PENDING")
+        
+        self._check_invoice_form_completeness()
+
+    def _handle_submission_error(self, error_msg: str) -> None:
+        """Called when background invoice submission fails."""
+        QApplication.restoreOverrideCursor()
+        self.invoice_submit_btn.setEnabled(True)
+        self.invoice_submit_btn.setText("Submit to FBR")
+        
+        logger.error(f"FBR submission error caught in UI: {error_msg}")
+        
+        # Check if it's a known FBR connection error to show friendly message
+        if "ConnectionError" in error_msg or "Timeout" in error_msg:
+            msg = "Could not connect to FBR server. Check internet connection or FBR URL settings."
+        else:
+            msg = f"Submission failed: {error_msg}"
+            
+        self._show_error("Submission Error", msg)
+        self._check_invoice_form_completeness()
 
     def _reset_invoice_form(self) -> None:
         self._is_dealer_selected = False
