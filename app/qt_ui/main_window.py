@@ -88,6 +88,13 @@ from app.services.backup_service import backup_service
 from app.services.print_service_v2 import print_service_v2
 from app.qt_ui.dealer_search_dialog import DealerSearchDialog
 from app.qt_ui.web_import_dialog import WebImportDialog
+from app.qt_ui.settings_modals import (
+    FBRSecurityDialog, 
+    BusinessPreferencesDialog, 
+    DatabaseSettingsDialog, 
+    BackupSettingsDialog,
+    AppUpdatesDialog
+)
 from app.core.logger import logger
 from app.core.version_manager import VersionManager
 from app.updater.updater_manager import UpdaterManager
@@ -102,6 +109,7 @@ class CampaignRow:
     failed: int
     total: int
     created_at: dt.datetime
+    channel: str = "SMS"
     error_message: str = ""
 
 
@@ -137,7 +145,28 @@ class MySQLRestoreWorker(QObject):
         except Exception as e:
             logger.error(f"MySQLRestoreWorker failed: {e}", exc_info=True)
             self.error.emit(str(e))
-    error_message: str = ""
+
+
+class InvoiceSubmissionWorker(QThread):
+    """Background worker for invoice creation and sync to prevent UI freezing."""
+    finished = pyqtSignal(int) # Returns invoice ID
+    error = pyqtSignal(str)
+    
+    def __init__(self, invoice_in: InvoiceCreate):
+        super().__init__()
+        self.invoice_in = invoice_in
+        
+    def run(self):
+        db = SessionLocal()
+        try:
+            logger.info(f"Background SubmissionWorker started for invoice {self.invoice_in.invoice_number}")
+            created = invoice_service.create_invoice(db, self.invoice_in)
+            self.finished.emit(created.id)
+        except Exception as e:
+            logger.error(f"Background SubmissionWorker failed: {e}", exc_info=True)
+            self.error.emit(str(e))
+        finally:
+            db.close()
 
 @dataclass
 class CapturedDataRow:
@@ -2319,693 +2348,100 @@ class MainWindow(QMainWindow):
         return page
 
     def _create_settings_page(self) -> QWidget:
+        """Dashboard-style settings page with category launchers."""
         page = QWidget(self)
         root_layout = QVBoxLayout(page)
-        root_layout.setContentsMargins(30, 30, 30, 30)
-        root_layout.setSpacing(20)
+        root_layout.setContentsMargins(40, 40, 40, 40)
+        root_layout.setSpacing(30)
 
-        header = QLabel("Application Settings")
+        header_layout = QHBoxLayout()
+        header = QLabel("Settings Dashboard")
         header.setObjectName("pageHeader")
-        root_layout.addWidget(header)
+        header.setStyleSheet("font-size: 28px; color: #2c3e50; font-weight: bold;")
+        header_layout.addWidget(header)
+        header_layout.addStretch(1)
+        root_layout.addLayout(header_layout)
 
-        scroll = QScrollArea(page)
-        scroll.setWidgetResizable(True)
-        root_layout.addWidget(scroll, 1)
-
-        container = QWidget()
-        scroll.setWidget(container)
-        container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(0, 0, 10, 0)
-        container_layout.setSpacing(20)
-
-        # --- Group 1: FBR Configuration ---
-        fbr_group = QFrame()
-        fbr_group.setObjectName("formGroup")
-        fbr_layout = QGridLayout(fbr_group)
-        fbr_layout.setContentsMargins(20, 25, 20, 20)
-        fbr_layout.setHorizontalSpacing(20)
-        fbr_layout.setVerticalSpacing(15)
-
-        fbr_title = QLabel("FBR API CONFIGURATION")
-        fbr_title.setObjectName("groupTitle")
-        fbr_layout.addWidget(fbr_title, 0, 0, 1, 2)
-
-        fbr_layout.addWidget(QLabel("Environment"), 1, 0)
-        self.settings_env_combo = QComboBox()
-        self.settings_env_combo.addItems(["SANDBOX", "PRODUCTION"])
-        self.settings_env_combo.currentTextChanged.connect(self._load_settings_for_env)
-        fbr_layout.addWidget(self.settings_env_combo, 1, 1)
-
-        fbr_layout.addWidget(QLabel("API Base URL"), 2, 0)
-        self.settings_api_url = QLineEdit()
-        fbr_layout.addWidget(self.settings_api_url, 2, 1)
-
-        fbr_layout.addWidget(QLabel("POS ID"), 3, 0)
-        self.settings_pos_id = QLineEdit()
-        fbr_layout.addWidget(self.settings_pos_id, 3, 1)
-
-        fbr_layout.addWidget(QLabel("USIN"), 4, 0)
-        self.settings_usin = QLineEdit()
-        fbr_layout.addWidget(self.settings_usin, 4, 1)
-
-        fbr_layout.addWidget(QLabel("Auth Token"), 5, 0)
-        self.settings_auth_token = QLineEdit()
-        self.settings_auth_token.setEchoMode(QLineEdit.EchoMode.PasswordEchoOnEdit)
-        fbr_layout.addWidget(self.settings_auth_token, 5, 1)
-
-        container_layout.addWidget(fbr_group)
-
-        # --- Group 2: Business & Tax Rules ---
-        tax_group = QFrame()
-        tax_group.setObjectName("formGroup")
-        tax_layout = QGridLayout(tax_group)
-        tax_layout.setContentsMargins(20, 25, 20, 20)
-        tax_layout.setHorizontalSpacing(20)
-        tax_layout.setVerticalSpacing(15)
-
-        tax_title = QLabel("BUSINESS & TAX RULES")
-        tax_title.setObjectName("groupTitle")
-        tax_layout.addWidget(tax_title, 0, 0, 1, 4)
-
-        tax_layout.addWidget(QLabel("Default Sales Tax (%)"), 1, 0)
-        self.settings_tax_rate = QDoubleSpinBox()
-        self.settings_tax_rate.setRange(0, 100)
-        self.settings_tax_rate.setDecimals(1)
-        tax_layout.addWidget(self.settings_tax_rate, 1, 1)
-
-        tax_layout.addWidget(QLabel("PCT Code"), 1, 2)
-        self.settings_pct_code = QLineEdit()
-        tax_layout.addWidget(self.settings_pct_code, 1, 3)
-
-        tax_layout.addWidget(QLabel("Item Code Prefix"), 2, 0)
-        self.settings_item_code = QLineEdit()
-        tax_layout.addWidget(self.settings_item_code, 2, 1)
-
-        tax_layout.addWidget(QLabel("Default Item Name"), 2, 2)
-        self.settings_item_name = QLineEdit()
-        tax_layout.addWidget(self.settings_item_name, 2, 3)
-
-        tax_layout.addWidget(QLabel("Default Invoice Type"), 3, 0)
-        self.settings_invoice_type = QComboBox()
-        self.settings_invoice_type.addItems(["Standard", "Debit Note", "Credit Note"])
-        tax_layout.addWidget(self.settings_invoice_type, 3, 1)
-
-        tax_layout.addWidget(QLabel("Default Discount (%)"), 3, 2)
-        self.settings_discount = QDoubleSpinBox()
-        self.settings_discount.setRange(0, 100)
-        tax_layout.addWidget(self.settings_discount, 3, 3)
-
-        tax_layout.addWidget(QLabel("Business Name"), 4, 0)
-        self.settings_business_name = QLineEdit()
-        tax_layout.addWidget(self.settings_business_name, 4, 1, 1, 3) # Span 3 columns
-
-        container_layout.addWidget(tax_group)
-
-        # --- Group 3: Application Updates ---
-        update_group = QFrame()
-        update_group.setObjectName("formGroup")
-        update_layout = QGridLayout(update_group)
-        update_layout.setContentsMargins(20, 25, 20, 20)
-        update_layout.setHorizontalSpacing(20)
-        update_layout.setVerticalSpacing(15)
-
-        update_title = QLabel("APPLICATION UPDATES")
-        update_title.setObjectName("groupTitle")
-        update_layout.addWidget(update_title, 0, 0, 1, 2)
-
-        from app.core.version_manager import VersionManager
-        update_layout.addWidget(QLabel("Current Version:"), 1, 0)
-        self.settings_version_label = QLabel(VersionManager.get_version_string())
-        self.settings_version_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
-        update_layout.addWidget(self.settings_version_label, 1, 1)
-
-        self.manual_update_btn = QPushButton("🔄 Check for Updates Now")
-        self.manual_update_btn.setFixedWidth(200)
-        self.manual_update_btn.clicked.connect(self._on_manual_update_check)
-        update_layout.addWidget(self.manual_update_btn, 2, 0, 1, 2)
-
-        container_layout.addWidget(update_group)
-
-        # --- Group 3.5: Database Connection ---
-        db_group = QFrame()
-        db_group.setObjectName("formGroup")
-        db_layout = QGridLayout(db_group)
-        db_layout.setContentsMargins(20, 25, 20, 20)
-        db_layout.setHorizontalSpacing(20)
-        db_layout.setVerticalSpacing(15)
-
-        db_title = QLabel("DATABASE CONNECTION")
-        db_title.setObjectName("groupTitle")
-        db_layout.addWidget(db_title, 0, 0, 1, 4)
-
-        db_layout.addWidget(QLabel("Server (Host)"), 1, 0)
-        self.settings_db_server = QLineEdit()
-        db_layout.addWidget(self.settings_db_server, 1, 1)
-
-        db_layout.addWidget(QLabel("Port"), 1, 2)
-        self.settings_db_port = QLineEdit()
-        self.settings_db_port.setPlaceholderText("3306")
-        db_layout.addWidget(self.settings_db_port, 1, 3)
-
-        db_layout.addWidget(QLabel("Database Name"), 2, 0)
-        self.settings_db_name = QLineEdit()
-        db_layout.addWidget(self.settings_db_name, 2, 1)
-
-        db_layout.addWidget(QLabel("Username"), 2, 2)
-        self.settings_db_user = QLineEdit()
-        db_layout.addWidget(self.settings_db_user, 2, 3)
-
-        db_layout.addWidget(QLabel("Password"), 3, 0)
-        self.settings_db_password = QLineEdit()
-        self.settings_db_password.setEchoMode(QLineEdit.EchoMode.PasswordEchoOnEdit)
-        db_layout.addWidget(self.settings_db_password, 3, 1)
-
-        self.test_db_btn = QPushButton("🔌 Test Connection")
-        self.test_db_btn.setFixedWidth(150)
-        self.test_db_btn.clicked.connect(self._on_test_db_connection)
-        db_layout.addWidget(self.test_db_btn, 3, 2, 1, 2)
-
-        container_layout.addWidget(db_group)
-
-        # --- Group 4: Database Backup & Restore ---
-        backup_group = QFrame()
-        backup_group.setObjectName("formGroup")
-        backup_layout = QVBoxLayout(backup_group)
-        backup_layout.setContentsMargins(20, 25, 20, 20)
-        backup_layout.setSpacing(15)
-
-        backup_title_layout = QHBoxLayout()
-        backup_title = QLabel("DATABASE BACKUP & RESTORE")
-        backup_title.setObjectName("groupTitle")
-        backup_title.setStyleSheet("color: #2c3e50; font-weight: bold;")
-        backup_title_layout.addWidget(backup_title)
-        backup_title_layout.addStretch(1)
+        # Grid for settings categories
+        grid_container = QWidget()
+        grid_layout = QGridLayout(grid_container)
+        grid_layout.setSpacing(25)
         
-        self.manual_backup_btn = QPushButton("💾 Create Backup Now")
-        self.manual_backup_btn.setStyleSheet("background-color: #27ae60; color: white; padding: 5px 15px;")
-        self.manual_backup_btn.clicked.connect(self._on_create_manual_backup)
-        backup_title_layout.addWidget(self.manual_backup_btn)
+        categories = [
+            ("Security & FBR API", "🔒", "Configure FBR credentials, tokens, and environments.", self._open_fbr_security),
+            ("Business Preferences", "🏢", "Set tax rules, PCT codes, and business identity.", self._open_business_prefs),
+            ("Database Connection", "🗄️", "Manage MySQL server, credentials, and connectivity.", self._open_db_settings),
+            ("Backup & Maintenance", "💾", "Schedule backups, restore data, and manage storage.", self._open_backup_settings),
+            ("System Updates", "🔄", "Check for software updates and view version info.", self._open_app_updates),
+            ("SMS & Messaging", "💬", "Configure SMS/WhatsApp gateways and templates.", lambda: self._select_page("sms")),
+        ]
 
-        self.restore_external_btn = QPushButton("📂 Restore from File...")
-        self.restore_external_btn.setStyleSheet("background-color: #3498db; color: white; padding: 5px 15px;")
-        self.restore_external_btn.clicked.connect(self._on_restore_external_file)
-        backup_title_layout.addWidget(self.restore_external_btn)
-        
-        backup_layout.addLayout(backup_title_layout)
+        for i, (title, icon, desc, callback) in enumerate(categories):
+            card = QFrame()
+            card.setObjectName("formGroup")
+            card.setCursor(Qt.CursorShape.PointingHandCursor)
+            card.setStyleSheet("""
+                QFrame#formGroup {
+                    background-color: white;
+                    border: 1px solid #e0e0e0;
+                    border-radius: 12px;
+                    padding: 20px;
+                }
+                QFrame#formGroup:hover {
+                    border: 1px solid #3498db;
+                    background-color: #f8fbff;
+                }
+            """)
+            
+            card_layout = QVBoxLayout(card)
+            
+            icon_lbl = QLabel(icon)
+            icon_lbl.setStyleSheet("font-size: 36px; margin-bottom: 5px;")
+            card_layout.addWidget(icon_lbl)
+            
+            title_lbl = QLabel(title)
+            title_lbl.setStyleSheet("font-size: 16px; font-weight: bold; color: #2c3e50;")
+            card_layout.addWidget(title_lbl)
+            
+            desc_lbl = QLabel(desc)
+            desc_lbl.setWordWrap(True)
+            desc_lbl.setStyleSheet("color: #7f8c8d; font-size: 13px; margin-top: 5px;")
+            card_layout.addWidget(desc_lbl)
+            
+            card_layout.addStretch(1)
+            
+            # Make card clickable
+            card.mousePressEvent = lambda e, cb=callback: cb()
+            
+            grid_layout.addWidget(card, i // 3, i % 3)
 
-        # Settings sub-layout
-        backup_settings_grid = QGridLayout()
-        backup_settings_grid.setSpacing(15)
-
-        backup_settings_grid.addWidget(QLabel("Backup Location:"), 0, 0)
-        backup_path_layout = QHBoxLayout()
-        self.backup_path_input = QLineEdit()
-        self.backup_path_input.setReadOnly(True)
-        backup_path_layout.addWidget(self.backup_path_input)
-        
-        self.browse_backup_btn = QPushButton("📂 Browse")
-        self.browse_backup_btn.setFixedWidth(80)
-        self.browse_backup_btn.clicked.connect(self._on_browse_backup_path)
-        backup_path_layout.addWidget(self.browse_backup_btn)
-        backup_settings_grid.addLayout(backup_path_layout, 0, 1)
-
-        self.backup_auto_enabled = QCheckBox("Enable Automatic Scheduled Backups")
-        self.backup_auto_enabled.stateChanged.connect(self._on_backup_settings_changed)
-        backup_settings_grid.addWidget(self.backup_auto_enabled, 1, 0, 1, 2)
-
-        backup_settings_grid.addWidget(QLabel("Backup Interval:"), 2, 0)
-        self.backup_interval_combo = QComboBox()
-        self.backup_interval_combo.addItems(["daily", "weekly", "monthly"])
-        self.backup_interval_combo.currentTextChanged.connect(self._on_backup_settings_changed)
-        backup_settings_grid.addWidget(self.backup_interval_combo, 2, 1)
-
-        backup_settings_grid.addWidget(QLabel("Backup Time (HH:MM):"), 3, 0)
-        self.backup_time_input = QLineEdit()
-        self.backup_time_input.setPlaceholderText("00:00")
-        self.backup_time_input.textChanged.connect(self._on_backup_settings_changed)
-        backup_settings_grid.addWidget(self.backup_time_input, 3, 1)
-
-        backup_settings_grid.addWidget(QLabel("Retention (Days):"), 4, 0)
-        self.backup_retention_spin = QSpinBox()
-        self.backup_retention_spin.setRange(1, 365)
-        self.backup_retention_spin.setValue(30)
-        self.backup_retention_spin.valueChanged.connect(self._on_backup_settings_changed)
-        backup_settings_grid.addWidget(self.backup_retention_spin, 4, 1)
-
-        self.backup_encrypt_enabled = QCheckBox("Encrypt Backup Files (Professional Security)")
-        self.backup_encrypt_enabled.setChecked(True)
-        self.backup_encrypt_enabled.stateChanged.connect(self._on_backup_settings_changed)
-        backup_settings_grid.addWidget(self.backup_encrypt_enabled, 5, 0, 1, 2)
-
-        backup_layout.addLayout(backup_settings_grid)
-
-        # Recent Backups Table
-        backup_list_label = QLabel("RECENT BACKUPS")
-        backup_list_label.setStyleSheet("font-weight: bold; color: #7f8c8d; font-size: 11px; margin-top: 10px;")
-        backup_layout.addWidget(backup_list_label)
-
-        self.backup_table = QTableWidget()
-        self.backup_table.setColumnCount(4)
-        self.backup_table.setHorizontalHeaderLabels(["Date", "File Name", "Size (MB)", "Actions"])
-        self.backup_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.backup_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.backup_table.verticalHeader().setVisible(False)
-        self.backup_table.setFixedHeight(200)
-        self.backup_table.setStyleSheet("""
-            QTableWidget { border: 1px solid #dee2e6; border-radius: 4px; background-color: #fcfcfc; }
-            QHeaderView::section { background-color: #f1f1f1; padding: 5px; border: none; font-weight: bold; }
-        """)
-        backup_layout.addWidget(self.backup_table)
-
-        container_layout.addWidget(backup_group)
-
-        # Action Buttons
-        btn_bar = QWidget()
-        btn_layout = QHBoxLayout(btn_bar)
-        btn_layout.setContentsMargins(0, 0, 0, 0)
-        btn_layout.addStretch(1)
-
-        save_btn = QPushButton("Save Settings")
-        save_btn.setObjectName("primaryButton")
-        save_btn.clicked.connect(self._save_settings)
-        btn_layout.addWidget(save_btn)
-
-        container_layout.addWidget(btn_bar)
-        container_layout.addStretch(1)
-
-        # Initial load
-        active_env = settings_service.get_active_environment()
-        self.settings_env_combo.setCurrentText(active_env)
-        self._load_settings_for_env(active_env)
-        
-        # Load Database Settings
-        db_settings = settings_service.get_db_settings()
-        self.settings_db_server.setText(db_settings.get("server", "localhost"))
-        self.settings_db_port.setText(db_settings.get("port", "3306"))
-        self.settings_db_name.setText(db_settings.get("name", "honda_fbr"))
-        self.settings_db_user.setText(db_settings.get("user", "root"))
-        self.settings_db_password.setText(db_settings.get("password", ""))
-
-        self._load_backup_ui()
+        root_layout.addWidget(grid_container)
+        root_layout.addStretch(1)
 
         return page
 
-    def _on_test_db_connection(self) -> None:
-        """Professionally tests the database connection with current UI values."""
-        server = self.settings_db_server.text().strip()
-        port = self.settings_db_port.text().strip() or "3306"
-        name = self.settings_db_name.text().strip()
-        user = self.settings_db_user.text().strip()
-        pwd = self.settings_db_password.text().strip()
+    def _open_fbr_security(self):
+        dialog = FBRSecurityDialog(self)
+        dialog.exec()
 
-        if not all([server, name, user]):
-            self._show_error("Validation Error", "Server, Database Name, and Username are required.")
-            return
+    def _open_business_prefs(self):
+        dialog = BusinessPreferencesDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Refresh branding if business name changed
+            active_settings = settings_service.get_active_settings()
+            self._update_app_branding(active_settings.get("business_name", "Ehsan Trader"))
 
-        self.test_db_btn.setEnabled(False)
-        self.test_db_btn.setText("⏳ Testing...")
-        QApplication.processEvents()
+    def _open_db_settings(self):
+        dialog = DatabaseSettingsDialog(self)
+        dialog.exec()
 
-        try:
-            from sqlalchemy import create_engine, text
-            # Construct temporary URL for testing
-            # We assume MySQL as per standard
-            db_url = f"mysql+pymysql://{user}:{pwd}@{server}:{port}/{name}"
-            test_engine = create_engine(db_url, connect_args={"connect_timeout": 5})
-            
-            with test_engine.connect() as conn:
-                conn.execute(text("SELECT 1"))
-            
-            self._show_success("Connection Successful", f"Successfully connected to database '{name}' on {server}:{port}.")
-        except Exception as e:
-            logger.error(f"DB Test Connection failed: {e}")
-            self._show_error("Connection Failed", f"Unable to connect to database:\n{str(e)}")
-        finally:
-            self.test_db_btn.setEnabled(True)
-            self.test_db_btn.setText("🔌 Test Connection")
+    def _open_backup_settings(self):
+        dialog = BackupSettingsDialog(self)
+        dialog.exec()
 
-    def _load_settings_for_env(self, env: str) -> None:
-        data = settings_service.get_environment(env)
-        if not data:
-            return
-        
-        self.settings_api_url.setText(data.get("base_url", ""))
-        self.settings_pos_id.setText(data.get("pos_id", ""))
-        self.settings_usin.setText(data.get("usin", ""))
-        self.settings_auth_token.setText(data.get("token", ""))
-        self.settings_tax_rate.setValue(float(data.get("tax_rate", 18.0)))
-        self.settings_pct_code.setText(data.get("pct_code", "8711.2010"))
-        self.settings_item_code.setText(data.get("item_code", "MOTO"))
-        self.settings_item_name.setText(data.get("item_name", "Motorcycle"))
-        self.settings_invoice_type.setCurrentText(data.get("invoice_type", "Standard"))
-        self.settings_discount.setValue(float(data.get("discount", 0.0)))
-        self.settings_business_name.setText(data.get("business_name", "Ehsan Trader"))
-
-    def _save_settings(self) -> None:
-        env = self.settings_env_combo.currentText()
-        business_name = self.settings_business_name.text().strip() or "Ehsan Trader"
-        
-        # Database Settings
-        db_server = self.settings_db_server.text().strip()
-        db_port = self.settings_db_port.text().strip() or "3306"
-        db_name = self.settings_db_name.text().strip()
-        db_user = self.settings_db_user.text().strip()
-        db_password = self.settings_db_password.text().strip()
-
-        try:
-            # 1. Save Environment Settings
-            settings_service.save_environment(
-                env=env,
-                base_url=self.settings_api_url.text(),
-                pos_id=self.settings_pos_id.text(),
-                usin=self.settings_usin.text(),
-                token=self.settings_auth_token.text(),
-                tax_rate=str(self.settings_tax_rate.value()),
-                pct_code=self.settings_pct_code.text(),
-                invoice_type=self.settings_invoice_type.currentText(),
-                discount=str(self.settings_discount.value()),
-                item_code=self.settings_item_code.text(),
-                item_name=self.settings_item_name.text(),
-                business_name=business_name
-            )
-            settings_service.set_active_environment(env)
-            
-            # 2. Save Database Settings
-            settings_service.save_db_settings(
-                server=db_server,
-                port=db_port,
-                name=db_name,
-                user=db_user,
-                password=db_password
-            )
-
-            # 3. Reload Config & Re-initialize DB Connection
-            from app.core.config import reload_settings
-            from app.db.session import init_db
-            
-            reload_settings()
-            init_db()
-            
-            # Update UI Branding
-            self._update_app_branding(business_name)
-            
-            # Update environment badge on invoice page if it exists
-            if hasattr(self, "invoice_env_value_label"):
-                self.invoice_env_value_label.setText(env.upper())
-                color = "#e67e22" if env.upper() == "SANDBOX" else "#27ae60"
-                self.invoice_env_badge.setStyleSheet(f"QFrame {{ border: 2px solid {color}; border-radius: 8px; background-color: white; }}")
-            
-            self._show_success("Settings Saved", f"Configuration updated successfully. Database connection has been re-initialized to '{db_name}'.")
-        except Exception as e:
-            logger.error(f"Failed to save settings: {e}", exc_info=True)
-            self._show_error("Save Error", f"An error occurred while saving settings:\n{str(e)}")
-
-    def _load_backup_ui(self):
-        """Load backup settings into UI elements."""
-        config = backup_service.config
-        self.backup_path_input.setText(config.local_path)
-        self.backup_auto_enabled.setChecked(config.enabled)
-        self.backup_interval_combo.setCurrentText(config.interval)
-        self.backup_time_input.setText(config.time_str)
-        self.backup_retention_spin.setValue(config.retention_days)
-        self.backup_encrypt_enabled.setChecked(config.encrypt)
-        self._reload_backup_list()
-
-    def _on_backup_settings_changed(self):
-        """Update backup service config when UI elements change."""
-        backup_service.config.enabled = self.backup_auto_enabled.isChecked()
-        backup_service.config.interval = self.backup_interval_combo.currentText()
-        backup_service.config.time_str = self.backup_time_input.text()
-        backup_service.config.retention_days = self.backup_retention_spin.value()
-        backup_service.config.encrypt = self.backup_encrypt_enabled.isChecked()
-        backup_service.save_config()
-        
-        # Restart scheduler if enabled
-        if backup_service.config.enabled:
-            backup_service.start_scheduler()
-        else:
-            backup_service.stop_scheduler()
-
-    def _on_browse_backup_path(self):
-        dir_path = QFileDialog.getExistingDirectory(self, "Select Backup Directory", self.backup_path_input.text())
-        if dir_path:
-            self.backup_path_input.setText(dir_path)
-            backup_service.config.local_path = dir_path
-            backup_service.save_config()
-            self._reload_backup_list()
-
-    def _on_create_manual_backup(self):
-        """Professionally launches a manual backup in a separate thread."""
-        self.manual_backup_btn.setEnabled(False)
-        self.manual_backup_btn.setText("⏳ Backing up...")
-        logger.info("Manual backup requested by user.")
-        
-        # 1. Setup Thread and Worker
-        self._backup_thread = QThread()
-        self._backup_worker = BackupWorker()
-        self._backup_worker.moveToThread(self._backup_thread)
-        
-        # 2. Connect Signals
-        self._backup_thread.started.connect(self._backup_worker.run)
-        self._backup_worker.finished.connect(self._handle_backup_result)
-        self._backup_worker.error.connect(lambda msg: self._handle_backup_result({"success": False, "message": msg}))
-        
-        # 3. Cleanup on completion
-        self._backup_worker.finished.connect(self._backup_thread.quit)
-        self._backup_worker.finished.connect(self._backup_worker.deleteLater)
-        self._backup_thread.finished.connect(self._backup_thread.deleteLater)
-        
-        # 4. Start Thread
-        self._backup_thread.start()
-
-    def _handle_backup_result(self, result: Dict):
-        """Restores the backup button state and provides user feedback."""
-        self.manual_backup_btn.setEnabled(True)
-        self.manual_backup_btn.setText("💾 Create Backup Now")
-        logger.info(f"Manual backup completed with success: {result.get('success', False)}")
-        
-        if result.get("success"):
-            self._show_success("Backup Successful", result.get("message", "Database backed up successfully."))
-            self._reload_backup_list()
-        else:
-            error_msg = result.get("message", "Unknown error occurred.")
-            logger.error(f"Manual backup failed: {error_msg}")
-            self._show_error("Backup Failed", error_msg)
-
-    def _reload_backup_list(self):
-        backups = backup_service.list_backups()
-        self.backup_table.setRowCount(len(backups))
-        
-        for i, b in enumerate(backups):
-            self.backup_table.setItem(i, 0, QTableWidgetItem(b["date"]))
-            self.backup_table.setItem(i, 1, QTableWidgetItem(b["name"]))
-            self.backup_table.setItem(i, 2, QTableWidgetItem(str(b["size_mb"])))
-            
-            # Action buttons
-            actions_widget = QWidget()
-            actions_layout = QHBoxLayout(actions_widget)
-            actions_layout.setContentsMargins(5, 2, 5, 2)
-            actions_layout.setSpacing(10)
-            
-            restore_btn = QPushButton("Restore")
-            restore_btn.setStyleSheet("background-color: #3498db; color: white; padding: 2px 8px; font-size: 11px;")
-            restore_btn.clicked.connect(lambda checked, path=b["path"]: self._on_restore_backup(path))
-            
-            delete_btn = QPushButton("Delete")
-            delete_btn.setStyleSheet("background-color: #e74c3c; color: white; padding: 2px 8px; font-size: 11px;")
-            delete_btn.clicked.connect(lambda checked, path=b["path"]: self._on_delete_backup(path))
-            
-            actions_layout.addWidget(restore_btn)
-            actions_layout.addWidget(delete_btn)
-            self.backup_table.setCellWidget(i, 3, actions_widget)
-
-    def _on_restore_external_file(self):
-        """Allows selecting an external backup file for restore."""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, 
-            "Select Backup File", 
-            "", 
-            "Backup Files (*.zip *.enc);;All Files (*)"
-        )
-        if file_path:
-            self._on_restore_backup(file_path)
-
-    def _on_restore_backup(self, path: str):
-        """Professionally handles the restore process by launching an external utility."""
-        backup_file = os.path.basename(path)
-        
-        # Professional Custom Warning Dialog
-        msg = (
-            f"You are about to restore the database from: <b>{backup_file}</b><br><br>"
-            "<span style='color: #e74c3c;'><b>⚠️ CRITICAL WARNING:</b></span><br>"
-            "1. This will <b>COMPLETELY OVERWRITE</b> your current database.<br>"
-            "2. All current transactions, invoices, and customers will be replaced.<br>"
-            "3. This action is <b>IRREVERSIBLE</b>.<br><br>"
-            "The application will <b>CLOSE</b> now to perform the restore safely, and then restart automatically."
-        )
-        
-        reply = QMessageBox.warning(
-            self, 
-            "Database Restore Confirmation", 
-            msg,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            # Check if we are using MySQL or SQLite
-            is_mysql = "mysql" in settings.DB_URL.lower()
-            
-            if is_mysql:
-                # For MySQL, we don't need the external utility as much because there's no file lock
-                # We use the professional BackupWorker for MySQL as well
-                progress = QProgressDialog("Restoring MySQL Database...", None, 0, 0, self)
-                progress.setWindowTitle("Professional Database Restore")
-                progress.setWindowModality(Qt.WindowModality.WindowModal)
-                progress.setMinimumWidth(400)
-                progress.setCancelButton(None)
-                progress.setStyleSheet("""
-                    QProgressDialog {
-                        background-color: white;
-                        border: 1px solid #ced4da;
-                        border-radius: 8px;
-                    }
-                    QLabel {
-                        font-size: 14px;
-                        color: #2c3e50;
-                        padding: 10px;
-                    }
-                    QProgressBar {
-                        border: 1px solid #ced4da;
-                        border-radius: 4px;
-                        text-align: center;
-                        height: 20px;
-                    }
-                    QProgressBar::chunk {
-                        background-color: #3498db;
-                    }
-                """)
-                progress.show()
-                QApplication.processEvents()
-                
-                close_all_db_connections()
-                
-                # 1. Setup Thread and Worker
-                self._restore_thread = QThread()
-                self._restore_worker = MySQLRestoreWorker(path)
-                self._restore_worker.moveToThread(self._restore_thread)
-                
-                # 2. Connect Signals
-                self._restore_thread.started.connect(self._restore_worker.run)
-                self._restore_worker.finished.connect(lambda result: self._handle_restore_result(result, progress))
-                self._restore_worker.error.connect(lambda msg: self._handle_restore_result({"success": False, "message": msg}, progress))
-                
-                # 3. Cleanup
-                self._restore_worker.finished.connect(self._restore_thread.quit)
-                self._restore_worker.finished.connect(self._restore_worker.deleteLater)
-                self._restore_thread.finished.connect(self._restore_thread.deleteLater)
-                
-                # 4. Start Thread
-                self._restore_thread.start()
-                return
-
-            # SQLite logic (Use External Utility to avoid file locks)
-            db_path = backup_service.get_db_path()
-            if not db_path:
-                logger.error(f"Could not determine SQLite path from URL: {settings.DB_URL}")
-                self._show_error("Restore Error", 
-                    f"Could not determine database path.<br><br>"
-                    f"<b>Current DB URL:</b> {settings.DB_URL}<br><br>"
-                    "Please ensure your .env file is configured correctly for SQLite.")
-                return
-                
-            encryption_key = backup_service.config.encryption_key if backup_service.config.encrypt else "None"
-            
-            # Determine how to restart the main app
-            if getattr(sys, 'frozen', False):
-                main_app_entry = os.path.abspath(sys.executable)
-            else:
-                main_app_entry = os.path.abspath(sys.argv[0]) # Usually run.py or main.py
-            
-            # Path to the utility script
-            project_root = Path(__file__).resolve().parent.parent.parent
-            util_script = project_root / "restore_util.py"
-            
-            try:
-                # Launch the external restorer in a new terminal/window
-                if sys.platform == "win32":
-                    # Use sys.executable to ensure we use the same Python environment
-                    python_exe = os.path.abspath(sys.executable)
-                    cmd = f'"{python_exe}" "{util_script}" "{path}" "{db_path}" "{encryption_key}" "{main_app_entry}"'
-                    subprocess.Popen(f'start cmd /k {cmd}', shell=True)
-                else:
-                    subprocess.Popen([sys.executable, str(util_script), str(path), str(db_path), encryption_key, main_app_entry])
-                
-                # Exit the main process immediately to release ALL locks
-                os._exit(0)
-                
-            except Exception as e:
-                self._show_error("Restore Launch Failed", str(e))
-
-    def _handle_restore_result(self, result: Dict, progress_dialog: QProgressDialog):
-        # Close the progress dialog
-        progress_dialog.close()
-        
-        self.restore_external_btn.setEnabled(True)
-        self.restore_external_btn.setText("📂 Restore from File...")
-        
-        if result.get("success"):
-            QMessageBox.information(
-                self, 
-                "Restore Successful", 
-                "The database has been restored successfully.<br><br>The application will now restart."
-            )
-            self._restart_application()
-        else:
-            # Re-start background tasks if failed
-            if hasattr(self, '_update_check_timer'):
-                self._update_check_timer.start()
-            backup_service.start_scheduler()
-            
-            self._show_error("Restore Failed", result.get("message", "Unknown error during restore."))
-
-    def _restart_application(self):
-        """Robust application restart mechanism."""
-        try:
-            # Close application
-            QApplication.quit()
-            
-            # Prepare restart command
-            if getattr(sys, 'frozen', False):
-                # If packaged as exe
-                executable = sys.executable
-                os.startfile(executable)
-            else:
-                # If running as script, use module-based launch to avoid ModuleNotFoundError
-                python = sys.executable
-                # The root directory is the parent of the 'app' directory
-                project_root = Path(__file__).resolve().parent.parent.parent
-                subprocess.Popen([python, "-m", "app.main"], cwd=str(project_root))
-            
-            # Force immediate exit to release all file handles
-            os._exit(0)
-        except Exception as e:
-            logger.error(f"Restart failed: {e}")
-            # Fallback message
-            print(f"Please restart the application manually: {e}")
-
-    def _on_delete_backup(self, path: str):
-        reply = QMessageBox.question(
-            self, "Confirm Delete", 
-            "Are you sure you want to delete this backup file?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                os.remove(path)
-                self._reload_backup_list()
-            except Exception as e:
-                self._show_error("Delete Error", str(e))
+    def _open_app_updates(self):
+        dialog = AppUpdatesDialog(self)
+        dialog.exec()
 
     def _update_app_branding(self, business_name: str) -> None:
         """Dynamically update window title and sidebar branding."""
@@ -3330,6 +2766,10 @@ class MainWindow(QMainWindow):
         self.sms_enabled_check.setStyleSheet("font-weight: bold; color: #2c3e50;")
         wifi_layout.addWidget(self.sms_enabled_check)
 
+        self.wa_enabled_check = QCheckBox("Enable WhatsApp Module")
+        self.wa_enabled_check.setStyleSheet("font-weight: bold; color: #25D366;") # WhatsApp Green
+        wifi_layout.addWidget(self.wa_enabled_check)
+
         # Gateway Type Switcher
         type_layout = QHBoxLayout()
         type_layout.addWidget(QLabel("Gateway Type:"))
@@ -3424,6 +2864,36 @@ class MainWindow(QMainWindow):
         common_layout.addWidget(self.sms_bulk_delay, 0, 1)
         
         wifi_layout.addLayout(common_layout)
+
+        # WhatsApp Gateway Overrides (Optional)
+        wa_overrides = QFrame()
+        wa_overrides.setFrameShape(QFrame.Shape.StyledPanel)
+        wa_overrides.setStyleSheet("background-color: #f9f9f9; border: 1px dashed #25D366; border-radius: 8px;")
+        wa_over_layout = QVBoxLayout(wa_overrides)
+        wa_over_layout.addWidget(QLabel("WhatsApp Gateway Overrides (If different from SMS):"))
+        
+        wa_ip_row = QHBoxLayout()
+        wa_ip_row.addWidget(QLabel("WA IP:"))
+        self.wa_gateway_ip = QLineEdit()
+        self.wa_gateway_ip.setPlaceholderText("Leave empty to use SMS IP")
+        wa_ip_row.addWidget(self.wa_gateway_ip)
+        wa_ip_row.addWidget(QLabel("WA Port:"))
+        self.wa_gateway_port = QLineEdit()
+        self.wa_gateway_port.setPlaceholderText("8080")
+        wa_ip_row.addWidget(self.wa_gateway_port)
+        wa_over_layout.addLayout(wa_ip_row)
+        
+        wa_auth_row = QHBoxLayout()
+        wa_auth_row.addWidget(QLabel("Instance ID:"))
+        self.wa_instance_id = QLineEdit()
+        wa_auth_row.addWidget(self.wa_instance_id)
+        wa_auth_row.addWidget(QLabel("WA API Key:"))
+        self.wa_api_key = QLineEdit()
+        self.wa_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        wa_auth_row.addWidget(self.wa_api_key)
+        wa_over_layout.addLayout(wa_auth_row)
+        
+        wifi_layout.addWidget(wa_overrides)
         
         self.test_conn_btn = QPushButton("🔌 Test Connection")
         self.test_conn_btn.setFixedWidth(150)
@@ -3605,6 +3075,20 @@ class MainWindow(QMainWindow):
         self.bulk_validation_lbl.setStyleSheet("color: #2c3e50; font-weight: bold;")
         start_layout.addWidget(self.bulk_validation_lbl)
         
+        # Channel Selection
+        channel_layout = QHBoxLayout()
+        channel_layout.addWidget(QLabel("Select Channel:"))
+        self.bulk_channel_selector = QComboBox()
+        self.bulk_channel_selector.addItems(["SMS", "WHATSAPP"])
+        self.bulk_channel_selector.setFixedHeight(35)
+        self.bulk_channel_selector.setStyleSheet("""
+            QComboBox { font-weight: bold; padding-left: 10px; }
+            QComboBox:item:selected { background-color: #3498db; color: white; }
+        """)
+        channel_layout.addWidget(self.bulk_channel_selector)
+        channel_layout.addStretch(1)
+        start_layout.addLayout(channel_layout)
+        
         self.bulk_start_btn = QPushButton("🚀 Create Campaign & Start Sending")
         self.bulk_start_btn.setObjectName("primaryButton")
         self.bulk_start_btn.setFixedHeight(50)
@@ -3758,20 +3242,29 @@ class MainWindow(QMainWindow):
         from app.db.session import SessionLocal
         from app.db.models import SMSConfiguration
 
-        # Check if SMS module is enabled before starting
+        # Check if SMS or WhatsApp module is enabled before starting
         db = SessionLocal()
+        channel = self.bulk_channel_selector.currentText()
         try:
             config = db.query(SMSConfiguration).first()
-            if not config or not config.is_enabled:
-                QMessageBox.warning(self, "SMS Module Disabled", 
-                    "The SMS Module is currently disabled.\n\n"
-                    "Please go to the 'CONFIGURATION' tab, check 'Enable SMS Module', and save.")
-                self.sms_config_tab_btn.click()
-                return
+            if channel == "SMS":
+                if not config or not config.is_enabled:
+                    QMessageBox.warning(self, "SMS Module Disabled", 
+                        "The SMS Module is currently disabled.\n\n"
+                        "Please go to the 'CONFIGURATION' tab, check 'Enable SMS Module', and save.")
+                    self.sms_config_tab_btn.click()
+                    return
+            else: # WHATSAPP
+                if not config or not config.whatsapp_enabled:
+                    QMessageBox.warning(self, "WhatsApp Module Disabled", 
+                        "The WhatsApp Module is currently disabled.\n\n"
+                        "Please go to the 'CONFIGURATION' tab, check 'Enable WhatsApp Module', and save.")
+                    self.sms_config_tab_btn.click()
+                    return
         finally:
             db.close()
         
-        campaign_name, ok = QInputDialog.getText(self, "Campaign Name", "Enter a name for this campaign:")
+        campaign_name, ok = QInputDialog.getText(self, "Campaign Name", f"Enter a name for this {channel} campaign:")
         if not ok or not campaign_name:
             return
             
@@ -3785,7 +3278,8 @@ class MainWindow(QMainWindow):
             campaign_id = bulk_sms_service.create_campaign(
                 campaign_name,
                 template,
-                self._current_bulk_data
+                self._current_bulk_data,
+                channel=channel
             )
             
             # Start worker
@@ -3872,6 +3366,7 @@ class MainWindow(QMainWindow):
                      failed=c.failed_count,
                      total=c.total_recipients,
                      created_at=c.created_at,
+                     channel=getattr(c, 'channel', 'SMS'),
                      error_message=c.error_message
                  ) for c in campaigns
              ]
@@ -3936,11 +3431,18 @@ class MainWindow(QMainWindow):
                 db.commit()
             
             self.sms_enabled_check.setChecked(config.is_enabled)
+            self.wa_enabled_check.setChecked(getattr(config, 'whatsapp_enabled', False))
             self.sms_gateway_type.setCurrentText(getattr(config, 'gateway_type', 'WIFI'))
             self._on_gateway_type_changed(self.sms_gateway_type.currentText())
             
             self.sms_gateway_ip.setText(config.gateway_ip or "")
             self.sms_gateway_port.setText(config.gateway_port or "8080")
+            
+            self.wa_gateway_ip.setText(getattr(config, 'whatsapp_gateway_ip', '') or "")
+            self.wa_gateway_port.setText(getattr(config, 'whatsapp_gateway_port', '') or "")
+            self.wa_instance_id.setText(getattr(config, 'whatsapp_instance_id', '') or "")
+            self.wa_api_key.setText(getattr(config, 'whatsapp_api_key', '') or "")
+            
             self.sms_use_https.setChecked(getattr(config, 'use_https', False))
             self.sms_cloud_url.setText(getattr(config, 'api_url', '') or "")
             self.sms_cloud_username.setText(getattr(config, 'cloud_username', '') or "")
@@ -3963,9 +3465,16 @@ class MainWindow(QMainWindow):
             from app.db.models import SMSConfiguration
             config = db.query(SMSConfiguration).first()
             config.is_enabled = self.sms_enabled_check.isChecked()
+            config.whatsapp_enabled = self.wa_enabled_check.isChecked()
             config.gateway_type = self.sms_gateway_type.currentText()
             config.gateway_ip = self.sms_gateway_ip.text().strip()
             config.gateway_port = self.sms_gateway_port.text().strip()
+            
+            config.whatsapp_gateway_ip = self.wa_gateway_ip.text().strip()
+            config.whatsapp_gateway_port = self.wa_gateway_port.text().strip()
+            config.whatsapp_instance_id = self.wa_instance_id.text().strip()
+            config.whatsapp_api_key = self.wa_api_key.text().strip()
+            
             config.use_https = self.sms_use_https.isChecked()
             config.api_url = self.sms_cloud_url.text().strip()
             config.cloud_username = self.sms_cloud_username.text().strip()
@@ -5574,7 +5083,8 @@ class MainWindow(QMainWindow):
         
         # Disable button during submission to prevent double-clicks
         self.invoice_submit_btn.setEnabled(False)
-        self.invoice_submit_btn.setText("Submitting...")
+        self.invoice_submit_btn.setText("⏳ Submitting...")
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         QApplication.processEvents() # Ensure UI updates
 
         inv_num = self.invoice_number_input.text().strip()
@@ -5594,13 +5104,16 @@ class MainWindow(QMainWindow):
         engine = self.invoice_engine_input.text().strip().upper()
         model_name = self.invoice_model_combo.currentText().strip()
         color = self.invoice_color_combo.currentText().strip()
+        
         settings = settings_service.get_active_settings()
         sales_tax_rate = float(settings.get("tax_rate", 18.0))
         fbr_item_name_base = settings.get("item_name", "Motorcycle") or "Motorcycle"
         fbr_item_code_base = settings.get("item_code", "MOTO") or "MOTO"
         fbr_pct_code = settings.get("pct_code", "8711.2010") or "8711.2010"
+        
         final_item_name = f"{fbr_item_name_base} {model_name} {color}"
         final_item_code = f"{fbr_item_code_base}-{model_name}-{color}"
+        
         item = InvoiceItemCreate(
             item_code=final_item_code,
             item_name=final_item_name,
@@ -5615,7 +5128,8 @@ class MainWindow(QMainWindow):
             model_name=model_name,
             color=color,
         )
-        inv = InvoiceCreate(
+        
+        inv_data = InvoiceCreate(
             invoice_number=inv_num,
             buyer_cnic=buyer_cnic,
             buyer_name=buyer_name,
@@ -5627,53 +5141,89 @@ class MainWindow(QMainWindow):
             payment_mode=payment_mode,
             items=[item],
         )
+
+        # Start background worker
+        self._submission_worker = InvoiceSubmissionWorker(inv_data)
+        self._submission_worker.finished.connect(self._handle_submission_success)
+        self._submission_worker.error.connect(self._handle_submission_error)
+        self._submission_worker.start()
+
+    def _handle_submission_success(self, invoice_id: int) -> None:
+        """Called when background invoice submission succeeds."""
+        QApplication.restoreOverrideCursor()
+        self.invoice_submit_btn.setEnabled(True)
+        self.invoice_submit_btn.setText("Submit to FBR")
+        
+        # Fetch the invoice in the main thread's session to avoid threading issues
         db = SessionLocal()
         try:
-            logger.info("Submitting invoice %s for %s", inv_num, buyer_name)
-            created = invoice_service.create_invoice(db, inv)
-            fbr_id = created.fbr_invoice_number or "N/A"
-            self._show_success(
-                "Submission Success",
-                f"Invoice {inv_num} has been successfully created and queued for FBR sync.\n\nFBR ID: {fbr_id}"
-            )
+            # We eager load customer and items to avoid lazy load issues during UI/Print
+            created = db.query(Invoice).options(
+                joinedload(Invoice.customer),
+                joinedload(Invoice.items).joinedload(InvoiceItem.motorcycle)
+            ).filter(Invoice.id == invoice_id).first()
+            
+            if not created:
+                self._show_error("System Error", "Invoice was created but could not be retrieved from database.")
+                return
+
+            inv_num = created.invoice_number
+            fbr_id = created.fbr_invoice_number
+            
+            if fbr_id:
+                title = "Submission Success"
+                msg = f"Invoice {inv_num} has been successfully created and uploaded to FBR.\n\nFBR ID: {fbr_id}"
+            else:
+                title = "Local Save Success"
+                msg = f"Invoice {inv_num} has been created locally but FBR sync failed.\n\n{created.fbr_response_message}\n\nYou can retry the sync later from the reports section."
+
+            self._show_success(title, msg)
+            
             self._reset_invoice_form()
             self._generate_invoice_number()
-            self._update_fbr_submitted_counter() # Update counter after submission
+            self._update_fbr_submitted_counter()
             
             # Independent Printing logic
             self._handle_post_submission_print(created)
             
             # Queue SMS if enabled
-            from app.services.sms_service import sms_service
-            sms_service.queue_invoice_sms(db, created)
-            # Start background processing of SMS queue
-            QTimer.singleShot(1000, sms_service.process_queue)
+            try:
+                from app.services.sms_service import sms_service
+                sms_service.queue_invoice_sms(db, created)
+                db.commit()
+                # Start background processing of SMS queue
+                QTimer.singleShot(1000, sms_service.process_queue)
+            except Exception as e:
+                logger.error(f"Error queuing SMS: {e}")
 
             if created.fbr_invoice_number:
                 self.invoice_fbr_number_display.setText(f"FBR INV: {created.fbr_invoice_number}")
                 self._display_invoice_qr(created.fbr_invoice_number)
             else:
                 self.invoice_fbr_number_display.setText("FBR SYNC PENDING")
-        except RetryError as exc:
-            try:
-                last_exc = exc.last_attempt.exception()
-                if isinstance(last_exc, requests.exceptions.ConnectionError):
-                    msg = "Could not connect to FBR server. Check internet connection or FBR URL settings."
-                elif isinstance(last_exc, requests.exceptions.Timeout):
-                    msg = "Connection to FBR server timed out."
-                else:
-                    msg = f"FBR submission failed: {str(last_exc)}"
-            except Exception:
-                msg = f"FBR submission error: {str(exc)}"
-            logger.error("FBR RetryError: %s", msg)
-            self._show_error("FBR Connection Error", msg)
-        except Exception as exc:
-            logger.error("Unexpected error during invoice submission: %s", exc, exc_info=True)
-            self._show_error("System Error", f"An unexpected error occurred during submission:\n\n{str(exc)}")
+        except Exception as e:
+            logger.error(f"Error in _handle_submission_success: {e}", exc_info=True)
+            self._show_error("UI Error", f"Error updating UI after submission: {e}")
         finally:
-            self.invoice_submit_btn.setText("Submit to FBR")
-            self._check_invoice_form_completeness() # Re-evaluate state
             db.close()
+            self._check_invoice_form_completeness()
+
+    def _handle_submission_error(self, error_msg: str) -> None:
+        """Called when background invoice submission fails."""
+        QApplication.restoreOverrideCursor()
+        self.invoice_submit_btn.setEnabled(True)
+        self.invoice_submit_btn.setText("Submit to FBR")
+        
+        logger.error(f"FBR submission error caught in UI: {error_msg}")
+        
+        # Check if it's a known FBR connection error to show friendly message
+        if "ConnectionError" in error_msg or "Timeout" in error_msg:
+            msg = "Could not connect to FBR server. Check internet connection or FBR URL settings."
+        else:
+            msg = f"Submission failed: {error_msg}"
+            
+        self._show_error("Submission Error", msg)
+        self._check_invoice_form_completeness()
 
     def _reset_invoice_form(self) -> None:
         self._is_dealer_selected = False
@@ -8465,7 +8015,7 @@ class InvoiceTableModel(QAbstractTableModel):
 
 
 class CampaignsTableModel(QAbstractTableModel):
-    headers = ["Date", "Campaign Name", "Status", "Sent", "Failed", "Total", "Error Message"]
+    headers = ["Date", "Campaign Name", "Channel", "Status", "Sent", "Failed", "Total", "Error Message"]
 
     def __init__(self) -> None:
         super().__init__()
@@ -8489,30 +8039,34 @@ class CampaignsTableModel(QAbstractTableModel):
             if col == 1:
                 return row.name
             if col == 2:
-                return row.status
+                return getattr(row, 'channel', 'SMS')
             if col == 3:
-                return str(row.sent)
+                return row.status
             if col == 4:
-                return str(row.failed)
+                return str(row.sent)
             if col == 5:
-                return str(row.total)
+                return str(row.failed)
             if col == 6:
+                return str(row.total)
+            if col == 7:
                 return row.error_message or ""
         
         if role == Qt.ItemDataRole.TextAlignmentRole:
-            if col == 6:
+            if col == 7:
                 return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
             return Qt.AlignmentFlag.AlignCenter
             
         if role == Qt.ItemDataRole.ForegroundRole:
-            if col == 2: # Status column
+            if col == 2: # Channel
+                return Qt.GlobalColor.darkBlue if getattr(row, 'channel', 'SMS') == 'WHATSAPP' else Qt.GlobalColor.black
+            if col == 3: # Status column
                 if row.status == "COMPLETED":
                     return Qt.GlobalColor.darkGreen
                 if row.status == "RUNNING":
                     return Qt.GlobalColor.blue
                 if row.status == "FAILED":
                     return Qt.GlobalColor.red
-            if col == 6: # Error Message column
+            if col == 7: # Error Message column
                 return Qt.GlobalColor.red
                     
         return None

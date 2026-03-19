@@ -46,11 +46,20 @@ class BulkSMSWorker(threading.Thread):
                 return
 
             config = db.query(SMSConfiguration).first()
-            if not config or not config.is_enabled:
+            
+            # Channel-specific enablement check
+            channel = campaign.channel or "SMS"
+            if channel == "SMS" and (not config or not config.is_enabled):
                 campaign.status = "FAILED"
                 campaign.error_message = "SMS Module is disabled in Settings."
                 db.commit()
                 if self.on_complete: self.on_complete(False, "SMS Module is disabled in settings.")
+                return
+            elif channel == "WHATSAPP" and (not config or not config.whatsapp_enabled):
+                campaign.status = "FAILED"
+                campaign.error_message = "WhatsApp Module is disabled in Settings."
+                db.commit()
+                if self.on_complete: self.on_complete(False, "WhatsApp Module is disabled in settings.")
                 return
 
             campaign.status = "RUNNING"
@@ -111,7 +120,17 @@ class BulkSMSWorker(threading.Thread):
                 success = False
                 result = ""
                 
-                if getattr(config, 'gateway_type', 'WIFI') == 'CLOUD' and config.api_url:
+                # Channel-aware sending
+                if channel == "WHATSAPP":
+                    success, result = sms_service.send_whatsapp_via_gateway(
+                        config.whatsapp_gateway_ip or config.gateway_ip,
+                        config.whatsapp_gateway_port or config.gateway_port,
+                        msg.phone_number,
+                        msg.message,
+                        instance_id=config.whatsapp_instance_id,
+                        api_key=config.whatsapp_api_key or config.api_key
+                    )
+                elif getattr(config, 'gateway_type', 'WIFI') == 'CLOUD' and config.api_url:
                     success, result = sms_service.send_sms_via_cloud(
                         config.api_url,
                         msg.phone_number,
@@ -200,7 +219,7 @@ class BulkSMSService:
             template = template.replace(f"{{{key}}}", str(value))
         return template
 
-    def create_campaign(self, name: str, template: str, data: List[Dict[str, Any]]) -> int:
+    def create_campaign(self, name: str, template: str, data: List[Dict[str, Any]], channel: str = "SMS") -> int:
         """
         Creates a campaign and its associated messages in the database.
         """
@@ -209,6 +228,7 @@ class BulkSMSService:
             campaign = SMSCampaign(
                 name=name,
                 template=template,
+                channel=channel,
                 total_recipients=len(data),
                 status="PENDING"
             )
@@ -229,6 +249,7 @@ class BulkSMSService:
 
                 sms = SMSQueue(
                     campaign_id=campaign.id,
+                    channel=channel,
                     phone_number=str(phone_number),
                     recipient_name=str(recipient_name),
                     message=message_text,

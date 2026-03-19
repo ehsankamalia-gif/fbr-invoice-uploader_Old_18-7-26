@@ -313,6 +313,7 @@ class SMSCampaign(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), nullable=False)
     template = Column(String(1000), nullable=False)
+    channel = Column(String(20), default="SMS") # SMS or WHATSAPP
     total_recipients = Column(Integer, default=0)
     sent_count = Column(Integer, default=0)
     failed_count = Column(Integer, default=0)
@@ -330,6 +331,7 @@ class SMSQueue(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     campaign_id = Column(Integer, ForeignKey("sms_campaigns.id"), nullable=True)
+    channel = Column(String(20), default="SMS") # SMS or WHATSAPP
     phone_number = Column(String(20), nullable=False, index=True)
     recipient_name = Column(String(100), nullable=True)
     message = Column(String(1000), nullable=False)
@@ -352,12 +354,19 @@ class SMSConfiguration(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     is_enabled = Column(Boolean, default=False)
+    whatsapp_enabled = Column(Boolean, default=False) # Separate toggle for WhatsApp
     gateway_type = Column(String(20), default="WIFI") # WIFI or CLOUD
     
-    # WiFi Gateway Settings
+    # WiFi Gateway Settings (Can be used for both SMS & WhatsApp depending on App)
     gateway_ip = Column(String(100), nullable=True) 
     gateway_port = Column(String(10), default="8080")
     use_https = Column(Boolean, default=False)
+    
+    # WhatsApp Specific (for Option 2 Gateway Apps)
+    whatsapp_gateway_ip = Column(String(100), nullable=True)
+    whatsapp_gateway_port = Column(String(10), default="8080")
+    whatsapp_instance_id = Column(String(100), nullable=True) # If app uses instances
+    whatsapp_api_key = Column(String(100), nullable=True)
     
     # Cloud/Common Settings
     api_url = Column(String(255), nullable=True) # Cloud Server URL

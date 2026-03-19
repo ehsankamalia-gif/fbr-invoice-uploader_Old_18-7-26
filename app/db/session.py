@@ -215,7 +215,7 @@ def run_migrations():
                 (1, "Initial schema and legacy migrations", _run_legacy_migrations),
                 (2, "Add use_https to sms_configurations", _migration_v2_add_https),
                 (3, "Add app_configurations table", _migration_v3_add_app_configs),
-                # Add more migrations here as needed
+                (4, "Add WhatsApp fields to SMS configuration and models", _migration_v4_whatsapp_support),
             ]
 
             for version, description, func in migrations:
@@ -283,6 +283,43 @@ def _migration_v3_add_app_configs(conn) -> bool:
         return True
     except Exception as e:
         logger.error(f"Migration v3 failed: {e}")
+        return False
+
+def _migration_v4_whatsapp_support(conn) -> bool:
+    """Adds WhatsApp fields to configurations and channel to campaign/queue."""
+    try:
+        # 1. SMS Configurations
+        cols = [
+            ("whatsapp_enabled", "BOOLEAN DEFAULT 0"),
+            ("whatsapp_gateway_ip", "VARCHAR(100) NULL"),
+            ("whatsapp_gateway_port", "VARCHAR(10) DEFAULT '8080'"),
+            ("whatsapp_instance_id", "VARCHAR(100) NULL"),
+            ("whatsapp_api_key", "VARCHAR(100) NULL")
+        ]
+        for col, dtype in cols:
+            try:
+                conn.execute(text(f"SELECT {col} FROM sms_configurations LIMIT 1"))
+            except Exception:
+                logger.info(f"Adding column {col} to sms_configurations")
+                conn.execute(text(f"ALTER TABLE sms_configurations ADD COLUMN {col} {dtype}"))
+        
+        # 2. SMS Campaigns (channel)
+        try:
+            conn.execute(text("SELECT channel FROM sms_campaigns LIMIT 1"))
+        except Exception:
+            logger.info("Adding column 'channel' to sms_campaigns")
+            conn.execute(text("ALTER TABLE sms_campaigns ADD COLUMN channel VARCHAR(20) DEFAULT 'SMS'"))
+            
+        # 3. SMS Queue (channel)
+        try:
+            conn.execute(text("SELECT channel FROM sms_queue LIMIT 1"))
+        except Exception:
+            logger.info("Adding column 'channel' to sms_queue")
+            conn.execute(text("ALTER TABLE sms_queue ADD COLUMN channel VARCHAR(20) DEFAULT 'SMS'"))
+            
+        return True
+    except Exception as e:
+        logger.error(f"Migration v4 failed: {e}")
         return False
 
 
