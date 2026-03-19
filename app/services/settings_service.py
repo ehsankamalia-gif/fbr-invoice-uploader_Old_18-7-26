@@ -314,4 +314,70 @@ class SettingsService:
         finally:
             db.close()
 
+    def get_sms_config(self) -> dict:
+        """Get SMS/WhatsApp configuration from database."""
+        db = SessionLocal()
+        try:
+            from app.db.models import SMSConfiguration
+            config = db.query(SMSConfiguration).first()
+            if not config:
+                # Default settings
+                return {
+                    "is_enabled": False,
+                    "gateway_type": "WIFI",
+                    "gateway_ip": "",
+                    "gateway_port": "8080",
+                    "api_key": "",
+                    "api_url": "",
+                    "whatsapp_enabled": False,
+                    "whatsapp_gateway_ip": "",
+                    "whatsapp_gateway_port": "8080",
+                    "whatsapp_instance_id": "",
+                    "whatsapp_api_key": "",
+                    "invoice_template": "Hello {customer}, your invoice {invoice_no} for Rs. {amount} has been generated. FBR ID: {fbr_id}"
+                }
+            
+            return {
+                "is_enabled": config.is_enabled,
+                "gateway_type": config.gateway_type,
+                "gateway_ip": config.gateway_ip,
+                "gateway_port": config.gateway_port,
+                "api_key": config.api_key,
+                "api_url": config.api_url,
+                "whatsapp_enabled": config.whatsapp_enabled,
+                "whatsapp_gateway_ip": config.whatsapp_gateway_ip,
+                "whatsapp_gateway_port": config.whatsapp_gateway_port,
+                "whatsapp_instance_id": config.whatsapp_instance_id,
+                "whatsapp_api_key": config.whatsapp_api_key,
+                "invoice_template": config.invoice_template
+            }
+        except Exception as e:
+            logger.error(f"Error getting SMS config: {e}")
+            return {}
+        finally:
+            db.close()
+
+    def save_sms_config(self, **kwargs):
+        """Update SMS/WhatsApp configuration in database."""
+        db = SessionLocal()
+        try:
+            from app.db.models import SMSConfiguration
+            config = db.query(SMSConfiguration).first()
+            if not config:
+                config = SMSConfiguration()
+                db.add(config)
+            
+            for key, value in kwargs.items():
+                if hasattr(config, key):
+                    setattr(config, key, value)
+            
+            db.commit()
+            logger.info("Updated SMS/WhatsApp configuration")
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error saving SMS config: {e}")
+            raise
+        finally:
+            db.close()
+
 settings_service = SettingsService()

@@ -93,7 +93,8 @@ from app.qt_ui.settings_modals import (
     BusinessPreferencesDialog, 
     DatabaseSettingsDialog, 
     BackupSettingsDialog,
-    AppUpdatesDialog
+    AppUpdatesDialog,
+    SMSWhatsAppDialog
 )
 from app.core.logger import logger
 from app.core.version_manager import VersionManager
@@ -2373,7 +2374,7 @@ class MainWindow(QMainWindow):
             ("Database Connection", "🗄️", "Manage MySQL server, credentials, and connectivity.", self._open_db_settings),
             ("Backup & Maintenance", "💾", "Schedule backups, restore data, and manage storage.", self._open_backup_settings),
             ("System Updates", "🔄", "Check for software updates and view version info.", self._open_app_updates),
-            ("SMS & Messaging", "💬", "Configure SMS/WhatsApp gateways and templates.", lambda: self._select_page("sms")),
+            ("SMS & WhatsApp", "💬", "Configure SMS/WhatsApp gateways and templates.", self._open_sms_settings),
         ]
 
         for i, (title, icon, desc, callback) in enumerate(categories):
@@ -2441,6 +2442,10 @@ class MainWindow(QMainWindow):
 
     def _open_app_updates(self):
         dialog = AppUpdatesDialog(self)
+        dialog.exec()
+
+    def _open_sms_settings(self):
+        dialog = SMSWhatsAppDialog(self)
         dialog.exec()
 
     def _update_app_branding(self, business_name: str) -> None:

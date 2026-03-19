@@ -612,39 +612,135 @@ class BackupSettingsDialog(BaseSettingsDialog):
 
 class AppUpdatesDialog(BaseSettingsDialog):
     """Modal for Application Updates and Versioning."""
+    # ... existing class ...
+
+class SMSWhatsAppDialog(BaseSettingsDialog):
+    """Modal for SMS and WhatsApp notification settings."""
     def __init__(self, parent=None):
-        super().__init__("Application Updates & Version", parent)
+        super().__init__("SMS & WhatsApp Configuration", parent)
+        self.setMinimumWidth(600)
         self._init_ui()
+        self._load_data()
 
     def _init_ui(self):
-        from app.core.version_manager import VersionManager
-        layout = QVBoxLayout()
+        # Using a scroll area for better layout if more fields are added
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll_content = QWidget()
+        layout = QVBoxLayout(scroll_content)
         
-        layout.addWidget(QLabel(f"Current Version: {VersionManager.get_version_string()}"))
+        # SMS Section
+        sms_group = QFrame()
+        sms_group.setStyleSheet("background-color: #fcfcfc; border: 1px solid #dee2e6; border-radius: 4px;")
+        sms_layout = QGridLayout(sms_group)
         
-        self.check_btn = QPushButton("🔄 Check for Updates Now")
-        self.check_btn.setObjectName("primaryButton")
-        self.check_btn.clicked.connect(self._on_check)
-        layout.addWidget(self.check_btn)
+        sms_title = QLabel("SMS GATEWAY (ANDROID)")
+        sms_title.setStyleSheet("color: #2980b9; font-size: 14px; border: none;")
+        sms_layout.addWidget(sms_title, 0, 0, 1, 2)
         
-        self.content_layout.addLayout(layout)
-        # Remove save button since this is just info/action
-        self.save_btn.hide()
+        self.sms_enabled = QCheckBox("Enable SMS Notifications")
+        sms_layout.addWidget(self.sms_enabled, 1, 0, 1, 2)
+        
+        sms_layout.addWidget(QLabel("Gateway IP:"), 2, 0)
+        self.sms_ip = QLineEdit()
+        self.sms_ip.setPlaceholderText("e.g. 192.168.1.100")
+        sms_layout.addWidget(self.sms_ip, 2, 1)
+        
+        sms_layout.addWidget(QLabel("Gateway Port:"), 3, 0)
+        self.sms_port = QLineEdit()
+        self.sms_port.setPlaceholderText("8080")
+        sms_layout.addWidget(self.sms_port, 3, 1)
+        
+        sms_layout.addWidget(QLabel("API Key (Optional):"), 4, 0)
+        self.sms_api_key = QLineEdit()
+        sms_layout.addWidget(self.sms_api_key, 4, 1)
+        
+        layout.addWidget(sms_group)
+        
+        # WhatsApp Section
+        wa_group = QFrame()
+        wa_group.setStyleSheet("background-color: #fcfcfc; border: 1px solid #dee2e6; border-radius: 4px;")
+        wa_layout = QGridLayout(wa_group)
+        
+        wa_title = QLabel("WHATSAPP GATEWAY")
+        wa_title.setStyleSheet("color: #27ae60; font-size: 14px; border: none;")
+        wa_layout.addWidget(wa_title, 0, 0, 1, 2)
+        
+        self.wa_enabled = QCheckBox("Enable WhatsApp Notifications")
+        wa_layout.addWidget(self.wa_enabled, 1, 0, 1, 2)
+        
+        wa_layout.addWidget(QLabel("Gateway IP:"), 2, 0)
+        self.wa_ip = QLineEdit()
+        self.wa_ip.setPlaceholderText("e.g. 192.168.1.100")
+        wa_layout.addWidget(self.wa_ip, 2, 1)
+        
+        wa_layout.addWidget(QLabel("Gateway Port:"), 3, 0)
+        self.wa_port = QLineEdit()
+        self.wa_port.setPlaceholderText("8080")
+        wa_layout.addWidget(self.wa_port, 3, 1)
+        
+        wa_layout.addWidget(QLabel("Instance ID:"), 4, 0)
+        self.wa_instance = QLineEdit()
+        wa_layout.addWidget(self.wa_instance, 4, 1)
+        
+        wa_layout.addWidget(QLabel("API Key:"), 5, 0)
+        self.wa_api_key = QLineEdit()
+        wa_layout.addWidget(self.wa_api_key, 5, 1)
+        
+        layout.addWidget(wa_group)
+        
+        # Template Section
+        tmpl_group = QFrame()
+        tmpl_group.setStyleSheet("background-color: #fcfcfc; border: 1px solid #dee2e6; border-radius: 4px;")
+        tmpl_layout = QVBoxLayout(tmpl_group)
+        
+        tmpl_title = QLabel("MESSAGE TEMPLATE")
+        tmpl_title.setStyleSheet("color: #e67e22; font-size: 14px; border: none;")
+        tmpl_layout.addWidget(tmpl_title)
+        
+        self.template_text = QTextEdit()
+        self.template_text.setFixedHeight(80)
+        tmpl_layout.addWidget(self.template_text)
+        
+        help_text = QLabel("Available variables: {customer}, {invoice_no}, {amount}, {fbr_id}")
+        help_text.setStyleSheet("font-size: 11px; color: #7f8c8d; border: none;")
+        tmpl_layout.addWidget(help_text)
+        
+        layout.addWidget(tmpl_group)
+        
+        scroll.setWidget(scroll_content)
+        self.content_layout.addWidget(scroll)
 
-    def _on_check(self):
-        # Trigger update check via parent if possible, or directly
+    def _load_data(self):
+        config = settings_service.get_sms_config()
+        self.sms_enabled.setChecked(config.get("is_enabled", False))
+        self.sms_ip.setText(config.get("gateway_ip", ""))
+        self.sms_port.setText(config.get("gateway_port", "8080"))
+        self.sms_api_key.setText(config.get("api_key", ""))
+        
+        self.wa_enabled.setChecked(config.get("whatsapp_enabled", False))
+        self.wa_ip.setText(config.get("whatsapp_gateway_ip", ""))
+        self.wa_port.setText(config.get("whatsapp_gateway_port", "8080"))
+        self.wa_instance.setText(config.get("whatsapp_instance_id", ""))
+        self.wa_api_key.setText(config.get("whatsapp_api_key", ""))
+        
+        self.template_text.setPlainText(config.get("invoice_template", ""))
+
+    def save_settings(self):
         try:
-            parent = self.parent()
-            # If the direct parent is not main window, try to find it
-            while parent and not hasattr(parent, "_on_manual_update_check"):
-                parent = parent.parent()
-            
-            if parent and hasattr(parent, "_on_manual_update_check"):
-                parent._on_manual_update_check()
-                self.accept()
-            else:
-                logger.warning("Main window update check method not found.")
-                self._show_error("Error", "Update system not available from this context.")
+            settings_service.save_sms_config(
+                is_enabled=self.sms_enabled.isChecked(),
+                gateway_ip=self.sms_ip.text().strip(),
+                gateway_port=self.sms_port.text().strip(),
+                api_key=self.sms_api_key.text().strip(),
+                whatsapp_enabled=self.wa_enabled.isChecked(),
+                whatsapp_gateway_ip=self.wa_ip.text().strip(),
+                whatsapp_gateway_port=self.wa_port.text().strip(),
+                whatsapp_instance_id=self.wa_instance.text().strip(),
+                whatsapp_api_key=self.wa_api_key.text().strip(),
+                invoice_template=self.template_text.toPlainText().strip()
+            )
+            self._show_success("Saved", "SMS and WhatsApp settings updated.")
+            self.accept()
         except Exception as e:
-            logger.error(f"Error triggering update check: {e}")
-            self._show_error("Error", f"Failed to check for updates: {str(e)}")
+            self._show_error("Error", str(e))
