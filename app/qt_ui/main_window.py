@@ -4549,12 +4549,16 @@ class MainWindow(QMainWindow):
             qty = float(self.invoice_quantity_spin.value())
             amount_excl = float(self.invoice_amount_spin.value())
             focused = self.focusWidget()
+            
             tax_charged = 0.0
             total_further_tax = 0.0
+            
+            # Use current price if available, but respect manual overrides if focused
             if self._invoice_current_price:
                 tax_per_unit = float(getattr(self._invoice_current_price, "tax_amount", 0) or 0)
                 # If dealer is selected, further tax is typically 0
                 further_per_unit = 0.0 if self._is_dealer_selected else float(getattr(self._invoice_current_price, "levy_amount", 0) or 0)
+                
                 tax_charged = tax_per_unit * qty
                 total_further_tax = further_per_unit * qty
             else:
@@ -4562,39 +4566,49 @@ class MainWindow(QMainWindow):
                 tax_rate = float(settings.get("tax_rate", 18.0))
                 sale_value = amount_excl * qty
                 tax_charged = (sale_value * tax_rate) / 100.0
-                try:
-                    # If dealer is selected, default further tax to 0
-                    if self._is_dealer_selected:
-                        total_further_tax = 0.0
-                    else:
-                        total_further_tax = float(self.invoice_further_tax_spin.value())
-                except ValueError:
+                
+                # If dealer is selected, default further tax to 0
+                if self._is_dealer_selected:
                     total_further_tax = 0.0
+                else:
+                    # Use current value if it's already set manually
+                    total_further_tax = float(self.invoice_further_tax_spin.value())
+
+            # Manual override prioritization:
+            # If a spin box is focused, trust its current value over calculation
             if focused is self.invoice_tax_spin:
                 try:
                     tax_charged = float(self.invoice_tax_spin.value())
                 except ValueError:
                     pass
+            
             if focused is self.invoice_further_tax_spin:
                 try:
                     total_further_tax = float(self.invoice_further_tax_spin.value())
                 except ValueError:
                     pass
+
             sale_value_total = amount_excl * qty
             total_amount = sale_value_total + tax_charged + total_further_tax
+            
+            # Update UI components safely
             if focused is not self.invoice_tax_spin:
                 self.invoice_tax_spin.blockSignals(True)
                 self.invoice_tax_spin.setValue(tax_charged)
                 self.invoice_tax_spin.blockSignals(False)
+                
             if focused is not self.invoice_further_tax_spin:
                 self.invoice_further_tax_spin.blockSignals(True)
                 self.invoice_further_tax_spin.setValue(total_further_tax)
                 self.invoice_further_tax_spin.blockSignals(False)
+                
             if focused is not self.invoice_total_spin:
                 self.invoice_total_spin.blockSignals(True)
                 self.invoice_total_spin.setValue(total_amount)
                 self.invoice_total_spin.blockSignals(False)
-        except Exception:
+                
+        except Exception as e:
+            logger.error(f"Error recalculating totals: {e}")
             return
 
     def _on_invoice_buyer_name_changed(self, text: str) -> None:

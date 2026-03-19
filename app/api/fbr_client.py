@@ -182,6 +182,7 @@ class FBRClient:
                 "TaxCharged": round(float(item.get("tax_charged", 0.0)), 2),
                 "Discount": round(discount, 2),
                 "FurtherTax": round(float(item.get("further_tax", 0.0)), 2),
+                "OtherTax": round(float(item.get("further_tax", 0.0)), 2), # Alias for compatibility
                 "InvoiceType": default_invoice_type_int
             })
 
@@ -249,6 +250,7 @@ class FBRClient:
             "TotalSaleValue": round(float(data.get("total_sale_value", 0.0)), 2),
             "TotalTaxCharged": round(float(data.get("total_tax_charged", 0.0)), 2),
             "TotalFurtherTax": round(float(data.get("total_further_tax", 0.0)), 2),
+            "TotalOtherTax": round(float(data.get("total_further_tax", 0.0)), 2), # Alias for compatibility
             "PaymentMode": mode_int,
             "InvoiceType": default_invoice_type_int,
             "Items": items
