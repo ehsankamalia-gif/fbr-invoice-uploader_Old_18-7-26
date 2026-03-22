@@ -268,14 +268,23 @@ class InvoiceService:
             response_code = str(response.get("Code")) if response and response.get("Code") else None
             is_success = response_code == "100"
             
-            if is_success and "InvoiceNumber" in response:
-                invoice.fbr_invoice_number = response.get("InvoiceNumber")
+            # ECHO DETECTION:
+            # If FBR returns the same USIN we sent as the FBR Invoice Number, 
+            # it indicates a silent failure/echo bug in FBR.
+            returned_fbr_id = response.get("InvoiceNumber")
+            internal_usin = invoice.invoice_number # mapped to USIN in FBRClient
+            is_echo = returned_fbr_id == internal_usin
+            
+            if is_success and returned_fbr_id and not is_echo:
+                invoice.fbr_invoice_number = returned_fbr_id
                 invoice.is_fiscalized = True
                 invoice.sync_status = "SYNCED"
                 invoice.status_updated_at = datetime.utcnow()
                 invoice.fbr_response_code = response_code
                 invoice.fbr_response_message = "Success"
                 invoice.fbr_full_response = response
+                
+                logger.info(f"FBR SUCCESS: Invoice {invoice.invoice_number} fiscalized as {returned_fbr_id}")
 
                 # Auto-delete captured data if chassis exists (Cleanup after successful FBR upload)
                 try:
@@ -286,12 +295,23 @@ class InvoiceService:
                 except Exception as cleanup_err:
                      logger.error(f"Error cleaning up captured data for invoice {invoice.invoice_number}: {cleanup_err}")
 
+            elif is_echo:
+                # Echo detected -> Treat as failure
+                logger.error(f"FBR ECHO FAILURE: FBR returned echoed Invoice Number {returned_fbr_id} for {invoice.invoice_number}")
+                invoice.sync_status = "FAILED"
+                invoice.status_updated_at = datetime.utcnow()
+                invoice.fbr_response_message = "FBR returned echoed Invoice Number (FBR Glitch)"
+                invoice.fbr_full_response = response
+                # We raise an exception so the UI knows it was a critical error
+                raise Exception("FBR returned echoed Invoice Number. Please check FBR Portal.")
             else:
                 # API returned but with error (e.g. Logic Error)
                 # Keep as FAILED so user checks it.
                 invoice.sync_status = "FAILED"
                 invoice.status_updated_at = datetime.utcnow()
                 invoice.fbr_response_message = response.get("Response", "Unknown Error") if response else "No response"
+                invoice.fbr_full_response = response
+                logger.warning(f"FBR API Error for {invoice.invoice_number}: {invoice.fbr_response_message}")
                 
             db.add(invoice) # Ensure update
             # Note: Commit is handled by caller (create_invoice or background sync)

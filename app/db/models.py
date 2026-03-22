@@ -237,6 +237,7 @@ class FBRConfiguration(Base):
     pos_id = Column(String(50), nullable=True)
     usin = Column(String(50), nullable=True)
     auth_token = Column(String(500), nullable=True)
+    secret_key = Column(String(255), nullable=True) # New field for HMAC signature
     
     tax_rate = Column(Float, default=18.0)
     invoice_type = Column(String(20), default="Standard")
@@ -313,7 +314,7 @@ class SMSCampaign(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), nullable=False)
     template = Column(String(1000), nullable=False)
-    channel = Column(String(20), default="SMS") # SMS or WHATSAPP
+    channel = Column(String(20), default="SMS") # SMS
     total_recipients = Column(Integer, default=0)
     sent_count = Column(Integer, default=0)
     failed_count = Column(Integer, default=0)
@@ -331,7 +332,7 @@ class SMSQueue(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     campaign_id = Column(Integer, ForeignKey("sms_campaigns.id"), nullable=True)
-    channel = Column(String(20), default="SMS") # SMS or WHATSAPP
+    channel = Column(String(20), default="SMS") # SMS
     phone_number = Column(String(20), nullable=False, index=True)
     recipient_name = Column(String(100), nullable=True)
     message = Column(String(1000), nullable=False)
@@ -354,19 +355,29 @@ class SMSConfiguration(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     is_enabled = Column(Boolean, default=False)
-    whatsapp_enabled = Column(Boolean, default=False) # Separate toggle for WhatsApp
     gateway_type = Column(String(20), default="WIFI") # WIFI or CLOUD
     
-    # WiFi Gateway Settings (Can be used for both SMS & WhatsApp depending on App)
+    # WhatsApp Settings
+    whatsapp_enabled = Column(Boolean, default=False)
+    whatsapp_web_enabled = Column(Boolean, default=False)
+    whatsapp_gateway_ip = Column(String(100), nullable=True)
+    whatsapp_gateway_port = Column(String(10), default="8080")
+    whatsapp_use_https = Column(Boolean, default=False)
+    whatsapp_instance_id = Column(String(100), nullable=True)
+    whatsapp_api_key = Column(String(100), nullable=True)
+    whatsapp_username = Column(String(100), nullable=True)
+    whatsapp_password = Column(String(100), nullable=True)
+    
+    # Evolution API Settings (New Integration)
+    evolution_api_enabled = Column(Boolean, default=False)
+    evolution_base_url = Column(String(255), nullable=True)
+    evolution_api_key = Column(String(255), nullable=True)
+    evolution_instance_name = Column(String(100), nullable=True)
+    
+    # WiFi Gateway Settings (SMS)
     gateway_ip = Column(String(100), nullable=True) 
     gateway_port = Column(String(10), default="8080")
     use_https = Column(Boolean, default=False)
-    
-    # WhatsApp Specific (for Option 2 Gateway Apps)
-    whatsapp_gateway_ip = Column(String(100), nullable=True)
-    whatsapp_gateway_port = Column(String(10), default="8080")
-    whatsapp_instance_id = Column(String(100), nullable=True) # If app uses instances
-    whatsapp_api_key = Column(String(100), nullable=True)
     
     # Cloud/Common Settings
     api_url = Column(String(255), nullable=True) # Cloud Server URL

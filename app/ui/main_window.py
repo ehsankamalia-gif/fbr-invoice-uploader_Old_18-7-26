@@ -2897,8 +2897,18 @@ class App(ctk.CTk):
             logger.info(f"Submitting invoice {inv_num} for {buyer_name}")
             invoice = invoice_service.create_invoice(db, inv)
             fbr_id = invoice.fbr_invoice_number or "N/A"
-            logger.info(f"Invoice {inv_num} created successfully. FBR ID: {fbr_id}")
-            messagebox.showinfo("Success", f"Invoice Created and Queued for Sync\nFBR ID: {fbr_id}")
+            sync_status = invoice.sync_status
+            
+            if sync_status == "SYNCED":
+                logger.info(f"Invoice {inv_num} created and fiscalized successfully. FBR ID: {fbr_id}")
+                messagebox.showinfo("Success", f"Invoice Fiscalized Successfully!\nFBR ID: {fbr_id}")
+            else:
+                logger.warning(f"Invoice {inv_num} saved locally but sync is {sync_status}. Reason: {invoice.fbr_response_message}")
+                messagebox.showwarning("Partially Successful", 
+                                     f"Invoice saved locally but FBR sync failed.\n"
+                                     f"Status: {sync_status}\n"
+                                     f"Reason: {invoice.fbr_response_message}\n\n"
+                                     f"You can retry syncing from the dashboard later.")
             
             # Pass fbr_id to reset_form directly to ensure it is displayed
             # This handles both resetting the form AND showing the QR code in one consistent step

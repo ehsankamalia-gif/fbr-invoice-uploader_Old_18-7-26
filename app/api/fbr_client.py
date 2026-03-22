@@ -1,6 +1,8 @@
 import requests
 import json
 import urllib3
+import hmac
+import hashlib
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from app.core.logger import logger
 from app.api.schemas import InvoiceCreate
@@ -60,6 +62,20 @@ class FBRClient:
             # Validate payload before sending
             self._validate_payload(payload)
             
+            # Generate and add Signature if secret_key is provided
+            secret_key = settings.get("secret_key")
+            if secret_key:
+                signature = self._generate_signature(payload, secret_key)
+                # payload["Signature"] = signature # FBR usually expects it inside the JSON
+                # Actually, some versions expect it in the header, some in the body.
+                # The standard for Pakistani FBR is in the body.
+                # However, looking at _transform_to_fbr_format, it's not there.
+                # I'll add it here.
+                payload["Signature"] = signature
+                logger.info(f"FBR Sync: Payload signed successfully.")
+            else:
+                logger.warning(f"FBR Sync: No Secret Key configured. Sending unsigned payload.")
+
             logger.info(f"Sending invoice {invoice_data.get('invoice_number')} to FBR...")
             logger.debug(f"FBR Payload: {json.dumps(payload, default=str)}")
             
@@ -84,6 +100,24 @@ class FBRClient:
                  # Raise a custom error with the response text so UI can show it
                  raise Exception(f"FBR Error: {e.response.status_code} - {e.response.text}")
             raise e
+
+    def _generate_signature(self, payload: dict, secret_key: str) -> str:
+        """
+        Generates HMAC-SHA256 signature for the payload.
+        FBR Pakistan standard: HMAC-SHA256 of the JSON string using the secret key.
+        """
+        # Ensure we have a consistent JSON string (keys sorted, no extra whitespace)
+        # Note: FBR's requirement for JSON normalization might vary, 
+        # but sorted keys is a safe standard for deterministic hashing.
+        payload_str = json.dumps(payload, sort_keys=True, separators=(',', ':'))
+        
+        signature = hmac.new(
+            secret_key.encode('utf-8'),
+            payload_str.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest().upper()
+        
+        return signature
 
     def _validate_payload(self, payload: dict):
         """

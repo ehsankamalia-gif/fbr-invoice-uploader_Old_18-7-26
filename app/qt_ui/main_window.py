@@ -94,7 +94,7 @@ from app.qt_ui.settings_modals import (
     DatabaseSettingsDialog, 
     BackupSettingsDialog,
     AppUpdatesDialog,
-    SMSWhatsAppDialog
+    SMSConfigDialog
 )
 from app.core.logger import logger
 from app.core.version_manager import VersionManager
@@ -2374,7 +2374,7 @@ class MainWindow(QMainWindow):
             ("Database Connection", "🗄️", "Manage MySQL server, credentials, and connectivity.", self._open_db_settings),
             ("Backup & Maintenance", "💾", "Schedule backups, restore data, and manage storage.", self._open_backup_settings),
             ("System Updates", "🔄", "Check for software updates and view version info.", self._open_app_updates),
-            ("SMS & WhatsApp", "💬", "Configure SMS/WhatsApp gateways and templates.", self._open_sms_settings),
+            ("SMS Configuration", "💬", "Configure SMS gateways and templates.", self._open_sms_settings),
         ]
 
         for i, (title, icon, desc, callback) in enumerate(categories):
@@ -2445,7 +2445,7 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _open_sms_settings(self):
-        dialog = SMSWhatsAppDialog(self)
+        dialog = SMSConfigDialog(self)
         dialog.exec()
 
     def _update_app_branding(self, business_name: str) -> None:
@@ -2771,10 +2771,6 @@ class MainWindow(QMainWindow):
         self.sms_enabled_check.setStyleSheet("font-weight: bold; color: #2c3e50;")
         wifi_layout.addWidget(self.sms_enabled_check)
 
-        self.wa_enabled_check = QCheckBox("Enable WhatsApp Module")
-        self.wa_enabled_check.setStyleSheet("font-weight: bold; color: #25D366;") # WhatsApp Green
-        wifi_layout.addWidget(self.wa_enabled_check)
-
         # Gateway Type Switcher
         type_layout = QHBoxLayout()
         type_layout.addWidget(QLabel("Gateway Type:"))
@@ -2869,36 +2865,6 @@ class MainWindow(QMainWindow):
         common_layout.addWidget(self.sms_bulk_delay, 0, 1)
         
         wifi_layout.addLayout(common_layout)
-
-        # WhatsApp Gateway Overrides (Optional)
-        wa_overrides = QFrame()
-        wa_overrides.setFrameShape(QFrame.Shape.StyledPanel)
-        wa_overrides.setStyleSheet("background-color: #f9f9f9; border: 1px dashed #25D366; border-radius: 8px;")
-        wa_over_layout = QVBoxLayout(wa_overrides)
-        wa_over_layout.addWidget(QLabel("WhatsApp Gateway Overrides (If different from SMS):"))
-        
-        wa_ip_row = QHBoxLayout()
-        wa_ip_row.addWidget(QLabel("WA IP:"))
-        self.wa_gateway_ip = QLineEdit()
-        self.wa_gateway_ip.setPlaceholderText("Leave empty to use SMS IP")
-        wa_ip_row.addWidget(self.wa_gateway_ip)
-        wa_ip_row.addWidget(QLabel("WA Port:"))
-        self.wa_gateway_port = QLineEdit()
-        self.wa_gateway_port.setPlaceholderText("8080")
-        wa_ip_row.addWidget(self.wa_gateway_port)
-        wa_over_layout.addLayout(wa_ip_row)
-        
-        wa_auth_row = QHBoxLayout()
-        wa_auth_row.addWidget(QLabel("Instance ID:"))
-        self.wa_instance_id = QLineEdit()
-        wa_auth_row.addWidget(self.wa_instance_id)
-        wa_auth_row.addWidget(QLabel("WA API Key:"))
-        self.wa_api_key = QLineEdit()
-        self.wa_api_key.setEchoMode(QLineEdit.EchoMode.Password)
-        wa_auth_row.addWidget(self.wa_api_key)
-        wa_over_layout.addLayout(wa_auth_row)
-        
-        wifi_layout.addWidget(wa_overrides)
         
         self.test_conn_btn = QPushButton("🔌 Test Connection")
         self.test_conn_btn.setFixedWidth(150)
@@ -3084,7 +3050,7 @@ class MainWindow(QMainWindow):
         channel_layout = QHBoxLayout()
         channel_layout.addWidget(QLabel("Select Channel:"))
         self.bulk_channel_selector = QComboBox()
-        self.bulk_channel_selector.addItems(["SMS", "WHATSAPP"])
+        self.bulk_channel_selector.addItems(["SMS"])
         self.bulk_channel_selector.setFixedHeight(35)
         self.bulk_channel_selector.setStyleSheet("""
             QComboBox { font-weight: bold; padding-left: 10px; }
@@ -3247,25 +3213,17 @@ class MainWindow(QMainWindow):
         from app.db.session import SessionLocal
         from app.db.models import SMSConfiguration
 
-        # Check if SMS or WhatsApp module is enabled before starting
+        # Check if SMS module is enabled before starting
         db = SessionLocal()
         channel = self.bulk_channel_selector.currentText()
         try:
             config = db.query(SMSConfiguration).first()
-            if channel == "SMS":
-                if not config or not config.is_enabled:
-                    QMessageBox.warning(self, "SMS Module Disabled", 
-                        "The SMS Module is currently disabled.\n\n"
-                        "Please go to the 'CONFIGURATION' tab, check 'Enable SMS Module', and save.")
-                    self.sms_config_tab_btn.click()
-                    return
-            else: # WHATSAPP
-                if not config or not config.whatsapp_enabled:
-                    QMessageBox.warning(self, "WhatsApp Module Disabled", 
-                        "The WhatsApp Module is currently disabled.\n\n"
-                        "Please go to the 'CONFIGURATION' tab, check 'Enable WhatsApp Module', and save.")
-                    self.sms_config_tab_btn.click()
-                    return
+            if not config or not config.is_enabled:
+                QMessageBox.warning(self, "SMS Module Disabled", 
+                    "The SMS Module is currently disabled.\n\n"
+                    "Please go to the 'CONFIGURATION' tab, check 'Enable SMS Module', and save.")
+                self.sms_config_tab_btn.click()
+                return
         finally:
             db.close()
         
@@ -3436,17 +3394,11 @@ class MainWindow(QMainWindow):
                 db.commit()
             
             self.sms_enabled_check.setChecked(config.is_enabled)
-            self.wa_enabled_check.setChecked(getattr(config, 'whatsapp_enabled', False))
             self.sms_gateway_type.setCurrentText(getattr(config, 'gateway_type', 'WIFI'))
             self._on_gateway_type_changed(self.sms_gateway_type.currentText())
             
             self.sms_gateway_ip.setText(config.gateway_ip or "")
             self.sms_gateway_port.setText(config.gateway_port or "8080")
-            
-            self.wa_gateway_ip.setText(getattr(config, 'whatsapp_gateway_ip', '') or "")
-            self.wa_gateway_port.setText(getattr(config, 'whatsapp_gateway_port', '') or "")
-            self.wa_instance_id.setText(getattr(config, 'whatsapp_instance_id', '') or "")
-            self.wa_api_key.setText(getattr(config, 'whatsapp_api_key', '') or "")
             
             self.sms_use_https.setChecked(getattr(config, 'use_https', False))
             self.sms_cloud_url.setText(getattr(config, 'api_url', '') or "")
@@ -3470,15 +3422,9 @@ class MainWindow(QMainWindow):
             from app.db.models import SMSConfiguration
             config = db.query(SMSConfiguration).first()
             config.is_enabled = self.sms_enabled_check.isChecked()
-            config.whatsapp_enabled = self.wa_enabled_check.isChecked()
             config.gateway_type = self.sms_gateway_type.currentText()
             config.gateway_ip = self.sms_gateway_ip.text().strip()
             config.gateway_port = self.sms_gateway_port.text().strip()
-            
-            config.whatsapp_gateway_ip = self.wa_gateway_ip.text().strip()
-            config.whatsapp_gateway_port = self.wa_gateway_port.text().strip()
-            config.whatsapp_instance_id = self.wa_instance_id.text().strip()
-            config.whatsapp_api_key = self.wa_api_key.text().strip()
             
             config.use_https = self.sms_use_https.isChecked()
             config.api_url = self.sms_cloud_url.text().strip()
@@ -7418,6 +7364,14 @@ class MainWindow(QMainWindow):
         try:
             logger.info("Application shutting down. Stopping background services...")
             form_capture_service.stop_capture_session()
+            
+            # Cleanup DB connections
+            close_all_db_connections()
+            
+            # Stop SMS scheduler
+            from app.services.sms_service import sms_service
+            sms_service.stop_scheduler()
+                
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
         event.accept()
@@ -8076,8 +8030,6 @@ class CampaignsTableModel(QAbstractTableModel):
             return Qt.AlignmentFlag.AlignCenter
             
         if role == Qt.ItemDataRole.ForegroundRole:
-            if col == 2: # Channel
-                return Qt.GlobalColor.darkBlue if getattr(row, 'channel', 'SMS') == 'WHATSAPP' else Qt.GlobalColor.black
             if col == 3: # Status column
                 if row.status == "COMPLETED":
                     return Qt.GlobalColor.darkGreen

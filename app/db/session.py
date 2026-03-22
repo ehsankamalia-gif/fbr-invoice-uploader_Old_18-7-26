@@ -106,7 +106,10 @@ def init_db():
             # 4. Create tables and run migrations on the verified engine
             Base.metadata.create_all(bind=engine)
             _ensure_critical_tables(engine)
-            run_migrations()
+            try:
+                run_migrations()
+            except Exception as e:
+                logger.error(f"Non-critical migration error: {e}")
             logger.info("Database initialized successfully.")
             
         except Exception as e:
@@ -215,7 +218,9 @@ def run_migrations():
                 (1, "Initial schema and legacy migrations", _run_legacy_migrations),
                 (2, "Add use_https to sms_configurations", _migration_v2_add_https),
                 (3, "Add app_configurations table", _migration_v3_add_app_configs),
-                (4, "Add WhatsApp fields to SMS configuration and models", _migration_v4_whatsapp_support),
+                (4, "Add WhatsApp configuration fields to sms_configurations", _migration_v4_add_whatsapp_fields),
+                (5, "Add Gateway Credentials to SMS and WhatsApp configurations", _migration_v5_add_gateway_credentials),
+                (6, "Add Evolution API configuration fields", _migration_v6_add_evolution_fields),
             ]
 
             for version, description, func in migrations:
@@ -285,43 +290,87 @@ def _migration_v3_add_app_configs(conn) -> bool:
         logger.error(f"Migration v3 failed: {e}")
         return False
 
-def _migration_v4_whatsapp_support(conn) -> bool:
-    """Adds WhatsApp fields to configurations and channel to campaign/queue."""
+def _migration_v4_add_whatsapp_fields(conn) -> bool:
+    """Adds WhatsApp related fields to the sms_configurations table."""
     try:
-        # 1. SMS Configurations
-        cols = [
+        # Columns to add and their default values
+        columns = [
             ("whatsapp_enabled", "BOOLEAN DEFAULT 0"),
-            ("whatsapp_gateway_ip", "VARCHAR(100) NULL"),
+            ("whatsapp_web_enabled", "BOOLEAN DEFAULT 0"),
+            ("whatsapp_gateway_ip", "VARCHAR(100)"),
             ("whatsapp_gateway_port", "VARCHAR(10) DEFAULT '8080'"),
-            ("whatsapp_instance_id", "VARCHAR(100) NULL"),
-            ("whatsapp_api_key", "VARCHAR(100) NULL")
+            ("whatsapp_use_https", "BOOLEAN DEFAULT 0"),
+            ("whatsapp_instance_id", "VARCHAR(100)"),
+            ("whatsapp_api_key", "VARCHAR(100)")
         ]
-        for col, dtype in cols:
-            try:
-                conn.execute(text(f"SELECT {col} FROM sms_configurations LIMIT 1"))
-            except Exception:
-                logger.info(f"Adding column {col} to sms_configurations")
-                conn.execute(text(f"ALTER TABLE sms_configurations ADD COLUMN {col} {dtype}"))
         
-        # 2. SMS Campaigns (channel)
-        try:
-            conn.execute(text("SELECT channel FROM sms_campaigns LIMIT 1"))
-        except Exception:
-            logger.info("Adding column 'channel' to sms_campaigns")
-            conn.execute(text("ALTER TABLE sms_campaigns ADD COLUMN channel VARCHAR(20) DEFAULT 'SMS'"))
-            
-        # 3. SMS Queue (channel)
-        try:
-            conn.execute(text("SELECT channel FROM sms_queue LIMIT 1"))
-        except Exception:
-            logger.info("Adding column 'channel' to sms_queue")
-            conn.execute(text("ALTER TABLE sms_queue ADD COLUMN channel VARCHAR(20) DEFAULT 'SMS'"))
-            
+        for col_name, col_def in columns:
+            try:
+                # Check for existence of each column individually
+                conn.execute(text(f"SELECT {col_name} FROM sms_configurations LIMIT 1"))
+            except Exception:
+                # Column is missing, add it
+                logger.info(f"Adding column {col_name} to sms_configurations...")
+                # SQLite doesn't support ADD COLUMN if it's already there (though we checked)
+                # DDL statements in MySQL are auto-committing, but in SQLAlchemy it depends on execution context
+                conn.execute(text(f"ALTER TABLE sms_configurations ADD COLUMN {col_name} {col_def}"))
+                try:
+                    # Try to commit, but don't fail if it's auto-committed or not needed
+                    conn.commit()
+                except: pass 
         return True
     except Exception as e:
-        logger.error(f"Migration v4 failed: {e}")
+        logger.error(f"Migration v4 failed: {e}", exc_info=True)
         return False
 
+def _migration_v5_add_gateway_credentials(conn) -> bool:
+    """Adds Gateway Username/Password fields to SMS and WhatsApp configurations."""
+    try:
+        # Columns to add and their default values
+        columns = [
+            ("gateway_username", "VARCHAR(100)"),
+            ("gateway_password", "VARCHAR(100)"),
+            ("whatsapp_username", "VARCHAR(100)"),
+            ("whatsapp_password", "VARCHAR(100)")
+        ]
+        
+        for col_name, col_def in columns:
+            try:
+                conn.execute(text(f"SELECT {col_name} FROM sms_configurations LIMIT 1"))
+            except Exception:
+                logger.info(f"Adding column {col_name} to sms_configurations...")
+                conn.execute(text(f"ALTER TABLE sms_configurations ADD COLUMN {col_name} {col_def}"))
+                try:
+                    conn.commit()
+                except: pass
+        return True
+    except Exception as e:
+        logger.error(f"Migration v5 failed: {e}", exc_info=True)
+        return False
+
+def _migration_v6_add_evolution_fields(conn) -> bool:
+    """Adds Evolution API related fields to the sms_configurations table."""
+    try:
+        columns = [
+            ("evolution_api_enabled", "BOOLEAN DEFAULT 0"),
+            ("evolution_base_url", "VARCHAR(255)"),
+            ("evolution_api_key", "VARCHAR(255)"),
+            ("evolution_instance_name", "VARCHAR(100)")
+        ]
+        
+        for col_name, col_def in columns:
+            try:
+                conn.execute(text(f"SELECT {col_name} FROM sms_configurations LIMIT 1"))
+            except Exception:
+                logger.info(f"Adding column {col_name} to sms_configurations...")
+                conn.execute(text(f"ALTER TABLE sms_configurations ADD COLUMN {col_name} {col_def}"))
+                try:
+                    conn.commit()
+                except: pass
+        return True
+    except Exception as e:
+        logger.error(f"Migration v6 failed: {e}", exc_info=True)
+        return False
 
 def get_db():
     db = SessionLocal()

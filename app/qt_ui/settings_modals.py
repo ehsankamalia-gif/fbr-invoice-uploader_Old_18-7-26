@@ -3,14 +3,17 @@ from typing import Dict, Any, Optional
 import os
 import sys
 import subprocess
+import base64
+import asyncio
 from pathlib import Path
-from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QThread
+from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QThread, QTimer
+from PyQt6.QtGui import QPixmap, QImage
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
     QPushButton, QComboBox, QDoubleSpinBox, QSpinBox, 
     QFrame, QGridLayout, QCheckBox, QScrollArea, 
     QMessageBox, QApplication, QTableWidget, QTableWidgetItem, QHeaderView,
-    QProgressDialog, QWidget
+    QProgressDialog, QWidget, QTextEdit
 )
 import logging
 import datetime as dt
@@ -172,12 +175,12 @@ class FBRSecurityDialog(BaseSettingsDialog):
         self.auth_token.setEchoMode(QLineEdit.EchoMode.PasswordEchoOnEdit)
         layout.addWidget(self.auth_token, 4, 1)
         
+        layout.addWidget(QLabel("Secret Key:"), 5, 0)
+        self.secret_key = QLineEdit()
+        self.secret_key.setEchoMode(QLineEdit.EchoMode.PasswordEchoOnEdit)
+        layout.addWidget(self.secret_key, 5, 1)
+        
         self.content_layout.addLayout(layout)
-
-    def _load_data(self):
-        env = settings_service.get_active_environment()
-        self.env_combo.setCurrentText(env)
-        self._load_env_settings(env)
 
     def _on_env_changed(self, env: str):
         self._load_env_settings(env)
@@ -189,6 +192,7 @@ class FBRSecurityDialog(BaseSettingsDialog):
             self.pos_id.setText(data.get("pos_id", ""))
             self.usin.setText(data.get("usin", ""))
             self.auth_token.setText(data.get("token", ""))
+            self.secret_key.setText(data.get("secret_key", ""))
 
     def save_settings(self):
         env = self.env_combo.currentText()
@@ -202,6 +206,7 @@ class FBRSecurityDialog(BaseSettingsDialog):
                 pos_id=self.pos_id.text().strip(),
                 usin=self.usin.text().strip(),
                 token=self.auth_token.text().strip(),
+                secret_key=self.secret_key.text().strip(),
                 tax_rate=existing.get("tax_rate", "18.0"),
                 pct_code=existing.get("pct_code", "8711.2010"),
                 invoice_type=existing.get("invoice_type", "Standard"),
@@ -391,6 +396,326 @@ class DatabaseSettingsDialog(BaseSettingsDialog):
         except Exception as e:
             self._show_error("Error", str(e))
 
+class SMSConfigDialog(BaseSettingsDialog):
+    """Modal for SMS & WhatsApp notification settings."""
+    def __init__(self, parent=None):
+        super().__init__("SMS & WhatsApp Configuration", parent)
+        self.setMinimumWidth(600)
+        self._init_ui()
+        self._load_data()
+
+    def _init_ui(self):
+        # Using a scroll area for better layout
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll_content = QWidget()
+        layout = QVBoxLayout(scroll_content)
+        
+        # 1. SMS Section
+        sms_group = QFrame()
+        sms_group.setStyleSheet("background-color: #fcfcfc; border: 1px solid #dee2e6; border-radius: 4px;")
+        sms_layout = QGridLayout(sms_group)
+        
+        sms_title = QLabel("SMS GATEWAY (ANDROID)")
+        sms_title.setStyleSheet("color: #2980b9; font-size: 14px; border: none; font-weight: bold;")
+        sms_layout.addWidget(sms_title, 0, 0, 1, 2)
+        
+        self.sms_enabled = QCheckBox("Enable SMS Notifications")
+        sms_layout.addWidget(self.sms_enabled, 1, 0, 1, 2)
+        
+        sms_layout.addWidget(QLabel("Gateway IP:"), 2, 0)
+        self.sms_ip = QLineEdit()
+        self.sms_ip.setPlaceholderText("e.g. 192.168.1.100")
+        sms_layout.addWidget(self.sms_ip, 2, 1)
+        
+        sms_layout.addWidget(QLabel("Gateway Port:"), 3, 0)
+        self.sms_port = QLineEdit()
+        self.sms_port.setPlaceholderText("8080")
+        sms_layout.addWidget(self.sms_port, 3, 1)
+        
+        sms_layout.addWidget(QLabel("Gateway Username:"), 4, 0)
+        self.sms_username = QLineEdit()
+        sms_layout.addWidget(self.sms_username, 4, 1)
+        
+        sms_layout.addWidget(QLabel("Gateway Password:"), 5, 0)
+        self.sms_password = QLineEdit()
+        self.sms_password.setEchoMode(QLineEdit.EchoMode.Password)
+        sms_layout.addWidget(self.sms_password, 5, 1)
+        
+        self.sms_https = QCheckBox("Use HTTPS Protocol")
+        sms_layout.addWidget(self.sms_https, 6, 0, 1, 2)
+        
+        sms_layout.addWidget(QLabel("API Key (Optional):"), 7, 0)
+        self.sms_api_key = QLineEdit()
+        sms_layout.addWidget(self.sms_api_key, 7, 1)
+        
+        self.sms_test_btn = QPushButton("🧪 Test SMS Connection")
+        self.sms_test_btn.setStyleSheet("background-color: #3498db; color: white; padding: 8px; font-weight: bold;")
+        self.sms_test_btn.clicked.connect(self._on_test_sms)
+        sms_layout.addWidget(self.sms_test_btn, 8, 0, 1, 2)
+        
+        layout.addWidget(sms_group)
+        
+        # 2. WhatsApp Section
+        wa_group = QFrame()
+        wa_group.setStyleSheet("background-color: #fcfcfc; border: 1px solid #dee2e6; border-radius: 4px;")
+        wa_layout = QGridLayout(wa_group)
+        
+        wa_title = QLabel("WHATSAPP NOTIFICATIONS")
+        wa_title.setStyleSheet("color: #27ae60; font-size: 14px; border: none; font-weight: bold;")
+        wa_layout.addWidget(wa_title, 0, 0, 1, 2)
+        
+        self.wa_enabled = QCheckBox("Enable WhatsApp Notifications (Gateway)")
+        wa_layout.addWidget(self.wa_enabled, 1, 0, 1, 2)
+        
+        wa_layout.addWidget(QLabel("WA Gateway IP:"), 2, 0)
+        self.wa_ip = QLineEdit()
+        wa_layout.addWidget(self.wa_ip, 2, 1)
+        
+        wa_layout.addWidget(QLabel("WA Gateway Port:"), 3, 0)
+        self.wa_port = QLineEdit()
+        wa_layout.addWidget(self.wa_port, 3, 1)
+        
+        wa_layout.addWidget(QLabel("WA Username:"), 4, 0)
+        self.wa_username = QLineEdit()
+        wa_layout.addWidget(self.wa_username, 4, 1)
+        
+        wa_layout.addWidget(QLabel("WA Password:"), 5, 0)
+        self.wa_password = QLineEdit()
+        self.wa_password.setEchoMode(QLineEdit.EchoMode.Password)
+        wa_layout.addWidget(self.wa_password, 5, 1)
+        
+        wa_layout.addWidget(QLabel("WA Instance ID:"), 6, 0)
+        self.wa_instance = QLineEdit()
+        wa_layout.addWidget(self.wa_instance, 6, 1)
+        
+        wa_layout.addWidget(QLabel("WA API Key:"), 7, 0)
+        self.wa_api_key = QLineEdit()
+        self.wa_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        wa_layout.addWidget(self.wa_api_key, 7, 1)
+        
+        self.wa_test_btn = QPushButton("🧪 Test WhatsApp Connection")
+        self.wa_test_btn.setStyleSheet("background-color: #2ecc71; color: white; padding: 8px; font-weight: bold;")
+        self.wa_test_btn.clicked.connect(self._on_test_whatsapp)
+        wa_layout.addWidget(self.wa_test_btn, 8, 0, 1, 2)
+        
+        layout.addWidget(wa_group)
+        
+        # 2.5 Evolution API Section (New)
+        evo_group = QFrame()
+        evo_group.setStyleSheet("background-color: #fcfcfc; border: 1px solid #dee2e6; border-radius: 4px;")
+        evo_layout = QGridLayout(evo_group)
+        
+        evo_title = QLabel("EVOLUTION API (RECOMMENDED)")
+        evo_title.setStyleSheet("color: #e67e22; font-size: 14px; border: none; font-weight: bold;")
+        evo_layout.addWidget(evo_title, 0, 0, 1, 2)
+        
+        self.evo_enabled = QCheckBox("Enable Evolution API (Stable)")
+        evo_layout.addWidget(self.evo_enabled, 1, 0, 1, 2)
+        
+        evo_layout.addWidget(QLabel("Server URL:"), 2, 0)
+        self.evo_url = QLineEdit()
+        self.evo_url.setPlaceholderText("https://your-evolution-server.com")
+        evo_layout.addWidget(self.evo_url, 2, 1)
+        
+        evo_layout.addWidget(QLabel("Global API Key:"), 3, 0)
+        self.evo_key = QLineEdit()
+        self.evo_key.setEchoMode(QLineEdit.EchoMode.Password)
+        evo_layout.addWidget(self.evo_key, 3, 1)
+        
+        evo_layout.addWidget(QLabel("Instance Name:"), 4, 0)
+        self.evo_instance = QLineEdit()
+        self.evo_instance.setPlaceholderText("e.g. MyWhatsApp")
+        evo_layout.addWidget(self.evo_instance, 4, 1)
+        
+        self.evo_test_btn = QPushButton("🧪 Test Evolution Connection")
+        self.evo_test_btn.setStyleSheet("background-color: #e67e22; color: white; padding: 8px; font-weight: bold;")
+        self.evo_test_btn.clicked.connect(self._on_test_evolution)
+        evo_layout.addWidget(self.evo_test_btn, 5, 0, 1, 2)
+        
+        layout.addWidget(evo_group)
+        
+        # 3. Message Template
+        tmpl_group = QFrame()
+        tmpl_group.setStyleSheet("background-color: #fcfcfc; border: 1px solid #dee2e6; border-radius: 4px;")
+        tmpl_layout = QVBoxLayout(tmpl_group)
+        
+        tmpl_title = QLabel("MESSAGE TEMPLATE")
+        tmpl_title.setStyleSheet("color: #e67e22; font-size: 14px; border: none; font-weight: bold;")
+        tmpl_layout.addWidget(tmpl_title)
+        
+        self.template_text = QTextEdit()
+        self.template_text.setFixedHeight(80)
+        tmpl_layout.addWidget(self.template_text)
+        
+        help_text = QLabel("Variables: {customer}, {invoice_no}, {amount}, {fbr_id}")
+        help_text.setStyleSheet("font-size: 11px; color: #7f8c8d; border: none;")
+        tmpl_layout.addWidget(help_text)
+        
+        layout.addWidget(tmpl_group)
+        
+        scroll.setWidget(scroll_content)
+        self.content_layout.addWidget(scroll)
+
+    def _load_data(self):
+        config = settings_service.get_sms_config()
+        self.sms_enabled.setChecked(config.get("is_enabled", False))
+        self.sms_ip.setText(config.get("gateway_ip", ""))
+        self.sms_port.setText(config.get("gateway_port", "8080"))
+        self.sms_username.setText(config.get("gateway_username", ""))
+        self.sms_password.setText(config.get("gateway_password", ""))
+        self.sms_https.setChecked(config.get("use_https", False))
+        self.sms_api_key.setText(config.get("api_key", ""))
+        
+        self.wa_enabled.setChecked(config.get("whatsapp_enabled", False))
+        self.wa_ip.setText(config.get("whatsapp_gateway_ip", ""))
+        self.wa_port.setText(config.get("whatsapp_gateway_port", "8080"))
+        self.wa_username.setText(config.get("whatsapp_username", ""))
+        self.wa_password.setText(config.get("whatsapp_password", ""))
+        self.wa_instance.setText(config.get("whatsapp_instance_id", ""))
+        self.wa_api_key.setText(config.get("whatsapp_api_key", ""))
+        
+        self.evo_enabled.setChecked(config.get("evolution_api_enabled", False))
+        self.evo_url.setText(config.get("evolution_base_url", ""))
+        self.evo_key.setText(config.get("evolution_api_key", ""))
+        self.evo_instance.setText(config.get("evolution_instance_name", ""))
+        
+        self.template_text.setPlainText(config.get("invoice_template", ""))
+
+    def _on_test_sms(self):
+        ip = self.sms_ip.text().strip()
+        port = self.sms_port.text().strip()
+        username = self.sms_username.text().strip()
+        password = self.sms_password.text().strip()
+        api_key = self.sms_api_key.text().strip()
+        use_https = self.sms_https.isChecked()
+
+        if not ip or not port:
+            self._show_error("Validation Error", "Gateway IP and Port are required for testing.")
+            return
+
+        self.sms_test_btn.setEnabled(False)
+        self.sms_test_btn.setText("⏳ Testing SMS...")
+        QApplication.processEvents()
+
+        try:
+            from app.services.sms_service import sms_service
+            # Send a generic test message to a dummy number or ask user? 
+            # We'll try to send to a placeholder or just check connectivity
+            success, msg = sms_service.send_sms_via_wifi(
+                ip, port, "0000000000", "FBR SMS Gateway Test", 
+                api_key=api_key, 
+                username=username if username else None,
+                password=password if password else None,
+                use_https=use_https, total_timeout=15.0
+            )
+            if success:
+                self._show_success("SMS Test Successful", f"Gateway responded: {msg}")
+            else:
+                self._show_error("SMS Test Failed", msg)
+        except Exception as e:
+            self._show_error("Error", str(e))
+        finally:
+            self.sms_test_btn.setEnabled(True)
+            self.sms_test_btn.setText("🧪 Test SMS Connection")
+
+    def _on_test_whatsapp(self):
+        ip = self.wa_ip.text().strip()
+        port = self.wa_port.text().strip()
+        username = self.wa_username.text().strip()
+        password = self.wa_password.text().strip()
+        instance = self.wa_instance.text().strip()
+        api_key = self.wa_api_key.text().strip()
+
+        if not all([ip, port, instance]):
+            self._show_error("Validation Error", "IP, Port, and Instance ID are required for testing.")
+            return
+
+        self.wa_test_btn.setEnabled(False)
+        self.wa_test_btn.setText("⏳ Testing WhatsApp...")
+        QApplication.processEvents()
+
+        try:
+            from app.services.sms_service import sms_service
+            # API Key is now optional in the service
+            success, msg = sms_service.send_whatsapp_via_gateway(
+                ip, port, "0000000000", "FBR WhatsApp Gateway Test",
+                instance, 
+                api_key=api_key if api_key else None, 
+                username=username if username else None,
+                password=password if password else None,
+                total_timeout=15.0
+            )
+            if success:
+                self._show_success("WhatsApp Test Successful", f"Gateway responded: {msg}")
+            else:
+                self._show_error("WhatsApp Test Failed", msg)
+        except Exception as e:
+            self._show_error("Error", str(e))
+        finally:
+            self.wa_test_btn.setEnabled(True)
+            self.wa_test_btn.setText("🧪 Test WhatsApp Connection")
+
+    def _on_test_evolution(self):
+        url = self.evo_url.text().strip()
+        key = self.evo_key.text().strip()
+        instance = self.evo_instance.text().strip()
+
+        if not all([url, key, instance]):
+            self._show_error("Validation Error", "Server URL, API Key, and Instance Name are required.")
+            return
+
+        self.evo_test_btn.setEnabled(False)
+        self.evo_test_btn.setText("⏳ Testing Evolution...")
+        QApplication.processEvents()
+
+        try:
+            # We'll do a simple GET to /instance/fetchInstances to check connectivity
+            import requests
+            headers = {"apikey": key}
+            # Remove trailing slash if present
+            base_url = url.rstrip('/')
+            test_url = f"{base_url}/instance/fetchInstances"
+            
+            response = requests.get(test_url, headers=headers, timeout=10.0)
+            if response.status_code == 200:
+                self._show_success("Evolution Test Successful", "Successfully connected to Evolution API server.")
+            else:
+                self._show_error("Evolution Test Failed", f"Server responded with status {response.status_code}: {response.text[:100]}")
+        except Exception as e:
+            self._show_error("Connection Error", f"Could not reach Evolution server: {str(e)}")
+        finally:
+            self.evo_test_btn.setEnabled(True)
+            self.evo_test_btn.setText("🧪 Test Evolution Connection")
+
+    def save_settings(self):
+        try:
+            settings_service.save_sms_config(
+                is_enabled=self.sms_enabled.isChecked(),
+                gateway_ip=self.sms_ip.text().strip(),
+                gateway_port=self.sms_port.text().strip(),
+                gateway_username=self.sms_username.text().strip(),
+                gateway_password=self.sms_password.text().strip(),
+                use_https=self.sms_https.isChecked(),
+                api_key=self.sms_api_key.text().strip(),
+                whatsapp_enabled=self.wa_enabled.isChecked(),
+                whatsapp_gateway_ip=self.wa_ip.text().strip(),
+                whatsapp_gateway_port=self.wa_port.text().strip(),
+                whatsapp_username=self.wa_username.text().strip(),
+                whatsapp_password=self.wa_password.text().strip(),
+                whatsapp_instance_id=self.wa_instance.text().strip(),
+                whatsapp_api_key=self.wa_api_key.text().strip(),
+                evolution_api_enabled=self.evo_enabled.isChecked(),
+                evolution_base_url=self.evo_url.text().strip(),
+                evolution_api_key=self.evo_key.text().strip(),
+                evolution_instance_name=self.evo_instance.text().strip(),
+                invoice_template=self.template_text.toPlainText().strip()
+            )
+            self._show_success("Saved", "Configuration updated.")
+            self.accept()
+        except Exception as e:
+            self._show_error("Error", str(e))
+
 class BackupSettingsDialog(BaseSettingsDialog):
     """Modal for Backup & Maintenance settings."""
     def __init__(self, parent=None):
@@ -398,92 +723,85 @@ class BackupSettingsDialog(BaseSettingsDialog):
         try:
             super().__init__("Backup & Maintenance Settings", parent)
             self.setMinimumWidth(800)
-            logger.info("Base class initialized. Setting up UI...")
             self._init_ui()
-            logger.info("UI Setup complete. Loading data...")
             self._load_data()
             logger.info("BackupSettingsDialog initialized successfully.")
         except Exception as e:
             logger.error(f"CRITICAL: Failed to initialize BackupSettingsDialog: {e}", exc_info=True)
-            # Re-raise or handle gracefully if possible, but logging is key here
             raise
 
     def _init_ui(self):
-        try:
-            layout = QVBoxLayout()
-            
-            # Header with Immediate Actions
-            header_actions = QHBoxLayout()
-            header_actions.addWidget(QLabel("Configuration & Scheduled Backups"))
-            header_actions.addStretch(1)
-            
-            self.manual_backup_btn = QPushButton("💾 Create Backup Now")
-            self.manual_backup_btn.setObjectName("primaryButton")
-            self.manual_backup_btn.setStyleSheet("background-color: #27ae60;")
-            self.manual_backup_btn.clicked.connect(self._on_manual_backup)
-            header_actions.addWidget(self.manual_backup_btn)
-            
-            self.restore_btn = QPushButton("📂 Restore from File...")
-            self.restore_btn.setObjectName("primaryButton")
-            self.restore_btn.clicked.connect(self._on_restore_file)
-            header_actions.addWidget(self.restore_btn)
-            
-            layout.addLayout(header_actions)
-            
-            # Settings Section
-            settings_frame = QFrame()
-            settings_frame.setStyleSheet("background-color: #fcfcfc; border: 1px solid #dee2e6; border-radius: 4px;")
-            grid = QGridLayout(settings_frame)
-            
-            grid.addWidget(QLabel("Backup Location:"), 0, 0)
-            path_layout = QHBoxLayout()
-            self.backup_path = QLineEdit()
-            self.backup_path.setReadOnly(True)
-            path_layout.addWidget(self.backup_path)
-            self.browse_btn = QPushButton("Browse")
-            self.browse_btn.clicked.connect(self._on_browse)
-            path_layout.addWidget(self.browse_btn)
-            grid.addLayout(path_layout, 0, 1)
-            
-            self.auto_enabled = QCheckBox("Enable Scheduled Backups")
-            grid.addWidget(self.auto_enabled, 1, 0, 1, 2)
-            
-            grid.addWidget(QLabel("Interval:"), 2, 0)
-            self.interval = QComboBox()
-            self.interval.addItems(["daily", "weekly", "monthly"])
-            grid.addWidget(self.interval, 2, 1)
-            
-            grid.addWidget(QLabel("Time (HH:MM):"), 3, 0)
-            self.time_input = QLineEdit()
-            self.time_input.setPlaceholderText("00:00")
-            grid.addWidget(self.time_input, 3, 1)
-            
-            grid.addWidget(QLabel("Retention (Days):"), 4, 0)
-            self.retention = QSpinBox()
-            self.retention.setRange(1, 365)
-            grid.addWidget(self.retention, 4, 1)
-            
-            layout.addWidget(settings_frame)
-            
-            # Recent Backups Table
-            layout.addWidget(QLabel("RECENT BACKUPS HISTORY"))
-            self.table = QTableWidget()
-            self.table.setColumnCount(4)
-            self.table.setHorizontalHeaderLabels(["Date", "File Name", "Size (MB)", "Actions"])
-            self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-            self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-            self.table.verticalHeader().setVisible(False)
-            self.table.setFixedHeight(250)
-            self.table.setStyleSheet("""
-                QTableWidget { border: 1px solid #dee2e6; border-radius: 4px; background-color: white; }
-                QHeaderView::section { background-color: #f1f1f1; padding: 8px; border: none; font-weight: bold; }
-            """)
-            layout.addWidget(self.table)
-            
-            self.content_layout.addLayout(layout)
-        except Exception as e:
-            logger.error(f"Error in _init_ui: {e}", exc_info=True)
-            raise
+        layout = QVBoxLayout()
+        
+        # Header with Immediate Actions
+        header_actions = QHBoxLayout()
+        header_actions.addWidget(QLabel("Configuration & Scheduled Backups"))
+        header_actions.addStretch(1)
+        
+        self.manual_backup_btn = QPushButton("💾 Create Backup Now")
+        self.manual_backup_btn.setObjectName("primaryButton")
+        self.manual_backup_btn.setStyleSheet("background-color: #27ae60;")
+        self.manual_backup_btn.clicked.connect(self._on_manual_backup)
+        header_actions.addWidget(self.manual_backup_btn)
+        
+        self.restore_btn = QPushButton("📂 Restore from File...")
+        self.restore_btn.setObjectName("primaryButton")
+        self.restore_btn.clicked.connect(self._on_restore_file)
+        header_actions.addWidget(self.restore_btn)
+        
+        layout.addLayout(header_actions)
+        
+        # Settings Section
+        settings_frame = QFrame()
+        settings_frame.setStyleSheet("background-color: #fcfcfc; border: 1px solid #dee2e6; border-radius: 4px;")
+        grid = QGridLayout(settings_frame)
+        
+        grid.addWidget(QLabel("Backup Location:"), 0, 0)
+        path_layout = QHBoxLayout()
+        self.backup_path = QLineEdit()
+        self.backup_path.setReadOnly(True)
+        path_layout.addWidget(self.backup_path)
+        self.browse_btn = QPushButton("Browse")
+        self.browse_btn.clicked.connect(self._on_browse)
+        path_layout.addWidget(self.browse_btn)
+        grid.addLayout(path_layout, 0, 1)
+        
+        self.auto_enabled = QCheckBox("Enable Scheduled Backups")
+        grid.addWidget(self.auto_enabled, 1, 0, 1, 2)
+        
+        grid.addWidget(QLabel("Interval:"), 2, 0)
+        self.interval = QComboBox()
+        self.interval.addItems(["daily", "weekly", "monthly"])
+        grid.addWidget(self.interval, 2, 1)
+        
+        grid.addWidget(QLabel("Time (HH:MM):"), 3, 0)
+        self.time_input = QLineEdit()
+        self.time_input.setPlaceholderText("00:00")
+        grid.addWidget(self.time_input, 3, 1)
+        
+        grid.addWidget(QLabel("Retention (Days):"), 4, 0)
+        self.retention = QSpinBox()
+        self.retention.setRange(1, 365)
+        grid.addWidget(self.retention, 4, 1)
+        
+        layout.addWidget(settings_frame)
+        
+        # Recent Backups Table
+        layout.addWidget(QLabel("RECENT BACKUPS HISTORY"))
+        self.table = QTableWidget()
+        self.table.setColumnCount(4)
+        self.table.setHorizontalHeaderLabels(["Date", "File Name", "Size (MB)", "Actions"])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setFixedHeight(250)
+        self.table.setStyleSheet("""
+            QTableWidget { border: 1px solid #dee2e6; border-radius: 4px; background-color: white; }
+            QHeaderView::section { background-color: #f1f1f1; padding: 8px; border: none; font-weight: bold; }
+        """)
+        layout.addWidget(self.table)
+        
+        self.content_layout.addLayout(layout)
 
     def _load_data(self):
         try:
@@ -507,7 +825,7 @@ class BackupSettingsDialog(BaseSettingsDialog):
     def _refresh_table(self):
         try:
             backups = backup_service.list_backups()
-            self.table.setRowCount(0) # Clear existing
+            self.table.setRowCount(0)
             self.table.setRowCount(len(backups))
             for i, b in enumerate(backups):
                 self.table.setItem(i, 0, QTableWidgetItem(str(b.get("date", "N/A"))))
@@ -612,135 +930,36 @@ class BackupSettingsDialog(BaseSettingsDialog):
 
 class AppUpdatesDialog(BaseSettingsDialog):
     """Modal for Application Updates and Versioning."""
-    # ... existing class ...
-
-class SMSWhatsAppDialog(BaseSettingsDialog):
-    """Modal for SMS and WhatsApp notification settings."""
     def __init__(self, parent=None):
-        super().__init__("SMS & WhatsApp Configuration", parent)
-        self.setMinimumWidth(600)
+        super().__init__("Application Updates & Version", parent)
         self._init_ui()
-        self._load_data()
 
     def _init_ui(self):
-        # Using a scroll area for better layout if more fields are added
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll_content = QWidget()
-        layout = QVBoxLayout(scroll_content)
+        from app.core.version_manager import VersionManager
+        layout = QVBoxLayout()
         
-        # SMS Section
-        sms_group = QFrame()
-        sms_group.setStyleSheet("background-color: #fcfcfc; border: 1px solid #dee2e6; border-radius: 4px;")
-        sms_layout = QGridLayout(sms_group)
+        layout.addWidget(QLabel(f"Current Version: {VersionManager.get_version_string()}"))
         
-        sms_title = QLabel("SMS GATEWAY (ANDROID)")
-        sms_title.setStyleSheet("color: #2980b9; font-size: 14px; border: none;")
-        sms_layout.addWidget(sms_title, 0, 0, 1, 2)
+        self.check_btn = QPushButton("🔄 Check for Updates Now")
+        self.check_btn.setObjectName("primaryButton")
+        self.check_btn.clicked.connect(self._on_check)
+        layout.addWidget(self.check_btn)
         
-        self.sms_enabled = QCheckBox("Enable SMS Notifications")
-        sms_layout.addWidget(self.sms_enabled, 1, 0, 1, 2)
-        
-        sms_layout.addWidget(QLabel("Gateway IP:"), 2, 0)
-        self.sms_ip = QLineEdit()
-        self.sms_ip.setPlaceholderText("e.g. 192.168.1.100")
-        sms_layout.addWidget(self.sms_ip, 2, 1)
-        
-        sms_layout.addWidget(QLabel("Gateway Port:"), 3, 0)
-        self.sms_port = QLineEdit()
-        self.sms_port.setPlaceholderText("8080")
-        sms_layout.addWidget(self.sms_port, 3, 1)
-        
-        sms_layout.addWidget(QLabel("API Key (Optional):"), 4, 0)
-        self.sms_api_key = QLineEdit()
-        sms_layout.addWidget(self.sms_api_key, 4, 1)
-        
-        layout.addWidget(sms_group)
-        
-        # WhatsApp Section
-        wa_group = QFrame()
-        wa_group.setStyleSheet("background-color: #fcfcfc; border: 1px solid #dee2e6; border-radius: 4px;")
-        wa_layout = QGridLayout(wa_group)
-        
-        wa_title = QLabel("WHATSAPP GATEWAY")
-        wa_title.setStyleSheet("color: #27ae60; font-size: 14px; border: none;")
-        wa_layout.addWidget(wa_title, 0, 0, 1, 2)
-        
-        self.wa_enabled = QCheckBox("Enable WhatsApp Notifications")
-        wa_layout.addWidget(self.wa_enabled, 1, 0, 1, 2)
-        
-        wa_layout.addWidget(QLabel("Gateway IP:"), 2, 0)
-        self.wa_ip = QLineEdit()
-        self.wa_ip.setPlaceholderText("e.g. 192.168.1.100")
-        wa_layout.addWidget(self.wa_ip, 2, 1)
-        
-        wa_layout.addWidget(QLabel("Gateway Port:"), 3, 0)
-        self.wa_port = QLineEdit()
-        self.wa_port.setPlaceholderText("8080")
-        wa_layout.addWidget(self.wa_port, 3, 1)
-        
-        wa_layout.addWidget(QLabel("Instance ID:"), 4, 0)
-        self.wa_instance = QLineEdit()
-        wa_layout.addWidget(self.wa_instance, 4, 1)
-        
-        wa_layout.addWidget(QLabel("API Key:"), 5, 0)
-        self.wa_api_key = QLineEdit()
-        wa_layout.addWidget(self.wa_api_key, 5, 1)
-        
-        layout.addWidget(wa_group)
-        
-        # Template Section
-        tmpl_group = QFrame()
-        tmpl_group.setStyleSheet("background-color: #fcfcfc; border: 1px solid #dee2e6; border-radius: 4px;")
-        tmpl_layout = QVBoxLayout(tmpl_group)
-        
-        tmpl_title = QLabel("MESSAGE TEMPLATE")
-        tmpl_title.setStyleSheet("color: #e67e22; font-size: 14px; border: none;")
-        tmpl_layout.addWidget(tmpl_title)
-        
-        self.template_text = QTextEdit()
-        self.template_text.setFixedHeight(80)
-        tmpl_layout.addWidget(self.template_text)
-        
-        help_text = QLabel("Available variables: {customer}, {invoice_no}, {amount}, {fbr_id}")
-        help_text.setStyleSheet("font-size: 11px; color: #7f8c8d; border: none;")
-        tmpl_layout.addWidget(help_text)
-        
-        layout.addWidget(tmpl_group)
-        
-        scroll.setWidget(scroll_content)
-        self.content_layout.addWidget(scroll)
+        self.content_layout.addLayout(layout)
+        self.save_btn.hide()
 
-    def _load_data(self):
-        config = settings_service.get_sms_config()
-        self.sms_enabled.setChecked(config.get("is_enabled", False))
-        self.sms_ip.setText(config.get("gateway_ip", ""))
-        self.sms_port.setText(config.get("gateway_port", "8080"))
-        self.sms_api_key.setText(config.get("api_key", ""))
-        
-        self.wa_enabled.setChecked(config.get("whatsapp_enabled", False))
-        self.wa_ip.setText(config.get("whatsapp_gateway_ip", ""))
-        self.wa_port.setText(config.get("whatsapp_gateway_port", "8080"))
-        self.wa_instance.setText(config.get("whatsapp_instance_id", ""))
-        self.wa_api_key.setText(config.get("whatsapp_api_key", ""))
-        
-        self.template_text.setPlainText(config.get("invoice_template", ""))
-
-    def save_settings(self):
+    def _on_check(self):
         try:
-            settings_service.save_sms_config(
-                is_enabled=self.sms_enabled.isChecked(),
-                gateway_ip=self.sms_ip.text().strip(),
-                gateway_port=self.sms_port.text().strip(),
-                api_key=self.sms_api_key.text().strip(),
-                whatsapp_enabled=self.wa_enabled.isChecked(),
-                whatsapp_gateway_ip=self.wa_ip.text().strip(),
-                whatsapp_gateway_port=self.wa_port.text().strip(),
-                whatsapp_instance_id=self.wa_instance.text().strip(),
-                whatsapp_api_key=self.wa_api_key.text().strip(),
-                invoice_template=self.template_text.toPlainText().strip()
-            )
-            self._show_success("Saved", "SMS and WhatsApp settings updated.")
-            self.accept()
+            parent = self.parent()
+            while parent and not hasattr(parent, "_on_manual_update_check"):
+                parent = parent.parent()
+            
+            if parent and hasattr(parent, "_on_manual_update_check"):
+                parent._on_manual_update_check()
+                self.accept()
+            else:
+                logger.warning("Main window update check method not found.")
+                self._show_error("Error", "Update system not available from this context.")
         except Exception as e:
-            self._show_error("Error", str(e))
+            logger.error(f"Error triggering update check: {e}")
+            self._show_error("Error", f"Failed to check for updates: {str(e)}")

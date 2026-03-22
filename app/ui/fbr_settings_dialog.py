@@ -60,6 +60,11 @@ class FBRSettingsDialog(ctk.CTkToplevel):
         self.token_entry = ctk.CTkEntry(self.api_frame, show="*")
         self.token_entry.grid(row=5, column=1, padx=10, pady=8, sticky="ew")
 
+        # Secret Key (New)
+        self._add_label(self.api_frame, "Secret Key:", 6, "HMAC Secret Key for Payload Signing")
+        self.secret_key_entry = ctk.CTkEntry(self.api_frame, show="*")
+        self.secret_key_entry.grid(row=6, column=1, padx=10, pady=8, sticky="ew")
+
         # --- Section 2: Invoice Defaults (Right Column) ---
         self.defaults_frame = ctk.CTkFrame(self.main_frame)
         self.defaults_frame.grid(row=0, column=1, padx=15, pady=10, sticky="nsew")
@@ -151,6 +156,7 @@ class FBRSettingsDialog(ctk.CTkToplevel):
         self._set_entry(self.pos_entry, data.get("pos_id", ""))
         self._set_entry(self.usin_entry, data.get("usin", ""))
         self._set_entry(self.token_entry, data.get("token", ""))
+        self._set_entry(self.secret_key_entry, data.get("secret_key", ""))
         self._set_entry(self.tax_rate_entry, data.get("tax_rate", "18.0"))
         self._set_entry(self.pct_code_entry, data.get("pct_code", "8711.2010"))
         
@@ -221,6 +227,7 @@ class FBRSettingsDialog(ctk.CTkToplevel):
             pos_id = self.pos_entry.get().strip()
             usin = self.usin_entry.get().strip()
             token = self.token_entry.get().strip()
+            secret_key = self.secret_key_entry.get().strip()
             
             tax_rate = self.tax_rate_entry.get().strip()
             pct_code = self.pct_code_entry.get().strip()
@@ -267,6 +274,7 @@ class FBRSettingsDialog(ctk.CTkToplevel):
                 pos_id=pos_id,
                 usin=usin,
                 token=token,
+                secret_key=secret_key,
                 tax_rate=tax_rate,
                 pct_code=pct_code,
                 invoice_type=invoice_type,
