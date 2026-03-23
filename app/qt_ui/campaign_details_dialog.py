@@ -23,19 +23,46 @@ class CampaignDetailsDialog(QDialog):
 
         # Messages Table
         self.table = QTableWidget()
-        self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(["Phone Number", "Message", "Status", "Error"])
+        self.table.setColumnCount(5)
+        self.table.setHorizontalHeaderLabels(["Phone Number", "Message", "Status", "Retries", "Error"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.itemDoubleClicked.connect(self.show_retry_history)
         layout.addWidget(self.table)
+        
+        help_label = QLabel("<i>Tip: Double-click a row to see detailed retry history.</i>")
+        help_label.setStyleSheet("color: #7f8c8d; font-size: 11px;")
+        layout.addWidget(help_label)
 
-        self.populate_table(details['messages'])
+        self.messages = details['messages']
+        self.populate_table(self.messages)
 
         # Actions
         self.retry_button = QPushButton("Retry Failed Messages")
         self.retry_button.setEnabled(details['campaign'].failed_count > 0)
         self.retry_button.clicked.connect(self.on_retry_clicked)
         layout.addWidget(self.retry_button)
+
+    def show_retry_history(self, item):
+        row = item.row()
+        msg = self.messages[row]
+        history = msg.retry_history or []
+        
+        if not history:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "Retry History", "No retry attempts recorded for this message.")
+            return
+            
+        history_text = "<b>Retry History for " + msg.phone_number + ":</b><br><br>"
+        for attempt in history:
+            ts = attempt.get('timestamp', 'N/A')
+            err = attempt.get('error', 'No error recorded')
+            att = attempt.get('attempt', '?')
+            temp = " (Temporary)" if attempt.get('is_temporary') else ""
+            history_text += f"• Attempt {att}{temp}: {ts}<br>   Error: {err}<br><br>"
+            
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.information(self, "Retry History", history_text)
 
     def on_retry_clicked(self):
         self.retry_requested.emit(self.campaign_id)
@@ -53,4 +80,5 @@ class CampaignDetailsDialog(QDialog):
                 status_val = status_val.value
             
             self.table.setItem(i, 2, QTableWidgetItem(str(status_val)))
-            self.table.setItem(i, 3, QTableWidgetItem(msg.error_message or ""))
+            self.table.setItem(i, 3, QTableWidgetItem(str(msg.retry_count)))
+            self.table.setItem(i, 4, QTableWidgetItem(msg.error_message or ""))

@@ -99,6 +99,7 @@ from app.qt_ui.settings_modals import (
 from app.core.logger import logger
 from app.core.version_manager import VersionManager
 from app.updater.updater_manager import UpdaterManager
+from app.qt_ui.whatsapp_campaign_widget import WhatsAppCampaignWidget
 
 
 @dataclass
@@ -687,6 +688,7 @@ class MainWindow(QMainWindow):
         self._add_page("dealers", self._create_dealers_page(), "Dealers")
         self._add_page("spare_ledger", self._create_spare_ledger_page(), "Spare Ledger")
         self._add_page("sms", self._create_sms_page(), "SMS Module")
+        self._add_page("whatsapp", self._create_whatsapp_page(), "Whatsapp Module")
         self._add_page("settings", self._create_settings_page(), "Settings")
         self._add_page("welcome", self._create_welcome_page(), "Welcome")
 
@@ -702,6 +704,7 @@ class MainWindow(QMainWindow):
             "dealers": "🏢",
             "spare_ledger": "📒",
             "sms": "💬",
+            "whatsapp": "📱",
             "settings": "⚙️",
             "welcome": "👋",
             "captured_data": "📁",
@@ -713,7 +716,7 @@ class MainWindow(QMainWindow):
             "SALES": ["invoice", "reports", "print_document"],
             "INVENTORY": ["inventory", "prices", "spare_ledger", "captured_data"],
             "DIRECTORY": ["customers", "dealers"],
-            "SYSTEM": ["sms", "settings"]
+            "SYSTEM": ["sms", "whatsapp", "settings"]
         }
 
         self._group_headers: Dict[str, GroupHeaderButton] = {}
@@ -2374,7 +2377,7 @@ class MainWindow(QMainWindow):
             ("Database Connection", "🗄️", "Manage MySQL server, credentials, and connectivity.", self._open_db_settings),
             ("Backup & Maintenance", "💾", "Schedule backups, restore data, and manage storage.", self._open_backup_settings),
             ("System Updates", "🔄", "Check for software updates and view version info.", self._open_app_updates),
-            ("SMS Configuration", "💬", "Configure SMS gateways and templates.", self._open_sms_settings),
+            ("SMS & Whatsapp Features", "💬", "Configure SMS gateways, WhatsApp, and bulk campaigns.", self._open_sms_settings),
         ]
 
         for i, (title, icon, desc, callback) in enumerate(categories):
@@ -3144,6 +3147,10 @@ class MainWindow(QMainWindow):
             bulk_sms_service.start_campaign(campaign_id)
         else:
             QMessageBox.critical(self, "Error", message)
+
+    def _create_whatsapp_page(self) -> QWidget:
+        """Creates the WhatsApp management page using the WhatsAppCampaignWidget."""
+        return WhatsAppCampaignWidget()
 
     def _on_bulk_browse_clicked(self):
         from PyQt6.QtWidgets import QFileDialog

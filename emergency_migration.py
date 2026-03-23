@@ -33,11 +33,7 @@ def run_emergency_migration():
                 ("whatsapp_username", "VARCHAR(100)"),
                 ("whatsapp_password", "VARCHAR(100)"),
                 ("gateway_username", "VARCHAR(100)"),
-                ("gateway_password", "VARCHAR(100)"),
-                ("evolution_api_enabled", "BOOLEAN DEFAULT 0"),
-                ("evolution_base_url", "VARCHAR(255)"),
-                ("evolution_api_key", "VARCHAR(255)"),
-                ("evolution_instance_name", "VARCHAR(100)")
+                ("gateway_password", "VARCHAR(100)")
             ]
             
             for col_name, col_def in columns:

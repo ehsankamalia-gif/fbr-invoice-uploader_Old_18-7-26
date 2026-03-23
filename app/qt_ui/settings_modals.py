@@ -7,13 +7,13 @@ import base64
 import asyncio
 from pathlib import Path
 from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QThread, QTimer
-from PyQt6.QtGui import QPixmap, QImage
+from PyQt6.QtGui import QPixmap, QImage, QAction, QIcon
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
     QPushButton, QComboBox, QDoubleSpinBox, QSpinBox, 
     QFrame, QGridLayout, QCheckBox, QScrollArea, 
     QMessageBox, QApplication, QTableWidget, QTableWidgetItem, QHeaderView,
-    QProgressDialog, QWidget, QTextEdit
+    QProgressDialog, QWidget, QTextEdit, QTabWidget
 )
 import logging
 import datetime as dt
@@ -22,6 +22,8 @@ from app.services.settings_service import settings_service
 from app.services.backup_service import backup_service
 from app.core.config import settings
 from app.core.logger import logger
+from app.qt_ui.whatsapp_widget import WhatsAppWidget
+from app.qt_ui.whatsapp_campaign_widget import WhatsAppCampaignWidget
 
 class BackupWorker(QThread):
     finished = pyqtSignal(dict)
@@ -141,6 +143,36 @@ class BaseSettingsDialog(QDialog):
     def _show_error(self, title: str, message: str):
         QMessageBox.critical(self, title, message)
 
+    def _add_password_toggle(self, line_edit: QLineEdit):
+        """Adds a visibility toggle (eye icon) to a QLineEdit."""
+        icons_dir = Path(__file__).parent.parent / "assets" / "icons"
+        icon_path = str(icons_dir / "eye.svg")
+        
+        action = QAction(QIcon(icon_path), "Show Password", line_edit)
+        line_edit.addAction(action, QLineEdit.ActionPosition.TrailingPosition)
+        action.triggered.connect(lambda: self._toggle_password_visibility(line_edit, action))
+        # Store initial state
+        action.setData(True) # True means currently masked
+
+    def _toggle_password_visibility(self, line_edit: QLineEdit, action: QAction):
+        """Toggles between password and normal echo modes."""
+        is_masked = action.data()
+        icons_dir = Path(__file__).parent.parent / "assets" / "icons"
+        
+        if is_masked:
+            line_edit.setEchoMode(QLineEdit.EchoMode.Normal)
+            icon_name = "eye-off.svg"
+            action.setToolTip("Hide Password")
+            action.setData(False)
+        else:
+            line_edit.setEchoMode(QLineEdit.EchoMode.Password)
+            icon_name = "eye.svg"
+            action.setToolTip("Show Password")
+            action.setData(True)
+            
+        icon_path = str(icons_dir / icon_name)
+        action.setIcon(QIcon(icon_path))
+
 class FBRSecurityDialog(BaseSettingsDialog):
     """Modal for FBR API and Security settings."""
     def __init__(self, parent=None):
@@ -172,15 +204,24 @@ class FBRSecurityDialog(BaseSettingsDialog):
         
         layout.addWidget(QLabel("Auth Token:"), 4, 0)
         self.auth_token = QLineEdit()
-        self.auth_token.setEchoMode(QLineEdit.EchoMode.PasswordEchoOnEdit)
+        self.auth_token.setEchoMode(QLineEdit.EchoMode.Password)
+        self._add_password_toggle(self.auth_token)
         layout.addWidget(self.auth_token, 4, 1)
         
         layout.addWidget(QLabel("Secret Key:"), 5, 0)
         self.secret_key = QLineEdit()
-        self.secret_key.setEchoMode(QLineEdit.EchoMode.PasswordEchoOnEdit)
+        self.secret_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self._add_password_toggle(self.secret_key)
         layout.addWidget(self.secret_key, 5, 1)
         
         self.content_layout.addLayout(layout)
+
+    def _load_data(self):
+        """Initial load of data into the dialog."""
+        # Get current global environment setting (SANDBOX or PRODUCTION)
+        current_env = os.getenv("FBR_ENV", "SANDBOX")
+        self.env_combo.setCurrentText(current_env)
+        self._load_env_settings(current_env)
 
     def _on_env_changed(self, env: str):
         self._load_env_settings(env)
@@ -332,7 +373,8 @@ class DatabaseSettingsDialog(BaseSettingsDialog):
         
         layout.addWidget(QLabel("Password:"), 4, 0)
         self.db_password = QLineEdit()
-        self.db_password.setEchoMode(QLineEdit.EchoMode.PasswordEchoOnEdit)
+        self.db_password.setEchoMode(QLineEdit.EchoMode.Password)
+        self._add_password_toggle(self.db_password)
         layout.addWidget(self.db_password, 4, 1)
         
         self.test_btn = QPushButton("🔌 Test Connection")
@@ -440,6 +482,7 @@ class SMSConfigDialog(BaseSettingsDialog):
         sms_layout.addWidget(QLabel("Gateway Password:"), 5, 0)
         self.sms_password = QLineEdit()
         self.sms_password.setEchoMode(QLineEdit.EchoMode.Password)
+        self._add_password_toggle(self.sms_password)
         sms_layout.addWidget(self.sms_password, 5, 1)
         
         self.sms_https = QCheckBox("Use HTTPS Protocol")
@@ -447,6 +490,8 @@ class SMSConfigDialog(BaseSettingsDialog):
         
         sms_layout.addWidget(QLabel("API Key (Optional):"), 7, 0)
         self.sms_api_key = QLineEdit()
+        self.sms_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self._add_password_toggle(self.sms_api_key)
         sms_layout.addWidget(self.sms_api_key, 7, 1)
         
         self.sms_test_btn = QPushButton("🧪 Test SMS Connection")
@@ -455,85 +500,12 @@ class SMSConfigDialog(BaseSettingsDialog):
         sms_layout.addWidget(self.sms_test_btn, 8, 0, 1, 2)
         
         layout.addWidget(sms_group)
-        
-        # 2. WhatsApp Section
-        wa_group = QFrame()
-        wa_group.setStyleSheet("background-color: #fcfcfc; border: 1px solid #dee2e6; border-radius: 4px;")
-        wa_layout = QGridLayout(wa_group)
-        
-        wa_title = QLabel("WHATSAPP NOTIFICATIONS")
-        wa_title.setStyleSheet("color: #27ae60; font-size: 14px; border: none; font-weight: bold;")
-        wa_layout.addWidget(wa_title, 0, 0, 1, 2)
-        
-        self.wa_enabled = QCheckBox("Enable WhatsApp Notifications (Gateway)")
-        wa_layout.addWidget(self.wa_enabled, 1, 0, 1, 2)
-        
-        wa_layout.addWidget(QLabel("WA Gateway IP:"), 2, 0)
-        self.wa_ip = QLineEdit()
-        wa_layout.addWidget(self.wa_ip, 2, 1)
-        
-        wa_layout.addWidget(QLabel("WA Gateway Port:"), 3, 0)
-        self.wa_port = QLineEdit()
-        wa_layout.addWidget(self.wa_port, 3, 1)
-        
-        wa_layout.addWidget(QLabel("WA Username:"), 4, 0)
-        self.wa_username = QLineEdit()
-        wa_layout.addWidget(self.wa_username, 4, 1)
-        
-        wa_layout.addWidget(QLabel("WA Password:"), 5, 0)
-        self.wa_password = QLineEdit()
-        self.wa_password.setEchoMode(QLineEdit.EchoMode.Password)
-        wa_layout.addWidget(self.wa_password, 5, 1)
-        
-        wa_layout.addWidget(QLabel("WA Instance ID:"), 6, 0)
-        self.wa_instance = QLineEdit()
-        wa_layout.addWidget(self.wa_instance, 6, 1)
-        
-        wa_layout.addWidget(QLabel("WA API Key:"), 7, 0)
-        self.wa_api_key = QLineEdit()
-        self.wa_api_key.setEchoMode(QLineEdit.EchoMode.Password)
-        wa_layout.addWidget(self.wa_api_key, 7, 1)
-        
-        self.wa_test_btn = QPushButton("🧪 Test WhatsApp Connection")
-        self.wa_test_btn.setStyleSheet("background-color: #2ecc71; color: white; padding: 8px; font-weight: bold;")
-        self.wa_test_btn.clicked.connect(self._on_test_whatsapp)
-        wa_layout.addWidget(self.wa_test_btn, 8, 0, 1, 2)
-        
-        layout.addWidget(wa_group)
-        
-        # 2.5 Evolution API Section (New)
-        evo_group = QFrame()
-        evo_group.setStyleSheet("background-color: #fcfcfc; border: 1px solid #dee2e6; border-radius: 4px;")
-        evo_layout = QGridLayout(evo_group)
-        
-        evo_title = QLabel("EVOLUTION API (RECOMMENDED)")
-        evo_title.setStyleSheet("color: #e67e22; font-size: 14px; border: none; font-weight: bold;")
-        evo_layout.addWidget(evo_title, 0, 0, 1, 2)
-        
-        self.evo_enabled = QCheckBox("Enable Evolution API (Stable)")
-        evo_layout.addWidget(self.evo_enabled, 1, 0, 1, 2)
-        
-        evo_layout.addWidget(QLabel("Server URL:"), 2, 0)
-        self.evo_url = QLineEdit()
-        self.evo_url.setPlaceholderText("https://your-evolution-server.com")
-        evo_layout.addWidget(self.evo_url, 2, 1)
-        
-        evo_layout.addWidget(QLabel("Global API Key:"), 3, 0)
-        self.evo_key = QLineEdit()
-        self.evo_key.setEchoMode(QLineEdit.EchoMode.Password)
-        evo_layout.addWidget(self.evo_key, 3, 1)
-        
-        evo_layout.addWidget(QLabel("Instance Name:"), 4, 0)
-        self.evo_instance = QLineEdit()
-        self.evo_instance.setPlaceholderText("e.g. MyWhatsApp")
-        evo_layout.addWidget(self.evo_instance, 4, 1)
-        
-        self.evo_test_btn = QPushButton("🧪 Test Evolution Connection")
-        self.evo_test_btn.setStyleSheet("background-color: #e67e22; color: white; padding: 8px; font-weight: bold;")
-        self.evo_test_btn.clicked.connect(self._on_test_evolution)
-        evo_layout.addWidget(self.evo_test_btn, 5, 0, 1, 2)
-        
-        layout.addWidget(evo_group)
+
+        # 2. WhatsApp Section (Evolution API)
+        wa_tabs = QTabWidget()
+        wa_tabs.addTab(WhatsAppWidget(), "Status & Test")
+        wa_tabs.addTab(WhatsAppCampaignWidget(), "Bulk Campaigns (Excel)")
+        layout.addWidget(wa_tabs)
         
         # 3. Message Template
         tmpl_group = QFrame()
@@ -566,19 +538,6 @@ class SMSConfigDialog(BaseSettingsDialog):
         self.sms_password.setText(config.get("gateway_password", ""))
         self.sms_https.setChecked(config.get("use_https", False))
         self.sms_api_key.setText(config.get("api_key", ""))
-        
-        self.wa_enabled.setChecked(config.get("whatsapp_enabled", False))
-        self.wa_ip.setText(config.get("whatsapp_gateway_ip", ""))
-        self.wa_port.setText(config.get("whatsapp_gateway_port", "8080"))
-        self.wa_username.setText(config.get("whatsapp_username", ""))
-        self.wa_password.setText(config.get("whatsapp_password", ""))
-        self.wa_instance.setText(config.get("whatsapp_instance_id", ""))
-        self.wa_api_key.setText(config.get("whatsapp_api_key", ""))
-        
-        self.evo_enabled.setChecked(config.get("evolution_api_enabled", False))
-        self.evo_url.setText(config.get("evolution_base_url", ""))
-        self.evo_key.setText(config.get("evolution_api_key", ""))
-        self.evo_instance.setText(config.get("evolution_instance_name", ""))
         
         self.template_text.setPlainText(config.get("invoice_template", ""))
 
@@ -619,75 +578,6 @@ class SMSConfigDialog(BaseSettingsDialog):
             self.sms_test_btn.setEnabled(True)
             self.sms_test_btn.setText("🧪 Test SMS Connection")
 
-    def _on_test_whatsapp(self):
-        ip = self.wa_ip.text().strip()
-        port = self.wa_port.text().strip()
-        username = self.wa_username.text().strip()
-        password = self.wa_password.text().strip()
-        instance = self.wa_instance.text().strip()
-        api_key = self.wa_api_key.text().strip()
-
-        if not all([ip, port, instance]):
-            self._show_error("Validation Error", "IP, Port, and Instance ID are required for testing.")
-            return
-
-        self.wa_test_btn.setEnabled(False)
-        self.wa_test_btn.setText("⏳ Testing WhatsApp...")
-        QApplication.processEvents()
-
-        try:
-            from app.services.sms_service import sms_service
-            # API Key is now optional in the service
-            success, msg = sms_service.send_whatsapp_via_gateway(
-                ip, port, "0000000000", "FBR WhatsApp Gateway Test",
-                instance, 
-                api_key=api_key if api_key else None, 
-                username=username if username else None,
-                password=password if password else None,
-                total_timeout=15.0
-            )
-            if success:
-                self._show_success("WhatsApp Test Successful", f"Gateway responded: {msg}")
-            else:
-                self._show_error("WhatsApp Test Failed", msg)
-        except Exception as e:
-            self._show_error("Error", str(e))
-        finally:
-            self.wa_test_btn.setEnabled(True)
-            self.wa_test_btn.setText("🧪 Test WhatsApp Connection")
-
-    def _on_test_evolution(self):
-        url = self.evo_url.text().strip()
-        key = self.evo_key.text().strip()
-        instance = self.evo_instance.text().strip()
-
-        if not all([url, key, instance]):
-            self._show_error("Validation Error", "Server URL, API Key, and Instance Name are required.")
-            return
-
-        self.evo_test_btn.setEnabled(False)
-        self.evo_test_btn.setText("⏳ Testing Evolution...")
-        QApplication.processEvents()
-
-        try:
-            # We'll do a simple GET to /instance/fetchInstances to check connectivity
-            import requests
-            headers = {"apikey": key}
-            # Remove trailing slash if present
-            base_url = url.rstrip('/')
-            test_url = f"{base_url}/instance/fetchInstances"
-            
-            response = requests.get(test_url, headers=headers, timeout=10.0)
-            if response.status_code == 200:
-                self._show_success("Evolution Test Successful", "Successfully connected to Evolution API server.")
-            else:
-                self._show_error("Evolution Test Failed", f"Server responded with status {response.status_code}: {response.text[:100]}")
-        except Exception as e:
-            self._show_error("Connection Error", f"Could not reach Evolution server: {str(e)}")
-        finally:
-            self.evo_test_btn.setEnabled(True)
-            self.evo_test_btn.setText("🧪 Test Evolution Connection")
-
     def save_settings(self):
         try:
             settings_service.save_sms_config(
@@ -698,17 +588,6 @@ class SMSConfigDialog(BaseSettingsDialog):
                 gateway_password=self.sms_password.text().strip(),
                 use_https=self.sms_https.isChecked(),
                 api_key=self.sms_api_key.text().strip(),
-                whatsapp_enabled=self.wa_enabled.isChecked(),
-                whatsapp_gateway_ip=self.wa_ip.text().strip(),
-                whatsapp_gateway_port=self.wa_port.text().strip(),
-                whatsapp_username=self.wa_username.text().strip(),
-                whatsapp_password=self.wa_password.text().strip(),
-                whatsapp_instance_id=self.wa_instance.text().strip(),
-                whatsapp_api_key=self.wa_api_key.text().strip(),
-                evolution_api_enabled=self.evo_enabled.isChecked(),
-                evolution_base_url=self.evo_url.text().strip(),
-                evolution_api_key=self.evo_key.text().strip(),
-                evolution_instance_name=self.evo_instance.text().strip(),
                 invoice_template=self.template_text.toPlainText().strip()
             )
             self._show_success("Saved", "Configuration updated.")

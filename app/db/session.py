@@ -220,7 +220,6 @@ def run_migrations():
                 (3, "Add app_configurations table", _migration_v3_add_app_configs),
                 (4, "Add WhatsApp configuration fields to sms_configurations", _migration_v4_add_whatsapp_fields),
                 (5, "Add Gateway Credentials to SMS and WhatsApp configurations", _migration_v5_add_gateway_credentials),
-                (6, "Add Evolution API configuration fields", _migration_v6_add_evolution_fields),
             ]
 
             for version, description, func in migrations:
@@ -346,30 +345,6 @@ def _migration_v5_add_gateway_credentials(conn) -> bool:
         return True
     except Exception as e:
         logger.error(f"Migration v5 failed: {e}", exc_info=True)
-        return False
-
-def _migration_v6_add_evolution_fields(conn) -> bool:
-    """Adds Evolution API related fields to the sms_configurations table."""
-    try:
-        columns = [
-            ("evolution_api_enabled", "BOOLEAN DEFAULT 0"),
-            ("evolution_base_url", "VARCHAR(255)"),
-            ("evolution_api_key", "VARCHAR(255)"),
-            ("evolution_instance_name", "VARCHAR(100)")
-        ]
-        
-        for col_name, col_def in columns:
-            try:
-                conn.execute(text(f"SELECT {col_name} FROM sms_configurations LIMIT 1"))
-            except Exception:
-                logger.info(f"Adding column {col_name} to sms_configurations...")
-                conn.execute(text(f"ALTER TABLE sms_configurations ADD COLUMN {col_name} {col_def}"))
-                try:
-                    conn.commit()
-                except: pass
-        return True
-    except Exception as e:
-        logger.error(f"Migration v6 failed: {e}", exc_info=True)
         return False
 
 def get_db():

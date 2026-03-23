@@ -299,7 +299,7 @@ class SpareLedgerAudit(Base):
     transaction_id = Column(Integer, ForeignKey("spare_ledger_transactions.id"), nullable=True)
     details = Column(JSON, nullable=True)
 
-# --- SMS Module ---
+# --- SMS & WhatsApp Module ---
 class SMSStatus(str, enum.Enum):
     PENDING = "PENDING"
     SENDING = "SENDING"
@@ -314,16 +314,25 @@ class SMSCampaign(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), nullable=False)
     template = Column(String(1000), nullable=False)
-    channel = Column(String(20), default="SMS") # SMS
+    channel = Column(String(20), default="SMS") # SMS, WHATSAPP
     total_recipients = Column(Integer, default=0)
     sent_count = Column(Integer, default=0)
     failed_count = Column(Integer, default=0)
     status = Column(String(20), default="PENDING", index=True) # PENDING, RUNNING, COMPLETED, PAUSED
     error_message = Column(String(500), nullable=True)
     
+    # Metadata for Excel-based campaigns
+    excel_file_path = Column(String(255), nullable=True)
+    merge_fields = Column(JSON, nullable=True) # List of column names found in Excel
+    
     scheduled_at = Column(DateTime, nullable=True, index=True)
     created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
+    started_at = Column(DateTime, nullable=True)
+    paused_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
+    
+    is_deleted = Column(Boolean, default=False, index=True)
+    deleted_at = Column(DateTime, nullable=True)
     
     messages = relationship("SMSQueue", back_populates="campaign", cascade="all, delete-orphan")
 
@@ -332,16 +341,28 @@ class SMSQueue(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     campaign_id = Column(Integer, ForeignKey("sms_campaigns.id"), nullable=True)
-    channel = Column(String(20), default="SMS") # SMS
+    channel = Column(String(20), default="SMS") # SMS, WHATSAPP
     phone_number = Column(String(20), nullable=False, index=True)
     recipient_name = Column(String(100), nullable=True)
     message = Column(String(1000), nullable=False)
     status = Column(String(20), default=SMSStatus.PENDING, index=True)
+    
+    # Retry Logic Fields
     retry_count = Column(Integer, default=0)
+    max_retries = Column(Integer, default=3)
+    next_retry_at = Column(DateTime, nullable=True, index=True)
+    retry_history = Column(JSON, nullable=True) # List of {timestamp, error, attempt}
+    
     error_message = Column(String(255), nullable=True)
     
     # Reference to invoice if applicable
     invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=True)
+    
+    # Analytics data
+    is_read = Column(Boolean, default=False)
+    read_at = Column(DateTime, nullable=True)
+    response_received = Column(Boolean, default=False)
+    last_response = Column(String(500), nullable=True)
     
     created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
     sent_at = Column(DateTime, nullable=True)
@@ -356,23 +377,6 @@ class SMSConfiguration(Base):
     id = Column(Integer, primary_key=True, index=True)
     is_enabled = Column(Boolean, default=False)
     gateway_type = Column(String(20), default="WIFI") # WIFI or CLOUD
-    
-    # WhatsApp Settings
-    whatsapp_enabled = Column(Boolean, default=False)
-    whatsapp_web_enabled = Column(Boolean, default=False)
-    whatsapp_gateway_ip = Column(String(100), nullable=True)
-    whatsapp_gateway_port = Column(String(10), default="8080")
-    whatsapp_use_https = Column(Boolean, default=False)
-    whatsapp_instance_id = Column(String(100), nullable=True)
-    whatsapp_api_key = Column(String(100), nullable=True)
-    whatsapp_username = Column(String(100), nullable=True)
-    whatsapp_password = Column(String(100), nullable=True)
-    
-    # Evolution API Settings (New Integration)
-    evolution_api_enabled = Column(Boolean, default=False)
-    evolution_base_url = Column(String(255), nullable=True)
-    evolution_api_key = Column(String(255), nullable=True)
-    evolution_instance_name = Column(String(100), nullable=True)
     
     # WiFi Gateway Settings (SMS)
     gateway_ip = Column(String(100), nullable=True) 
@@ -393,6 +397,18 @@ class SMSConfiguration(Base):
     otp_template = Column(String(500), default="Your verification code is {code}")
     
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=True) # Optional link to user table if it exists
+    action = Column(String(50), nullable=False) # DELETE, RETRY, START, etc.
+    resource_type = Column(String(50), nullable=False) # CAMPAIGN, MESSAGE
+    resource_id = Column(Integer, nullable=False)
+    details = Column(JSON, nullable=True)
+    ip_address = Column(String(45), nullable=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
 
 class AppConfiguration(Base):
     __tablename__ = "app_configurations"

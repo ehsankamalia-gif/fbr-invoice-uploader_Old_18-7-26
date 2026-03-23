@@ -93,6 +93,11 @@ class Settings(BaseModel):
     HONDA_PORTAL_USERNAME: str = Field(default_factory=lambda: os.getenv("HONDA_PORTAL_USERNAME", ""))
     HONDA_PORTAL_PASSWORD: str = Field(default_factory=lambda: os.getenv("HONDA_PORTAL_PASSWORD", ""))
 
+    # Evolution API Settings
+    EVOLUTION_API_URL: str = Field(default_factory=lambda: os.getenv("EVOLUTION_API_URL", ""))
+    EVOLUTION_API_KEY: str = Field(default_factory=lambda: os.getenv("EVOLUTION_API_KEY", ""))
+    EVOLUTION_INSTANCE_NAME: str = Field(default_factory=lambda: os.getenv("EVOLUTION_INSTANCE_NAME", ""))
+
 settings = Settings()
 
 def reload_settings():

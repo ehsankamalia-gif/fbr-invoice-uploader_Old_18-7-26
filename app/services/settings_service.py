@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
 from app.db.models import FBRConfiguration, AppConfiguration
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +212,7 @@ class SettingsService:
                     "pos_id": config.pos_id,
                     "usin": config.usin,
                     "token": config.auth_token,
+                    "secret_key": config.secret_key, # Added secret_key
                     "tax_rate": str(config.tax_rate),
                     "pct_code": config.pct_code,
                     "invoice_type": config.invoice_type,
@@ -233,6 +235,7 @@ class SettingsService:
             "pos_id": "",
             "usin": "",
             "token": "",
+            "secret_key": "", # Added secret_key
             "tax_rate": "18.0",
             "pct_code": "8711.2010",
             "invoice_type": "Standard",
@@ -344,22 +347,11 @@ class SettingsService:
                 "gateway_port": config.gateway_port,
                 "gateway_username": getattr(config, 'gateway_username', ""),
                 "gateway_password": getattr(config, 'gateway_password', ""),
-                "api_key": config.api_key,
-                "api_url": config.api_url,
                 "use_https": config.use_https,
-                "whatsapp_enabled": getattr(config, 'whatsapp_enabled', False),
-                "whatsapp_web_enabled": getattr(config, 'whatsapp_web_enabled', False),
-                "whatsapp_gateway_ip": getattr(config, 'whatsapp_gateway_ip', ""),
-                "whatsapp_gateway_port": getattr(config, 'whatsapp_gateway_port', "8080"),
-                "whatsapp_username": getattr(config, 'whatsapp_username', ""),
-                "whatsapp_password": getattr(config, 'whatsapp_password', ""),
-                "whatsapp_use_https": getattr(config, 'whatsapp_use_https', False),
-                "whatsapp_instance_id": getattr(config, 'whatsapp_instance_id', ""),
-                "whatsapp_api_key": getattr(config, 'whatsapp_api_key', ""),
-                "evolution_api_enabled": getattr(config, 'evolution_api_enabled', False),
-                "evolution_base_url": getattr(config, 'evolution_base_url', ""),
-                "evolution_api_key": getattr(config, 'evolution_api_key', ""),
-                "evolution_instance_name": getattr(config, 'evolution_instance_name', ""),
+                "api_url": config.api_url,
+                "cloud_username": getattr(config, 'cloud_username', ""),
+                "cloud_password": getattr(config, 'cloud_password', ""),
+                "api_key": config.api_key,
                 "invoice_template": config.invoice_template
             }
         except Exception as e:
@@ -386,7 +378,7 @@ class SettingsService:
                     logger.warning(f"SMSConfiguration model has no attribute '{key}'. Skipping.")
             
             db.commit()
-            logger.info("Updated SMS/WhatsApp configuration successfully.")
+            logger.info("Updated SMS configuration successfully.")
         except Exception as e:
             db.rollback()
             logger.error(f"CRITICAL: Error saving SMS/WhatsApp configuration: {e}", exc_info=True)

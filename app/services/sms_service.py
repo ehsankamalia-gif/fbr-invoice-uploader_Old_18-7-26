@@ -77,7 +77,8 @@ class SMSService:
         if protocol == "https": protocols_to_try.append("http")
         else: protocols_to_try.append("https")
         
-        endpoints = ["/message", "/sms", "/send", "/api/send"]
+        # Add simpler endpoint variants for basic Android SMS Gateways
+        endpoints = ["/message", "/sms", "/send", "/api/send", "/api/v1/sms", "/"]
 
         for proto in protocols_to_try:
             for ep in endpoints:
@@ -93,18 +94,31 @@ class SMSService:
                     try:
                         check_timeout()
                         logger.info(f"[TX:{tx_id}] Probing SMS endpoint: {url}")
-                        response = self.session.post(url, json=payload, headers=headers, timeout=6.0)
                         
+                        # Some gateways expect different payload formats
+                        # Try the standard one first, then a flat one
+                        try:
+                            response = self.session.post(url, json=payload, headers=headers, timeout=6.0)
+                        except:
+                            return False, "Request failed"
+
                         if response.status_code in [200, 201, 202]:
                             resp_text = response.text.lower()
                             if "<html" not in resp_text:
-                                success_keys = ["success", "sent", "ok", "true", "msgid"]
-                                if any(k in resp_text for k in success_keys):
-                                    return True, f"Success ({ep} {proto.upper()})"
+                                return True, f"Success: {response.status_code}"
                         
-                        return False, f"Status {response.status_code}"
+                        # Retry with flat payload for simpler gateways
+                        flat_payload = {
+                            "to": phone_number,
+                            "message": msg_content
+                        }
+                        response = self.session.post(url, json=flat_payload, headers=headers, timeout=6.0)
+                        if response.status_code in [200, 201, 202]:
+                             return True, f"Success: {response.status_code} (Flat Payload)"
+
+                        return False, f"Status {response.status_code}: {response.text[:100]}"
                     except Exception as e:
-                        return False, str(e)
+                        return False, f"Error: {str(e)}"
 
                 try:
                     success, msg = single_sms_attempt()
@@ -227,164 +241,13 @@ class SMSService:
             logger.error(f"[CLOUD:{tx_id}] Critical Failure: {e}")
             return False, f"Cloud connection failed: {str(e)}"
 
-    def send_whatsapp_via_gateway(self, ip: str, port: str, phone_number: str, msg_content: str,
-                                  instance_id: str, api_key: Optional[str] = None, 
-                                  username: Optional[str] = None,
-                                  password: Optional[str] = None,
-                                  use_https: bool = False,
-                                  total_timeout: float = 30.0) -> tuple[bool, str]:
-        """
-        Sends a WhatsApp message via a dedicated WhatsApp Gateway API.
-        Supports automatic endpoint discovery and protocol negotiation.
-        API Key is optional for gateways that use only Instance ID.
-        Supports Basic Auth if username and password are provided.
-        """
-        tx_id = str(uuid.uuid4())[:8]
-        start_time = time.time()
-        protocol = "https" if use_https else "http"
-        
-        logger.info(f"[WA:{tx_id}] --- Starting WhatsApp Send to {phone_number} at {protocol}://{ip}:{port} ---")
-        
-        # 0. Fast Connectivity Check
-        try:
-            sock_timeout = 5.0
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(sock_timeout)
-            result = sock.connect_ex((ip, int(port)))
-            sock.close()
-            if result != 0:
-                return False, f"Unreachable: {ip}:{port}. Check WA Gateway connectivity."
-        except Exception as e:
-            return False, f"Connection error: {str(e)}"
-
-        # 1. Prepare Payload & Headers
-        payload = {
-            "number": phone_number,
-            "phone": phone_number,
-            "message": msg_content,
-            "instance_id": instance_id
-        }
-        
-        # Add API key if provided
-        if api_key:
-            payload["access_token"] = api_key
-            payload["apikey"] = api_key
-        
-        headers = {
-            "Content-Type": "application/json"
-        }
-        
-        if api_key:
-            headers["X-API-KEY"] = api_key
-            headers["Authorization"] = f"Bearer {api_key}"
-        elif username and password:
-            auth_str = base64.b64encode(f"{username}:{password}".encode()).decode()
-            headers["Authorization"] = f"Basic {auth_str}"
-
-        # 2. Adaptive Endpoint Discovery
-        # Different gateways use different paths like /send, /send-message, /message
-        endpoints = ["/send", "/send-message", "/message", "/api/sendText", "/api/v1/send"]
-        
-        # Prepare list of attempts (Protocol + Endpoint)
-        attempts = []
-        for proto in [protocol, "http" if protocol == "https" else "https"]:
-            for ep in endpoints:
-                attempts.append((proto, ep))
-
-        last_error = "All WA gateway endpoints failed."
-
-        for proto, ep in attempts:
-            url = f"{proto}://{ip}:{port}{ep}"
-            
-            @retry(
-                stop=stop_after_attempt(2),
-                wait=wait_exponential(multiplier=1, min=1, max=3),
-                retry=retry_if_result(lambda x: x[0] is False),
-                reraise=False # We want it to return (False, ...) so we can try next EP
-            )
-            def single_attempt():
-                try:
-                    logger.info(f"[WA:{tx_id}] Probing WA endpoint: {url}")
-                    # Try sending as JSON first (modern gateways)
-                    response = self.session.post(url, json=payload, headers=headers, timeout=8.0)
-                    
-                    # Success indicators
-                    if response.status_code in [200, 201, 202]:
-                        resp_text = response.text.lower()
-                        success_keys = ["success", "status", "sent", "ok", "true", "msgid", "queue"]
-                        if any(k in resp_text for k in success_keys) and "false" not in resp_text:
-                            return True, f"WhatsApp Sent ({ep})"
-                        else:
-                            return False, f"Server rejected: {response.text[:100]}"
-                    
-                    # If JSON failed with 404 or 405, try as Params (legacy gateways)
-                    if response.status_code in [404, 405]:
-                        response = self.session.post(url, params=payload, headers=headers, timeout=8.0)
-                        if response.status_code in [200, 201, 202]:
-                            resp_text = response.text.lower()
-                            if any(k in resp_text for k in success_keys) and "false" not in resp_text:
-                                return True, f"WhatsApp Sent ({ep} via params)"
-
-                    return False, f"Status {response.status_code}"
-                except Exception as e:
-                    logger.warning(f"[WA:{tx_id}] Connection to {url} failed: {e}")
-                    return False, f"Conn Error: {str(e)}"
-
-            try:
-                success, msg = single_attempt()
-                if success:
-                    return True, msg
-                last_error = msg
-            except RetryError:
-                # This shouldn't happen with reraise=False, but just in case
-                continue
-            except Exception as e:
-                last_error = str(e)
-                continue
-
-        return False, f"WA Error: {last_error}. Ensure Instance ID is correct."
-
-    def send_whatsapp_via_evolution(self, base_url: str, api_key: str, instance_name: str, 
-                                    phone_number: str, message: str) -> tuple[bool, str]:
-        """Sends a WhatsApp message using the Evolution API."""
-        tx_id = str(uuid.uuid4())[:8]
-        try:
-            # Evolution API expects phone number with country code and without '+'
-            clean_phone = "".join(filter(str.isdigit, phone_number))
-            
-            # Construct the endpoint: /message/sendText/{instanceName}
-            base_url = base_url.rstrip('/')
-            url = f"{base_url}/message/sendText/{instance_name}"
-            
-            headers = {
-                "Content-Type": "application/json",
-                "apikey": api_key
-            }
-            
-            payload = {
-                "number": clean_phone,
-                "text": message
-            }
-            
-            logger.info(f"[EVO:{tx_id}] Sending WA via Evolution to {clean_phone}...")
-            response = self.session.post(url, json=payload, headers=headers, timeout=15.0)
-            
-            if response.status_code in [200, 201]:
-                return True, "WhatsApp Sent (Evolution)"
-            else:
-                return False, f"Evolution API Error {response.status_code}: {response.text[:100]}"
-                
-        except Exception as e:
-            logger.error(f"[EVO:{tx_id}] Evolution failure: {e}")
-            return False, f"Evolution Error: {str(e)}"
-
     def process_queue(self):
-        """Processes the SMS/WhatsApp queue using the configured gateway type."""
+        """Processes the SMS queue using the configured gateway type."""
         db = SessionLocal()
         try:
             # Get config
             config = db.query(SMSConfiguration).first()
-            if not config or (not config.is_enabled and not config.whatsapp_enabled):
+            if not config or not config.is_enabled:
                 return
 
             pending_items = db.query(SMSQueue).filter(SMSQueue.status == SMSStatus.PENDING).all()
@@ -395,59 +258,31 @@ class SMSService:
                 success = False
                 error_msg = ""
 
-                # 1. Handle WhatsApp Channel
-                if item.channel == "WHATSAPP":
-                    # Priority 1: Evolution API (Stable & Recommended)
-                    if config.evolution_api_enabled and config.evolution_base_url:
-                        success, error_msg = self.send_whatsapp_via_evolution(
-                            config.evolution_base_url,
-                            config.evolution_api_key,
-                            config.evolution_instance_name,
-                            item.phone_number,
-                            item.message
-                        )
-                    # Priority 2: Legacy WhatsApp Gateway (Probing)
-                    elif config.whatsapp_enabled and config.whatsapp_gateway_ip:
-                        success, error_msg = self.send_whatsapp_via_gateway(
-                            config.whatsapp_gateway_ip,
-                            config.whatsapp_gateway_port,
-                            item.phone_number,
-                            item.message,
-                            config.whatsapp_instance_id,
-                            api_key=config.whatsapp_api_key,
-                            username=config.whatsapp_username,
-                            password=config.whatsapp_password,
-                            use_https=config.whatsapp_use_https
-                        )
-                    else:
-                        error_msg = "WhatsApp not configured or disabled."
-
-                # 2. Handle SMS Channel
+                # 1. Handle SMS Channel
+                if not config.is_enabled:
+                    error_msg = "SMS Notifications are disabled."
+                elif config.gateway_type == 'CLOUD' and config.api_url:
+                    success, error_msg = self.send_sms_via_cloud(
+                        config.api_url,
+                        item.phone_number,
+                        item.message,
+                        config.api_key,
+                        config.cloud_username,
+                        config.cloud_password
+                    )
+                elif config.gateway_ip:
+                    success, error_msg = self.send_sms_via_wifi(
+                        config.gateway_ip, 
+                        config.gateway_port, 
+                        item.phone_number, 
+                        item.message,
+                        config.api_key,
+                        config.gateway_username,
+                        config.gateway_password,
+                        use_https=config.use_https
+                    )
                 else:
-                    if not config.is_enabled:
-                        error_msg = "SMS Notifications are disabled."
-                    elif config.gateway_type == 'CLOUD' and config.api_url:
-                        success, error_msg = self.send_sms_via_cloud(
-                            config.api_url,
-                            item.phone_number,
-                            item.message,
-                            config.api_key,
-                            config.cloud_username,
-                            config.cloud_password
-                        )
-                    elif config.gateway_ip:
-                        success, error_msg = self.send_sms_via_wifi(
-                            config.gateway_ip, 
-                            config.gateway_port, 
-                            item.phone_number, 
-                            item.message,
-                            config.api_key,
-                            config.gateway_username,
-                            config.gateway_password,
-                            use_https=config.use_https
-                        )
-                    else:
-                        error_msg = "SMS Gateway not configured properly."
+                    error_msg = "SMS Gateway not configured properly."
                 
                 if success:
                     item.status = SMSStatus.SENT
@@ -465,13 +300,13 @@ class SMSService:
                 
                 db.commit()
         except Exception as e:
-            logger.error(f"Error processing SMS/WhatsApp queue: {e}")
+            logger.error(f"Error processing SMS queue: {e}")
             db.rollback()
         finally:
             db.close()
 
     def queue_invoice_sms(self, db, invoice):
-        """Queues SMS and/or WhatsApp for a new invoice."""
+        """Queues SMS for a new invoice."""
         config = db.query(SMSConfiguration).first()
         if not config:
             return
@@ -499,16 +334,6 @@ class SMSService:
                 channel="SMS"
             )
             db.add(new_sms)
-            
-        # Queue WhatsApp if enabled (Legacy or Evolution)
-        if config.whatsapp_enabled or config.evolution_api_enabled:
-            new_wa = SMSQueue(
-                phone_number=phone,
-                message=message,
-                invoice_id=invoice.id,
-                channel="WHATSAPP"
-            )
-            db.add(new_wa)
             
         db.commit()
 
