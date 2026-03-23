@@ -220,6 +220,7 @@ def run_migrations():
                 (3, "Add app_configurations table", _migration_v3_add_app_configs),
                 (4, "Add WhatsApp configuration fields to sms_configurations", _migration_v4_add_whatsapp_fields),
                 (5, "Add Gateway Credentials to SMS and WhatsApp configurations", _migration_v5_add_gateway_credentials),
+                (6, "Add secret_key and business_name to fbr_configurations", _migration_v6_add_fbr_fields),
             ]
 
             for version, description, func in migrations:
@@ -345,6 +346,35 @@ def _migration_v5_add_gateway_credentials(conn) -> bool:
         return True
     except Exception as e:
         logger.error(f"Migration v5 failed: {e}", exc_info=True)
+        return False
+
+def _migration_v6_add_fbr_fields(conn) -> bool:
+    """Adds secret_key, business_name and other missing fields to fbr_configurations."""
+    try:
+        # Columns to add to fbr_configurations table
+        columns = [
+            ("secret_key", "VARCHAR(255)"),
+            ("business_name", "VARCHAR(100) DEFAULT 'Ehsan Trader'"),
+            ("item_code", "VARCHAR(50)"),
+            ("item_name", "VARCHAR(100)"),
+            ("tax_rate", "FLOAT DEFAULT 18.0"),
+            ("invoice_type", "VARCHAR(20) DEFAULT 'Standard'"),
+            ("discount", "FLOAT DEFAULT 0.0"),
+            ("pct_code", "VARCHAR(20) DEFAULT '8711.2010'")
+        ]
+        
+        for col_name, col_def in columns:
+            try:
+                conn.execute(text(f"SELECT {col_name} FROM fbr_configurations LIMIT 1"))
+            except Exception:
+                logger.info(f"Adding column {col_name} to fbr_configurations...")
+                conn.execute(text(f"ALTER TABLE fbr_configurations ADD COLUMN {col_name} {col_def}"))
+                try:
+                    conn.commit()
+                except: pass
+        return True
+    except Exception as e:
+        logger.error(f"Migration v6 failed: {e}", exc_info=True)
         return False
 
 def get_db():
