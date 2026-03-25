@@ -104,7 +104,7 @@ def init_db():
             SessionLocal.configure(bind=engine)
             
             # 4. Create tables and run migrations on the verified engine
-            Base.metadata.create_all(bind=engine)
+            verify_schema_integrity(engine)
             _ensure_critical_tables(engine)
             try:
                 run_migrations()
@@ -186,6 +186,68 @@ def create_mysql_db_if_missing():
         logger.error(f"Failed to check/create MySQL database: {e}")
 
 from app.utils.string_utils import normalize_business_name
+from sqlalchemy import inspect
+
+def verify_schema_integrity(target_engine):
+    """
+    Self-healing schema check.
+    Ensures all tables and columns defined in models.py exist in the target database.
+    """
+    try:
+        inspector = inspect(target_engine)
+        existing_tables = inspector.get_table_names()
+        
+        # 1. Create missing tables
+        Base.metadata.create_all(bind=target_engine)
+        
+        # 2. Check for missing columns in existing tables
+        with target_engine.connect() as conn:
+            for table_name, table_obj in Base.metadata.tables.items():
+                if table_name in existing_tables:
+                    existing_columns = [c["name"] for c in inspector.get_columns(table_name)]
+                    for col_name, col_obj in table_obj.columns.items():
+                        if col_name not in existing_columns:
+                            logger.warning(f"Self-healing: Missing column '{col_name}' in table '{table_name}'. Adding...")
+                            
+                            # Determine column type for SQL
+                            col_type = str(col_obj.type).upper()
+                            # Basic mapping for SQLAlchemy types to SQL
+                            if "VARCHAR" in col_type:
+                                sql_type = f"VARCHAR({col_obj.type.length})"
+                            elif "INTEGER" in col_type:
+                                sql_type = "INTEGER"
+                            elif "FLOAT" in col_type:
+                                sql_type = "FLOAT"
+                            elif "BOOLEAN" in col_type:
+                                sql_type = "BOOLEAN"
+                            elif "DATETIME" in col_type:
+                                sql_type = "DATETIME"
+                            elif "JSON" in col_type:
+                                sql_type = "JSON"
+                            else:
+                                sql_type = col_type
+                                
+                            default_val = ""
+                            if col_obj.default is not None:
+                                # Very basic default handling
+                                try:
+                                    if hasattr(col_obj.default, "arg"):
+                                        default_val = f" DEFAULT {col_obj.default.arg}"
+                                except: pass
+
+                            alter_stmt = f"ALTER TABLE {table_name} ADD COLUMN {col_name} {sql_type}{default_val}"
+                            try:
+                                conn.execute(text(alter_stmt))
+                                if "sqlite" not in str(target_engine.url):
+                                    conn.commit()
+                                logger.info(f"Successfully added column '{col_name}' to '{table_name}'.")
+                            except Exception as alter_err:
+                                logger.error(f"Failed to add column '{col_name}' to '{table_name}': {alter_err}")
+        
+        return True
+    except Exception as e:
+        logger.error(f"Schema integrity verification failed: {e}")
+        return False
 
 def run_migrations():
     """
