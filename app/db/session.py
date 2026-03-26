@@ -10,13 +10,21 @@ from app.db.models import (
     Motorcycle, 
     ProductModel, 
     Price,
+    Supplier,
+    PurchaseOrder,
+    PurchaseOrderItem,
+    User,
     SpareLedgerTransaction,
+    SpareLedgerMonthlyClose,
+    SpareLedgerAudit,
     CapturedData,
     FBRConfiguration,
     AppConfiguration,
     MigrationHistory,
+    SMSCampaign,
     SMSQueue,
-    SMSConfiguration
+    SMSConfiguration,
+    AuditLog
 )
 import logging
 

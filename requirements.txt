@@ -21,4 +21,4 @@ schedule
 platformdirs
 jinja2
 PyQt6-WebEngine
-openpyxl
+android-sms-gateway
