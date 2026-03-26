@@ -4667,18 +4667,32 @@ class MainWindow(QMainWindow):
             
         db = SessionLocal()
         try:
-            # Search in Motorcycle Inventory
+            # Subquery to find already uploaded motorcycles
+            uploaded_motorcycle_ids = db.query(InvoiceItem.motorcycle_id).join(Invoice).filter(
+                Invoice.is_fiscalized == True,
+                InvoiceItem.motorcycle_id.isnot(None)
+            ).subquery()
+
+            # Search in Motorcycle Inventory - EXCLUDE already uploaded
             results = db.query(Motorcycle.chassis_number).filter(
                 Motorcycle.status == "IN_STOCK",
-                Motorcycle.chassis_number.ilike(f"%{query_text}%")
+                Motorcycle.chassis_number.ilike(f"%{query_text}%"),
+                ~Motorcycle.id.in_(uploaded_motorcycle_ids)
             ).limit(10).all()
             
             suggestions = [r[0] for r in results]
             
-            # Also search in Captured Data
+            # Also search in Captured Data - EXCLUDE already uploaded
+            # To exclude from captured data, we need to check if the captured chassis 
+            # matches any chassis already in fiscalized invoices
+            uploaded_chassis = db.query(Motorcycle.chassis_number).join(InvoiceItem).join(Invoice).filter(
+                Invoice.is_fiscalized == True
+            ).subquery()
+
             captured_results = db.query(CapturedData.chassis_number).filter(
                 CapturedData.is_deleted == False,
-                CapturedData.chassis_number.ilike(f"%{query_text}%")
+                CapturedData.chassis_number.ilike(f"%{query_text}%"),
+                ~CapturedData.chassis_number.in_(uploaded_chassis)
             ).limit(10).all()
             
             for r in captured_results:
@@ -4703,6 +4717,23 @@ class MainWindow(QMainWindow):
             
         db = SessionLocal()
         try:
+            # Backend Check: Is this chassis already uploaded to FBR?
+            # We check InvoiceItem joined with Invoice to see if it's fiscalized
+            from app.db.models import Invoice, InvoiceItem
+            already_uploaded = db.query(InvoiceItem).join(Invoice).filter(
+                InvoiceItem.motorcycle_id.in_(
+                    db.query(Motorcycle.id).filter(Motorcycle.chassis_number == chassis)
+                ),
+                Invoice.is_fiscalized == True
+            ).first()
+
+            if already_uploaded:
+                QMessageBox.critical(self, "Duplicate Upload / ڈپلیکیٹ اپ لوڈ", 
+                                   f"This Chassis number {chassis} is already uploaded to FBR.\n"
+                                   f"FBR Invoice: {already_uploaded.invoice.fbr_invoice_number}")
+                self.invoice_chassis_input.clear()
+                return
+
             # 1. Search in Captured Data (Priority for Buyer Info)
             cap = db.query(CapturedData).filter(CapturedData.chassis_number == chassis, CapturedData.is_deleted == False).first()
             if cap:

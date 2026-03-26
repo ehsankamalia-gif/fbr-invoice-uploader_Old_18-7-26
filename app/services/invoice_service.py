@@ -29,6 +29,27 @@ class InvoiceService:
         
         return count > 0
 
+    def is_chassis_uploaded_to_fbr(self, db: Session, chassis_number: str) -> bool:
+        """
+        Check if a chassis number has already been uploaded to FBR.
+        Returns True if the chassis is linked to a fiscalized invoice.
+        """
+        if not chassis_number:
+            return False
+        
+        chassis_number = chassis_number.upper().strip()
+        
+        # Check through Motorcycle relationship
+        from app.db.models import Invoice, InvoiceItem, Motorcycle
+        exists = db.query(InvoiceItem).join(Invoice).filter(
+            InvoiceItem.motorcycle_id.in_(
+                db.query(Motorcycle.id).filter(Motorcycle.chassis_number == chassis_number)
+            ),
+            Invoice.is_fiscalized == True
+        ).first()
+        
+        return exists is not None
+
     def create_invoice(self, db: Session, invoice_in: InvoiceCreate):
         # 1. Calculate totals
         total_sale_value = 0.0
@@ -39,11 +60,11 @@ class InvoiceService:
 
         db_items = []
         for item in invoice_in.items:
-            # Check for Chassis Uniqueness across all fiscalized invoices
+            # 1. Mandatory Duplicate Upload Prevention
             if item.chassis_number:
-                # Validate if chassis is already used in a previous invoice
-                if self.is_chassis_used_in_posted_invoice(db, item.chassis_number):
-                    raise ValueError(f"Invoice with chassis number {item.chassis_number} has already been posted")
+                if self.is_chassis_uploaded_to_fbr(db, item.chassis_number):
+                    logger.error(f"AUDIT FAILURE: Attempted to re-upload chassis {item.chassis_number} which is already fiscalized.")
+                    raise ValueError(f"This Chassis number {item.chassis_number} is already uploaded to FBR.")
 
             # Trust input values from price table as per user request
             sale_value = item.sale_value
