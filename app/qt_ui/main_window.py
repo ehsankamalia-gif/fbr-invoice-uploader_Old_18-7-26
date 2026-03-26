@@ -20,6 +20,7 @@ from PyQt6.QtCore import (
     Qt, 
     QAbstractTableModel, 
     QModelIndex, 
+    QItemSelectionModel,
     QStringListModel, 
     QTimer, 
     QDate, 
@@ -3320,6 +3321,18 @@ class MainWindow(QMainWindow):
 
     def _reload_sms_campaigns(self):
         """Reloads campaigns list from database."""
+        # Preserve current selection before reload
+        selected_ids = set()
+        try:
+            selection_model = self.campaigns_table_view.selectionModel()
+            selected_rows = selection_model.selectedRows()
+            for index in selected_rows:
+                row_idx = index.row()
+                if 0 <= row_idx < len(self.campaigns_table_model._rows):
+                    selected_ids.add(self.campaigns_table_model._rows[row_idx].id)
+        except Exception as e:
+            logger.debug(f"Could not preserve campaign selection: {e}")
+
         from app.db.models import SMSCampaign
         from app.db.session import SessionLocal
         
@@ -3342,6 +3355,18 @@ class MainWindow(QMainWindow):
              ]
             
             self.campaigns_table_model.update_rows(rows)
+
+            # Restore selection after reload
+            if selected_ids:
+                def restore_selection():
+                    selection_model = self.campaigns_table_view.selectionModel()
+                    for i, row in enumerate(self.campaigns_table_model._rows):
+                        if row.id in selected_ids:
+                            index = self.campaigns_table_model.index(i, 0)
+                            selection_model.select(index, QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows)
+                
+                # Use QTimer to ensure selection happens after view updates
+                QTimer.singleShot(0, restore_selection)
             
         except Exception as e:
             logger.error(f"Error reloading campaigns: {e}")
@@ -3349,31 +3374,45 @@ class MainWindow(QMainWindow):
             db.close()
 
     def _on_delete_campaign(self):
-        """Deletes the selected campaign after confirmation."""
+        """Deletes the selected campaign(s) after confirmation."""
         from app.services.bulk_sms_service import bulk_sms_service
         
         selected = self.campaigns_table_view.selectionModel().selectedRows()
         if not selected:
-            QMessageBox.warning(self, "Selection Required / انتخاب ضروری ہے", "Please select a campaign to delete.")
+            QMessageBox.warning(self, "Selection Required / انتخاب ضروری ہے", "Please select one or more campaigns to delete.")
             return
             
-        row_idx = selected[0].row()
-        campaign = self.campaigns_table_model._rows[row_idx]
-        
+        campaigns_to_delete = []
+        for index in selected:
+            row_idx = index.row()
+            if 0 <= row_idx < len(self.campaigns_table_model._rows):
+                campaigns_to_delete.append(self.campaigns_table_model._rows[row_idx])
+
+        if len(campaigns_to_delete) == 1:
+            msg = f"Are you sure you want to delete campaign '{campaigns_to_delete[0].name}'?"
+        else:
+            msg = f"Are you sure you want to delete {len(campaigns_to_delete)} selected campaigns?"
+
         reply = QMessageBox.question(self, "Confirm Delete / تصدیق کریں", 
-                                   f"Are you sure you want to delete campaign '{campaign.name}'?\n\n"
-                                   "This will also delete all message history for this campaign.",
+                                   f"{msg}\n\n"
+                                   "This will also delete all message history for the selected campaign(s).",
                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
                                    
         if reply == QMessageBox.StandardButton.Yes:
-            try:
-                if bulk_sms_service.delete_campaign(campaign.id):
-                    self._reload_sms_campaigns()
-                    self._show_success("Deleted / حذف کر دیا گیا", f"Campaign '{campaign.name}' has been deleted.")
-                else:
-                    self._show_error("Error / غلطی", "Failed to delete campaign.")
-            except Exception as e:
-                self._show_error("Error / غلطی", str(e))
+            success_count = 0
+            for campaign in campaigns_to_delete:
+                try:
+                    if bulk_sms_service.delete_campaign(campaign.id):
+                        success_count += 1
+                except Exception as e:
+                    logger.error(f"Error deleting campaign {campaign.id}: {e}")
+
+            if success_count > 0:
+                self._reload_sms_campaigns()
+                self._show_success("Deleted / حذف کر دیا گیا", f"{success_count} campaign(s) have been deleted.")
+            
+            if success_count < len(campaigns_to_delete):
+                self._show_error("Error / غلطی", f"Failed to delete {len(campaigns_to_delete) - success_count} campaign(s).")
 
     def _on_gateway_type_changed(self, gateway_type: str) -> None:
         """Shows/hides relevant fields based on gateway type."""
