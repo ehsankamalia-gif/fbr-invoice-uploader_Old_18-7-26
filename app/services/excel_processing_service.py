@@ -31,10 +31,20 @@ class ExcelProcessingService:
     def validate_data(self, data: List[Dict[str, Any]], headers: List[str]) -> Dict[str, Any]:
         """Validates the data, looking for a 'phone' or 'number' column."""
         phone_column = None
-        for col in ['phone', 'number', 'cell', 'mobile']:
-            if col in headers:
+        keywords = ['phone', 'number', 'cell', 'mobile', 'contact', 'wa']
+        
+        # Try exact matches first
+        for col in headers:
+            if col.lower() in keywords:
                 phone_column = col
                 break
+        
+        # If no exact match, try keyword containment
+        if not phone_column:
+            for col in headers:
+                if any(kw in col.lower() for kw in keywords):
+                    phone_column = col
+                    break
         
         if not phone_column:
             return {

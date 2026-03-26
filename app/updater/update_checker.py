@@ -49,6 +49,13 @@ class UpdateChecker:
                 logger.error("version.json is missing required fields.")
                 return None
                 
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                # If it's a 404, we just log a concise warning instead of the full error
+                logger.warning(f"Update check skipped: Remote version.json not found (HTTP 404).")
+            else:
+                logger.error(f"Failed to fetch version.json (HTTP {e.response.status_code}): {e}")
+            return None
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to fetch version.json: {e}")
             return None
