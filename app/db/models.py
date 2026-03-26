@@ -312,7 +312,7 @@ class SMSCampaign(Base):
     __tablename__ = "sms_campaigns"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), nullable=False)
+    name = Column(String(100), nullable=False, unique=True)
     template = Column(String(1000), nullable=False)
     channel = Column(String(20), default="SMS") # SMS, WHATSAPP
     total_recipients = Column(Integer, default=0)

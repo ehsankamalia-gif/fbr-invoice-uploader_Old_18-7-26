@@ -297,6 +297,7 @@ def run_migrations():
                 (4, "Add WhatsApp configuration fields to sms_configurations", _migration_v4_add_whatsapp_fields),
                 (5, "Add Gateway Credentials to SMS and WhatsApp configurations", _migration_v5_add_gateway_credentials),
                 (6, "Add secret_key and business_name to fbr_configurations", _migration_v6_add_fbr_fields),
+                (7, "Add unique constraint to sms_campaigns.name", _migration_v7_add_sms_campaign_unique_name),
             ]
 
             for version, description, func in migrations:
@@ -451,6 +452,36 @@ def _migration_v6_add_fbr_fields(conn) -> bool:
         return True
     except Exception as e:
         logger.error(f"Migration v6 failed: {e}", exc_info=True)
+        return False
+
+def _migration_v7_add_sms_campaign_unique_name(conn) -> bool:
+    """Adds a unique constraint to the name column of the sms_campaigns table."""
+    try:
+        # Check if the unique constraint already exists
+        # This is different across DB types
+        is_sqlite = "sqlite" in str(engine.url)
+        
+        if is_sqlite:
+            # SQLite doesn't easily support ADD UNIQUE to existing columns
+            # But the application-level check in BulkSMSService will handle it.
+            # We skip SQLite schema modification for now.
+            logger.info("SQLite: Skipping unique constraint migration for sms_campaigns.name (handled at app level).")
+            return True
+        else:
+            # MySQL: Try to add the unique index
+            try:
+                logger.info("Adding unique index to sms_campaigns.name...")
+                conn.execute(text("ALTER TABLE sms_campaigns ADD UNIQUE (name)"))
+                conn.commit()
+                logger.info("Successfully added unique constraint.")
+            except Exception as e:
+                if "Duplicate entry" in str(e) or "already exists" in str(e):
+                    logger.warning(f"Could not add unique constraint: {e}")
+                else:
+                    raise e
+        return True
+    except Exception as e:
+        logger.error(f"Migration v7 failed: {e}", exc_info=True)
         return False
 
 def get_db():

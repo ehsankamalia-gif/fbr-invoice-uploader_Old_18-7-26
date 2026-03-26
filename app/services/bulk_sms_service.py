@@ -210,6 +210,11 @@ class BulkSMSService:
         """
         db = SessionLocal()
         try:
+            # Check if a campaign with the same name already exists
+            existing = db.query(SMSCampaign).filter(SMSCampaign.name == name).first()
+            if existing:
+                raise ValueError(f"A campaign named '{name}' already exists. Please choose a different name.")
+
             campaign = SMSCampaign(
                 name=name,
                 template=template,
