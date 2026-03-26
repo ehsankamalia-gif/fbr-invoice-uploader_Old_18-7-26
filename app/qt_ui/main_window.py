@@ -2170,6 +2170,7 @@ class MainWindow(QMainWindow):
         group2_layout.addWidget(QLabel("Quantity"), 3, 2)
         self.invoice_quantity_spin = QSpinBox()
         self.invoice_quantity_spin.setRange(1, 999)
+        self.invoice_quantity_spin.valueChanged.connect(self._recalculate_invoice_totals)
         group2_layout.addWidget(self.invoice_quantity_spin, 3, 3)
 
         container_layout.addWidget(group2)
@@ -2190,17 +2191,20 @@ class MainWindow(QMainWindow):
         group3_layout.addWidget(QLabel("Amount (Excl. Tax)"), 1, 0)
         self.invoice_amount_spin = QDoubleSpinBox()
         self.invoice_amount_spin.setRange(0, 99999999)
+        self.invoice_amount_spin.valueChanged.connect(self._recalculate_invoice_totals)
         group3_layout.addWidget(self.invoice_amount_spin, 1, 1)
 
         group3_layout.addWidget(QLabel("Sale Tax"), 1, 2)
         self.invoice_tax_spin = QDoubleSpinBox()
         self.invoice_tax_spin.setRange(0, 99999999)
+        self.invoice_tax_spin.valueChanged.connect(self._recalculate_invoice_totals)
         group3_layout.addWidget(self.invoice_tax_spin, 1, 3)
 
         # Further Tax & Total
         group3_layout.addWidget(QLabel("Further Tax"), 2, 0)
         self.invoice_further_tax_spin = QDoubleSpinBox()
         self.invoice_further_tax_spin.setRange(0, 99999999)
+        self.invoice_further_tax_spin.valueChanged.connect(self._recalculate_invoice_totals)
         group3_layout.addWidget(self.invoice_further_tax_spin, 2, 1)
 
         group3_layout.addWidget(QLabel("Total Price (Incl. Tax)"), 2, 2)
@@ -4578,34 +4582,31 @@ class MainWindow(QMainWindow):
                     total_further_tax = float(self.invoice_further_tax_spin.value())
 
             # Manual override prioritization:
-            # If a spin box is focused, trust its current value over calculation
-            if focused is self.invoice_tax_spin:
-                try:
-                    tax_charged = float(self.invoice_tax_spin.value())
-                except ValueError:
-                    pass
+            # If a spin box is focused AND the signal sender is NOT the spin box itself
+            # (to avoid overwriting what user is currently typing)
+            sender = self.sender()
             
-            if focused is self.invoice_further_tax_spin:
-                try:
-                    total_further_tax = float(self.invoice_further_tax_spin.value())
-                except ValueError:
-                    pass
+            if focused is self.invoice_tax_spin or sender is self.invoice_tax_spin:
+                tax_charged = float(self.invoice_tax_spin.value())
+            
+            if focused is self.invoice_further_tax_spin or sender is self.invoice_further_tax_spin:
+                total_further_tax = float(self.invoice_further_tax_spin.value())
 
             sale_value_total = amount_excl * qty
             total_amount = sale_value_total + tax_charged + total_further_tax
             
-            # Update UI components safely
-            if focused is not self.invoice_tax_spin:
+            # Update UI components safely - only update if the value changed and it's not the sender
+            if sender is not self.invoice_tax_spin:
                 self.invoice_tax_spin.blockSignals(True)
                 self.invoice_tax_spin.setValue(tax_charged)
                 self.invoice_tax_spin.blockSignals(False)
                 
-            if focused is not self.invoice_further_tax_spin:
+            if sender is not self.invoice_further_tax_spin:
                 self.invoice_further_tax_spin.blockSignals(True)
                 self.invoice_further_tax_spin.setValue(total_further_tax)
                 self.invoice_further_tax_spin.blockSignals(False)
                 
-            if focused is not self.invoice_total_spin:
+            if sender is not self.invoice_total_spin:
                 self.invoice_total_spin.blockSignals(True)
                 self.invoice_total_spin.setValue(total_amount)
                 self.invoice_total_spin.blockSignals(False)
