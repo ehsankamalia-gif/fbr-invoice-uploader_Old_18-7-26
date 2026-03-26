@@ -40,11 +40,8 @@ def verify_payload_structure():
         ]
     }
 
-    # Test Case 2: Dealer (Registered) - Should have 0 Further Tax (if logic applied)
-    # But wait, sync_invoice just takes whatever is in the invoice object.
-    # The logic of setting it to 0 is in the UI layer.
-    # So for the client, we just verify it sends what it receives.
-    print("\n[TEST CASE 2] Dealer (Registered) Buyer - Payload with 0 Additional Tax")
+    # Test Case 2: Dealer (Registered) - Verification of Structure Consistency
+    print("\n[TEST CASE 2] Dealer (Registered) Buyer - Verification of Structure Consistency")
     invoice_data_dealer = {
         "invoice_number": "TEST-DLR-001",
         "datetime": datetime.now(),
@@ -53,9 +50,9 @@ def verify_payload_structure():
         "payment_mode": "Online",
         "total_sale_value": 100000.0,
         "total_tax_charged": 18000.0,
-        "total_further_tax": 0.0,
+        "total_further_tax": 1500.0, # Added further tax for consistency testing
         "total_quantity": 1,
-        "total_amount": 118000.0,
+        "total_amount": 119501.0, # 100k + 18k + 1.5k + 1.0 PoSFee
         "items": [
             {
                 "item_code": "MOTO-001",
@@ -64,8 +61,8 @@ def verify_payload_structure():
                 "tax_rate": 18.0,
                 "sale_value": 100000.0,
                 "tax_charged": 18000.0,
-                "further_tax": 0.0,
-                "total_amount": 118000.0,
+                "further_tax": 1500.0,
+                "total_amount": 119500.0,
                 "pct_code": "87112010",
                 "discount": 0.0
             }
@@ -92,21 +89,31 @@ def verify_payload_structure():
     with patch.object(settings_service, 'get_active_settings', return_value=mock_settings):
         # Verify Case 1
         payload_ind = fbr_client._transform_to_fbr_format(invoice_data_ind, mock_settings)
-        print(f"  - TotalAdditionalTax: {payload_ind.get('TotalAdditionalTax')}")
-        print(f"  - Item AdditionalTax: {payload_ind.get('Items')[0].get('AdditionalTax')}")
+        with open("payload_snapshot.json", "w") as f:
+            json.dump(payload_ind, f, indent=2, default=str)
         
+        print("\n[PAYLOAD SNAPSHOT - CASE 1]")
+        print(json.dumps(payload_ind, indent=2, default=str))
+        
+        print(f"\n  - TotalFurtherTax: {payload_ind.get('TotalFurtherTax')}")
+        print(f"  - Item FurtherTax: {payload_ind.get('Items')[0].get('FurtherTax')}")
+        
+        assert payload_ind.get('TotalFurtherTax') == 3000.0
+        assert payload_ind.get('Items')[0].get('FurtherTax') == 3000.0
         assert payload_ind.get('TotalAdditionalTax') == 3000.0
-        assert payload_ind.get('Items')[0].get('AdditionalTax') == 3000.0
         assert payload_ind.get('TotalOtherTax') == 3000.0
         assert payload_ind.get('Items')[0].get('OtherTax') == 3000.0
 
         # Verify Case 2
         payload_dlr = fbr_client._transform_to_fbr_format(invoice_data_dealer, mock_settings)
-        print(f"  - TotalAdditionalTax: {payload_dlr.get('TotalAdditionalTax')}")
-        print(f"  - Item AdditionalTax: {payload_dlr.get('Items')[0].get('AdditionalTax')}")
+        print(f"  - TotalFurtherTax: {payload_dlr.get('TotalFurtherTax')}")
+        print(f"  - Item FurtherTax: {payload_dlr.get('Items')[0].get('FurtherTax')}")
         
-        assert payload_dlr.get('TotalAdditionalTax') == 0.0
-        assert payload_dlr.get('Items')[0].get('AdditionalTax') == 0.0
+        # Test Case 2 is now consistent with Case 1 structure
+        assert payload_dlr.get('TotalFurtherTax') == 1500.0
+        assert payload_dlr.get('Items')[0].get('FurtherTax') == 1500.0
+        assert payload_dlr.get('TotalAdditionalTax') == 1500.0
+        assert payload_dlr.get('Items')[0].get('AdditionalTax') == 1500.0
 
         # Check Signature for Case 1 (Production Mode)
         signature = fbr_client._generate_signature(payload_ind, mock_settings["secret_key"])

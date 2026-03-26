@@ -59,7 +59,25 @@ def test_transform_to_fbr_format_with_further_tax():
     fbr_data = client._transform_to_fbr_format(invoice_data, settings)
     
     assert fbr_data["TotalFurtherTax"] == 3.0
+    assert fbr_data["TotalFurtherTaxCharged"] == 3.0
+    assert fbr_data["TotalFurtherTaxAmount"] == 3.0
+    assert fbr_data["FurtherTax"] == 3.0 # Root alias
+    assert fbr_data["FurtherTaxCharged"] == 3.0 # Root alias
+    assert fbr_data["TotalAdditionalTax"] == 3.0
+    assert fbr_data["TotalAdditionalTaxCharged"] == 3.0
+    assert fbr_data["TotalOtherTax"] == 3.0
+    
     assert fbr_data["Items"][0]["FurtherTax"] == 3.0
+    assert fbr_data["Items"][0]["FurtherTaxCharged"] == 3.0
+    assert fbr_data["Items"][0]["FurtherTaxAmount"] == 3.0
+    assert fbr_data["Items"][0]["AdditionalTax"] == 3.0
+    assert fbr_data["Items"][0]["AdditionalTaxCharged"] == 3.0
+    assert fbr_data["Items"][0]["OtherTax"] == 3.0
+    
+    # Check PoSFee
+    assert fbr_data["PoSFee"] == 1.0
+    assert fbr_data["TotalPoSFee"] == 1.0
+    assert fbr_data["TotalBillAmount"] == 121.0 # 120 + 1.0 PoSFee
 
 def test_transform_to_fbr_format_with_business_rules():
     """Verify that settings from the business rules image are applied correctly."""
@@ -118,11 +136,22 @@ def test_transform_to_fbr_format(invoice_data):
     assert len(fbr_data["Items"]) == 1 # Was "items"
     assert fbr_data["Items"][0]["ItemCode"] == "1" # Was "items"
 
+@patch("app.services.settings_service.settings_service.get_active_settings")
 @patch("requests.post")
-def test_post_invoice_success(mock_post, invoice_data):
+def test_post_invoice_success(mock_post, mock_settings, invoice_data):
+    mock_settings.return_value = {
+        "pos_id": 123456,
+        "token": "MOCK_TOKEN",
+        "base_url": "https://esp.fbr.gov.pk:8243/PT/v1",
+        "env": "SANDBOX"
+    }
+    
+    # Ensure invoice data has required fields for validation
+    invoice_data["buyer_cnic"] = "33303-1234567-1"
+    
     mock_response = MagicMock()
     mock_response.status_code = 200
-    mock_response.json.return_value = {"InvoiceNumber": "FBR-123456", "Response": "Success"}
+    mock_response.json.return_value = {"InvoiceNumber": "FBR-123456", "Code": "100", "Response": "Success"}
     mock_post.return_value = mock_response
 
     client = FBRClient()

@@ -216,7 +216,10 @@ class FBRClient:
                 "TaxCharged": round(float(item.get("tax_charged", 0.0)), 2),
                 "Discount": round(discount, 2),
                 "FurtherTax": round(float(item.get("further_tax", 0.0)), 2),
+                "FurtherTaxCharged": round(float(item.get("further_tax", 0.0)), 2), # Alias
+                "FurtherTaxAmount": round(float(item.get("further_tax", 0.0)), 2), # Alias
                 "AdditionalTax": round(float(item.get("further_tax", 0.0)), 2), # Explicit Additional Tax field
+                "AdditionalTaxCharged": round(float(item.get("further_tax", 0.0)), 2), # Alias
                 "OtherTax": round(float(item.get("further_tax", 0.0)), 2), # Alias for compatibility
                 "InvoiceType": default_invoice_type_int
             })
@@ -280,13 +283,20 @@ class FBRClient:
             "BuyerCNIC": buyer_cnic,
             "BuyerName": data.get("buyer_name") or "Buyer Name",
             "BuyerPhoneNumber": data.get("buyer_phone") or None,
-            "TotalBillAmount": round(float(data.get("total_amount", 0.0)), 2),
+            "TotalBillAmount": round(float(data.get("total_amount", 0.0)) + 1.0, 2), # Include 1.0 PoSFee
             "TotalQuantity": round(float(data.get("total_quantity", 0.0)), 2),
             "TotalSaleValue": round(float(data.get("total_sale_value", 0.0)), 2),
             "TotalTaxCharged": round(float(data.get("total_tax_charged", 0.0)), 2),
             "TotalFurtherTax": round(float(data.get("total_further_tax", 0.0)), 2),
+            "TotalFurtherTaxCharged": round(float(data.get("total_further_tax", 0.0)), 2), # Alias
+            "TotalFurtherTaxAmount": round(float(data.get("total_further_tax", 0.0)), 2), # Alias
+            "FurtherTax": round(float(data.get("total_further_tax", 0.0)), 2), # Root level alias
+            "FurtherTaxCharged": round(float(data.get("total_further_tax", 0.0)), 2), # Alias
             "TotalAdditionalTax": round(float(data.get("total_further_tax", 0.0)), 2), # Explicit Total Additional Tax field
+            "TotalAdditionalTaxCharged": round(float(data.get("total_further_tax", 0.0)), 2), # Alias
             "TotalOtherTax": round(float(data.get("total_further_tax", 0.0)), 2), # Alias for compatibility
+            "PoSFee": 1.0, # Mandatory FBR POS Fee
+            "TotalPoSFee": 1.0, # Mandatory FBR POS Fee
             "PaymentMode": mode_int,
             "InvoiceType": default_invoice_type_int,
             "Items": items
