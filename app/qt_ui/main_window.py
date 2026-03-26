@@ -65,6 +65,7 @@ from PyQt6.QtWidgets import (
 
 from sqlalchemy.orm import joinedload
 
+from app.core import config
 from app.core.config import settings
 from app.db.session import SessionLocal, close_all_db_connections
 from app.services.report_service import report_service, SalesFilter
@@ -490,9 +491,14 @@ class MainWindow(QMainWindow):
         else:
             version_str = "1.0.0"
         
-        # Bitbucket Raw URL for version.json
-        version_url = "https://bitbucket.org/python_desktop/python_repository/raw/main/version.json"
+        # Get Update URL from settings
+        version_url = config.settings.APP_UPDATE_URL
         
+        # If URL is empty or explicitly set to placeholder, skip background update check
+        if not version_url or "your-server.com" in version_url:
+            logger.info("Update check skipped: No valid APP_UPDATE_URL configured.")
+            return
+
         self.updater_manager = UpdaterManager(
             current_version=version_str,
             version_url=version_url,

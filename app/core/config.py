@@ -98,6 +98,9 @@ class Settings(BaseModel):
     EVOLUTION_API_KEY: str = Field(default_factory=lambda: os.getenv("EVOLUTION_API_KEY", ""))
     EVOLUTION_INSTANCE_NAME: str = Field(default_factory=lambda: os.getenv("EVOLUTION_INSTANCE_NAME", ""))
 
+    # Update System
+    APP_UPDATE_URL: str = Field(default_factory=lambda: os.getenv("APP_UPDATE_URL", "https://bitbucket.org/python_desktop/python_repository/raw/main/version.json"))
+
 settings = Settings()
 
 def reload_settings():

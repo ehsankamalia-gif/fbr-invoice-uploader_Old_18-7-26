@@ -3,7 +3,7 @@ import time
 import logging
 import uuid
 import datetime as dt
-from typing import List, Dict, Any, Optional, Callable
+from typing import List, Dict, Any, Optional, Callable, Tuple
 from app.db.session import SessionLocal
 from app.db.models import SMSCampaign, SMSQueue, SMSStatus, SMSConfiguration
 from app.services.sms_service import sms_service
@@ -215,13 +215,60 @@ class BulkSMSService:
                 template=template,
                 channel=channel,
                 total_recipients=len(data),
-                status="PENDING"
+                status="PENDING",
+                sent_count=0,
+                failed_count=0,
+                is_deleted=False
             )
             db.add(campaign)
             db.flush()  # Get ID
 
-            phone_col = next((col for col in ['phone', 'number', 'cell', 'mobile'] if col in data[0]), None)
-            name_col = next((col for col in ['name', 'customer', 'recipient'] if col in data[0]), "Recipient")
+            # Audit Log
+            try:
+                from app.db.models import AuditLog
+                audit = AuditLog(
+                    action="CREATE",
+                    resource_type="CAMPAIGN",
+                    resource_id=campaign.id,
+                    details={"name": name, "recipients": len(data), "channel": channel}
+                )
+                db.add(audit)
+            except: pass # Optional log
+
+            phone_col = None
+            if data:
+                # Case-insensitive column search
+                keys = [k.lower() for k in data[0].keys()]
+                keywords = ['phone', 'number', 'cell', 'mobile', 'contact', 'wa']
+                
+                # 1. Try exact matches first
+                for k in data[0].keys():
+                    if k.lower() in keywords:
+                        phone_col = k
+                        break
+                
+                # 2. Try keyword containment
+                if not phone_col:
+                    for k in data[0].keys():
+                        if any(kw in k.lower() for kw in keywords):
+                            phone_col = k
+                            break
+            
+            name_col = "Recipient"
+            if data:
+                name_keywords = ['name', 'customer', 'recipient', 'person', 'client']
+                # 1. Try exact matches
+                for k in data[0].keys():
+                    if k.lower() in name_keywords:
+                        name_col = k
+                        break
+                
+                # 2. Try keyword containment
+                if name_col == "Recipient":
+                    for k in data[0].keys():
+                        if any(kw in k.lower() for kw in name_keywords):
+                            name_col = k
+                            break
 
             for item in data:
                 message_text = self._apply_template(template, item)

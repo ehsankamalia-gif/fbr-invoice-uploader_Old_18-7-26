@@ -240,7 +240,13 @@ def verify_schema_integrity(target_engine):
                                 # Very basic default handling
                                 try:
                                     if hasattr(col_obj.default, "arg"):
-                                        default_val = f" DEFAULT {col_obj.default.arg}"
+                                        arg = col_obj.default.arg
+                                        if isinstance(arg, str):
+                                            # If it's a string, wrap it in single quotes
+                                            default_val = f" DEFAULT '{arg}'"
+                                        else:
+                                            # For numbers or booleans, use it as is
+                                            default_val = f" DEFAULT {arg}"
                                 except: pass
 
                             alter_stmt = f"ALTER TABLE {table_name} ADD COLUMN {col_name} {sql_type}{default_val}"
