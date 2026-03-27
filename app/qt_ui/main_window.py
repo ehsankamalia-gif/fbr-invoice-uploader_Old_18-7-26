@@ -4564,13 +4564,12 @@ class MainWindow(QMainWindow):
             # Use current price if available, but respect manual overrides if focused
             if self._invoice_current_price:
                 tax_per_unit = float(getattr(self._invoice_current_price, "tax_amount", 0) or 0)
-                # If dealer is selected, further tax is typically 0
-                further_per_unit = 0.0 if self._is_dealer_selected else float(getattr(self._invoice_current_price, "levy_amount", 0) or 0)
+                further_per_unit = float(getattr(self._invoice_current_price, "levy_amount", 0) or 0)
                 
-                # Fallback: If levy is 0 in DB but buyer is individual, calculate 3% further tax
-                if not self._is_dealer_selected and further_per_unit == 0 and amount_excl > 0:
+                # Fallback: If levy is 0 in DB, calculate 3% further tax
+                if further_per_unit == 0 and amount_excl > 0:
                     further_per_unit = (amount_excl * 3.0) / 100.0
-                    logger.debug(f"Applied 3% fallback further tax for unregistered buyer: {further_per_unit}")
+                    logger.debug(f"Applied 3% fallback further tax: {further_per_unit}")
 
                 tax_charged = tax_per_unit * qty
                 total_further_tax = further_per_unit * qty
@@ -4581,17 +4580,13 @@ class MainWindow(QMainWindow):
                 tax_charged = (sale_value * tax_rate) / 100.0
                 
                 # Default further tax logic for manual entry or missing price records
-                if self._is_dealer_selected:
-                    total_further_tax = 0.0
+                # If no price record exists, default to 3% further tax if the field is currently 0.
+                # Otherwise, preserve the user's manual entry.
+                current_val = float(self.invoice_further_tax_spin.value())
+                if current_val == 0 and sale_value > 0:
+                    total_further_tax = round((sale_value * 3.0) / 100.0, 2)
                 else:
-                    # If it's an individual (unregistered) and no price record exists, 
-                    # default to 3% further tax if the field is currently 0.
-                    # Otherwise, preserve the user's manual entry.
-                    current_val = float(self.invoice_further_tax_spin.value())
-                    if current_val == 0 and sale_value > 0:
-                        total_further_tax = round((sale_value * 3.0) / 100.0, 2)
-                    else:
-                        total_further_tax = current_val
+                    total_further_tax = current_val
 
             # Manual override prioritization:
             # If a spin box is focused AND the signal sender is NOT the spin box itself
@@ -4898,11 +4893,8 @@ class MainWindow(QMainWindow):
             self.invoice_buyer_ntn_input.setText(dealer.ntn)
             self.invoice_buyer_ntn_input.blockSignals(False)
             
-        # Dealers are registered, so reset Further Tax to 0
-        self.invoice_further_tax_spin.blockSignals(True)
-        self.invoice_further_tax_spin.setValue(0.0)
-        self.invoice_further_tax_spin.blockSignals(False)
         self._recalculate_invoice_totals()
+        self._check_invoice_form_completeness()
 
     def _open_dealer_search_dialog(self) -> None:
         dialog = DealerSearchDialog(self)
@@ -4938,11 +4930,8 @@ class MainWindow(QMainWindow):
             self.invoice_buyer_ntn_input.setText(dealer.ntn)
             self.invoice_buyer_ntn_input.blockSignals(False)
 
-        # Dealers are registered, so reset Further Tax to 0
-        self.invoice_further_tax_spin.blockSignals(True)
-        self.invoice_further_tax_spin.setValue(0.0)
-        self.invoice_further_tax_spin.blockSignals(False)
         self._recalculate_invoice_totals()
+        self._check_invoice_form_completeness()
 
     def _on_invoice_ntn_changed(self, text: str) -> None:
         ntn = text.strip()
@@ -4956,6 +4945,7 @@ class MainWindow(QMainWindow):
                 from app.db.models import CustomerType
                 self._is_dealer_selected = (customer.type == CustomerType.DEALER)
                 self._recalculate_invoice_totals()
+                self._check_invoice_form_completeness()
         except Exception:
             pass
         finally:
@@ -5000,6 +4990,7 @@ class MainWindow(QMainWindow):
             from app.db.models import CustomerType
             self._is_dealer_selected = (customer.type == CustomerType.DEALER)
             self._recalculate_invoice_totals()
+            self._check_invoice_form_completeness()
         except Exception:
             return
         finally:
@@ -6420,6 +6411,11 @@ class MainWindow(QMainWindow):
             self._generate_invoice_number()
 
     def _reload_sales(self) -> None:
+        """Handles reloading for the dashboard/legacy sales list."""
+        if hasattr(self, "report_page"):
+            self.report_page.refresh_data()
+            return
+
         search = self.sales_search_input.text().strip() if hasattr(self, "sales_search_input") else ""
         status = self.sales_status_combo.currentText() if hasattr(self, "sales_status_combo") else "All"
         if status == "All Statuses":
