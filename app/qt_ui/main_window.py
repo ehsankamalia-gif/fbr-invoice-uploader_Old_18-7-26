@@ -3305,24 +3305,25 @@ class MainWindow(QMainWindow):
 
     def _on_download_template_clicked(self):
         from PyQt6.QtWidgets import QFileDialog
-        import pandas as pd
+        from openpyxl import Workbook
 
         file_path, _ = QFileDialog.getSaveFileName(self, "Save Template File", "sms_template.xlsx", "Excel Files (*.xlsx)")
 
         if file_path:
             try:
-                # Define the structure of the template
-                template_data = {
-                    'phone': ['03001234567', '03219876543'],
-                    'name': ['John Doe', 'Jane Smith'],
-                    'reg_no': ['ABC-123', 'XYZ-789'],
-                    'custom_field_1': ['Value1', 'Value2'],
-                    'custom_field_2': ['ValueA', 'ValueB']
-                }
-                df = pd.DataFrame(template_data)
+                headers = ["phone", "name", "reg_no", "custom_field_1", "custom_field_2"]
+                sample_rows = [
+                    ["03001234567", "John Doe", "ABC-123", "Value1", "ValueA"],
+                    ["03219876543", "Jane Smith", "XYZ-789", "Value2", "ValueB"],
+                ]
 
-                # Write the DataFrame to an Excel file
-                df.to_excel(file_path, index=False)
+                wb = Workbook()
+                ws = wb.active
+                ws.title = "Sheet1"
+                ws.append(headers)
+                for row in sample_rows:
+                    ws.append(row)
+                wb.save(file_path)
 
                 self._show_success("Template Saved", f"The SMS template has been saved to:\n{file_path}")
 

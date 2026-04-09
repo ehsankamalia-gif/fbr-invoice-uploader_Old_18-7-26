@@ -1,12 +1,18 @@
 from typing import List, Dict, Tuple, Any
-import pandas as pd
+from pathlib import Path
+
+from openpyxl import load_workbook
 
 class ExcelProcessingService:
     def get_sheet_names(self, file_path: str) -> List[str]:
         """Reads an Excel file and returns a list of all sheet names."""
         try:
-            xls = pd.ExcelFile(file_path)
-            return xls.sheet_names
+            path = Path(file_path)
+            wb = load_workbook(filename=str(path), read_only=True, data_only=True)
+            try:
+                return list(wb.sheetnames)
+            finally:
+                wb.close()
         except Exception as e:
             # Consider logging the error
             raise ValueError(f"Could not read sheet names from {file_path}: {e}")
@@ -14,17 +20,45 @@ class ExcelProcessingService:
     def read_excel(self, file_path: str, sheet_name: str | None = None) -> Tuple[List[Dict[str, Any]], List[str]]:
         """Reads a specific sheet from an Excel file and returns data and headers."""
         try:
-            # If no sheet_name is provided, default to the first sheet
-            df = pd.read_excel(file_path, sheet_name=sheet_name)
-            
-            # Sanitize headers: convert to lowercase, replace spaces with underscores
-            df.columns = [str(col).strip().lower().replace(' ', '_') for col in df.columns]
-            
-            # Convert DataFrame to list of dictionaries
-            data = df.to_dict(orient='records')
-            headers = list(df.columns)
-            
-            return data, headers
+            path = Path(file_path)
+            wb = load_workbook(filename=str(path), read_only=True, data_only=True)
+            try:
+                if sheet_name:
+                    if sheet_name not in wb.sheetnames:
+                        raise ValueError(f"Sheet '{sheet_name}' not found. Available: {', '.join(wb.sheetnames)}")
+                    ws = wb[sheet_name]
+                else:
+                    ws = wb[wb.sheetnames[0]]
+
+                rows = list(ws.iter_rows(values_only=True))
+                if not rows:
+                    return [], []
+
+                raw_headers = [str(col).strip() if col is not None else "" for col in rows[0]]
+                sanitized_headers = [h.lower().replace(" ", "_") for h in raw_headers]
+
+                used_indexes: List[int] = []
+                headers: List[str] = []
+                for idx, header in enumerate(sanitized_headers):
+                    if header:
+                        used_indexes.append(idx)
+                        headers.append(header)
+
+                data: List[Dict[str, Any]] = []
+                for row in rows[1:]:
+                    if row is None:
+                        continue
+                    if all(cell is None or str(cell).strip() == "" for cell in row):
+                        continue
+
+                    record: Dict[str, Any] = {}
+                    for header, col_idx in zip(headers, used_indexes):
+                        record[header] = row[col_idx] if col_idx < len(row) else None
+                    data.append(record)
+
+                return data, headers
+            finally:
+                wb.close()
         except Exception as e:
             raise ValueError(f"Failed to read Excel sheet '{sheet_name or 'default'}': {e}")
 

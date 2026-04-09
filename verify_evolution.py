@@ -53,8 +53,8 @@ def verify_integration():
     print("\n--- 5. Excel Service Check ---")
     try:
         from app.services.excel_service import excel_service
-        import pandas as pd
-        print("✅ Excel service and Pandas loaded.")
+        import openpyxl  # noqa: F401
+        print("✅ Excel service and openpyxl loaded.")
     except Exception as e:
         print(f"❌ Excel Service Error: {e}")
 

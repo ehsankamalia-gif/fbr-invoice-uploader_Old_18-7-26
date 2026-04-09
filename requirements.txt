@@ -16,7 +16,6 @@ playwright
 cryptography
 openpyxl
 PyQt6
-pandas
 schedule
 platformdirs
 jinja2

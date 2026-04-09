@@ -1,10 +1,12 @@
 import os
-import pandas as pd
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, func
 from app.db.models import Invoice, InvoiceItem, Motorcycle, Customer
+from openpyxl import Workbook
+import csv
+from pathlib import Path
 
 class SalesFilter:
     def __init__(
@@ -107,18 +109,10 @@ class ReportService:
         count = len(invoices)
         
         # Daily sales for chart
-        df_data = []
+        daily_sales: Dict[str, float] = {}
         for inv in invoices:
-            df_data.append({
-                'date': inv.datetime.date(),
-                'amount': float(inv.total_amount or 0)
-            })
-        
-        daily_sales = {}
-        if df_data:
-            df = pd.DataFrame(df_data)
-            daily = df.groupby('date')['amount'].sum().reset_index()
-            daily_sales = {str(row['date']): row['amount'] for _, row in daily.iterrows()}
+            date_key = str(inv.datetime.date())
+            daily_sales[date_key] = daily_sales.get(date_key, 0.0) + float(inv.total_amount or 0)
 
         return {
             "total_revenue": float(total_revenue),
@@ -132,10 +126,10 @@ class ReportService:
         """Exports filtered sales to a CSV file."""
         try:
             invoices = self.get_sales(db, flt)
-            data = []
+            rows: List[Dict[str, Any]] = []
             for inv in invoices:
                 chassis = ", ".join([it.motorcycle.chassis_number for it in inv.items if it.motorcycle])
-                data.append({
+                rows.append({
                     "Date": inv.datetime.strftime("%Y-%m-%d %H:%M"),
                     "Invoice #": inv.invoice_number,
                     "Customer": inv.customer.name if inv.customer else "N/A",
@@ -148,8 +142,27 @@ class ReportService:
                     "Status": "Synced" if inv.is_fiscalized else inv.sync_status
                 })
             
-            df = pd.DataFrame(data)
-            df.to_csv(file_path, index=False)
+            path = Path(file_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+
+            fieldnames = list(rows[0].keys()) if rows else [
+                "Date",
+                "Invoice #",
+                "Customer",
+                "CNIC",
+                "Chassis",
+                "Sale Value",
+                "Tax",
+                "Further Tax",
+                "Total",
+                "Status",
+            ]
+
+            with path.open("w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                for row in rows:
+                    writer.writerow({k: row.get(k, "") for k in fieldnames})
             return True
         except Exception as e:
             print(f"CSV Export Error: {e}")
@@ -159,10 +172,10 @@ class ReportService:
         """Exports filtered sales to an Excel file."""
         try:
             invoices = self.get_sales(db, flt)
-            data = []
+            rows: List[Dict[str, Any]] = []
             for inv in invoices:
                 chassis = ", ".join([it.motorcycle.chassis_number for it in inv.items if it.motorcycle])
-                data.append({
+                rows.append({
                     "Date": inv.datetime.strftime("%Y-%m-%d %H:%M"),
                     "Invoice #": inv.invoice_number,
                     "Customer": inv.customer.name if inv.customer else "N/A",
@@ -175,12 +188,29 @@ class ReportService:
                     "Status": "Synced" if inv.is_fiscalized else inv.sync_status
                 })
             
-            df = pd.DataFrame(data)
-            # Use openpyxl engine if available, otherwise fallback
-            try:
-                df.to_excel(file_path, index=False, engine='openpyxl')
-            except ImportError:
-                df.to_excel(file_path, index=False)
+            path = Path(file_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+
+            headers = list(rows[0].keys()) if rows else [
+                "Date",
+                "Invoice #",
+                "Customer",
+                "CNIC",
+                "Chassis",
+                "Sale Value",
+                "Tax",
+                "Further Tax",
+                "Total",
+                "Status",
+            ]
+
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Sales"
+            ws.append(headers)
+            for row in rows:
+                ws.append([row.get(h, "") for h in headers])
+            wb.save(str(path))
             return True
         except Exception as e:
             print(f"Excel Export Error: {e}")

@@ -50,7 +50,7 @@ class Bootstrapper:
         """Checks if critical required packages are importable."""
         critical_packages = [
             "fastapi", "sqlalchemy", "pydantic", "requests", "PyQt6", 
-            "cryptography", "pymysql", "pandas", "openpyxl", "android_sms_gateway"
+            "cryptography", "pymysql", "openpyxl", "android_sms_gateway"
         ]
         
         for pkg in critical_packages:
