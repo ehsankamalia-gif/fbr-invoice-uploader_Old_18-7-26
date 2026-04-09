@@ -5266,16 +5266,12 @@ class MainWindow(QMainWindow):
             self._generate_invoice_number()
             self._update_fbr_submitted_counter()
             
-            # Independent Printing logic
-            self._handle_post_submission_print(created)
-            
             # Queue SMS if enabled
             try:
                 from app.services.sms_service import sms_service
                 sms_service.queue_invoice_sms(db, created)
                 db.commit()
-                # Start background processing of SMS queue
-                QTimer.singleShot(1000, sms_service.process_queue)
+                threading.Thread(target=sms_service.process_queue, daemon=True).start()
             except Exception as e:
                 logger.error(f"Error queuing SMS: {e}")
 

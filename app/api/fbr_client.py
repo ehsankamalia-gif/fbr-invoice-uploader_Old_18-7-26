@@ -283,7 +283,7 @@ class FBRClient:
             "BuyerCNIC": buyer_cnic,
             "BuyerName": data.get("buyer_name") or "Buyer Name",
             "BuyerPhoneNumber": data.get("buyer_phone") or None,
-            "TotalBillAmount": round(float(data.get("total_amount", 0.0)) + 1.0, 2), # Include 1.0 PoSFee
+            "TotalBillAmount": round(float(data.get("total_amount", 0.0)), 2),
             "TotalQuantity": round(float(data.get("total_quantity", 0.0)), 2),
             "TotalSaleValue": round(float(data.get("total_sale_value", 0.0)), 2),
             "TotalTaxCharged": round(float(data.get("total_tax_charged", 0.0)), 2),
@@ -295,8 +295,8 @@ class FBRClient:
             "TotalAdditionalTax": round(float(data.get("total_further_tax", 0.0)), 2), # Explicit Total Additional Tax field
             "TotalAdditionalTaxCharged": round(float(data.get("total_further_tax", 0.0)), 2), # Alias
             "TotalOtherTax": round(float(data.get("total_further_tax", 0.0)), 2), # Alias for compatibility
-            "PoSFee": 1.0, # Mandatory FBR POS Fee
-            "TotalPoSFee": 1.0, # Mandatory FBR POS Fee
+            "PoSFee": 0.0,
+            "TotalPoSFee": 0.0,
             "PaymentMode": mode_int,
             "InvoiceType": default_invoice_type_int,
             "Items": items
