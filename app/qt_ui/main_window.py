@@ -68,7 +68,6 @@ from sqlalchemy.orm import joinedload
 from app.core import config
 from app.core.config import settings
 from app.db.session import SessionLocal, close_all_db_connections
-from app.services.report_service import report_service, SalesFilter
 from app.db.models import (
     Motorcycle,
     ProductModel,
@@ -419,11 +418,64 @@ class MainWindow(QMainWindow):
 
         self._init_ui()
         
-        # Auto-refresh timer for Captured Data
-        
-        # Load active branding
-        active_settings = settings_service.get_active_settings()
-        self._update_app_branding(active_settings.get("business_name", "Ehsan Trader"))
+        self._settings_subscription_token = settings_service.subscribe(self._on_settings_event)
+        self._active_fbr_settings_snapshot = settings_service.get_active_settings()
+        self._last_settings_revision = settings_service.get_revision()
+
+        self._update_app_branding(self._active_fbr_settings_snapshot.get("business_name", "Ehsan Trader"))
+
+    def _on_settings_event(self, event: dict) -> None:
+        QTimer.singleShot(0, lambda e=event: self._apply_settings_event(e))
+
+    def _apply_settings_event(self, event: dict) -> None:
+        try:
+            event_type = event.get("type")
+            if event_type not in ("fbr_settings_saved", "fbr_active_environment_changed"):
+                return
+
+            revision = int(event.get("revision") or 0)
+            last_rev = int(getattr(self, "_last_settings_revision", 0) or 0)
+            if revision and revision <= last_rev:
+                logger.info(f"Ignoring stale FBR settings event: type={event_type} revision={revision} last={last_rev}")
+                return
+            if revision:
+                self._last_settings_revision = revision
+
+            new_active_settings = settings_service.get_active_settings()
+            old_active_settings = getattr(self, "_active_fbr_settings_snapshot", {}) or {}
+            changed_keys = [
+                k for k in new_active_settings.keys()
+                if old_active_settings.get(k) != new_active_settings.get(k)
+            ]
+            self._active_fbr_settings_snapshot = dict(new_active_settings)
+
+            if "business_name" in changed_keys:
+                self._update_app_branding(new_active_settings.get("business_name", "Ehsan Trader"))
+
+            self._sync_invoice_page_with_fbr_settings(old_active_settings, new_active_settings, changed_keys)
+            logger.info(f"FBR settings event applied: type={event_type} revision={revision} changed={changed_keys}")
+        except Exception as e:
+            logger.error(f"Failed to apply settings event: {e}", exc_info=True)
+
+    def _sync_invoice_page_with_fbr_settings(self, before: dict, after: dict, changed_keys: list[str]) -> None:
+        try:
+            if hasattr(self, "invoice_env_value_label") and hasattr(self, "invoice_env_badge"):
+                active_env = settings_service.get_active_environment()
+                self.invoice_env_value_label.setText(active_env.upper())
+                color = "#e67e22" if active_env.upper() == "SANDBOX" else "#27ae60"
+                self.invoice_env_badge.setStyleSheet(f"QFrame {{ border: 2px solid {color}; border-radius: 8px; background-color: white; }}")
+
+            if hasattr(self, "invoice_number_input"):
+                from app.services.settings_service import should_regenerate_invoice_number
+                current_inv = self.invoice_number_input.text()
+                if should_regenerate_invoice_number(current_inv, before.get("usin") or "", changed_keys):
+                    self._generate_invoice_number()
+
+            if "tax_rate" in changed_keys and getattr(self, "_invoice_current_price", None) is None:
+                if hasattr(self, "_recalculate_invoice_totals"):
+                    self._recalculate_invoice_totals()
+        except Exception as e:
+            logger.error(f"Invoice page sync failed: {e}", exc_info=True)
 
     def _on_manual_update_check(self):
         """Triggered manually by user from Settings page or Sidebar Footer."""
@@ -1145,8 +1197,16 @@ class MainWindow(QMainWindow):
             self.dash_failed_card.value_label.setText(str(failed))
 
             # Update Recent Table (Top 10)
-            flt = SalesFilter(limit=10)
-            rows = report_service.get_sales(db, flt)
+            rows = (
+                db.query(Invoice)
+                .options(
+                    joinedload(Invoice.customer),
+                    joinedload(Invoice.items).joinedload(InvoiceItem.motorcycle),
+                )
+                .order_by(Invoice.datetime.desc())
+                .limit(10)
+                .all()
+            )
             
             data: List[SalesRow] = []
             for inv in rows:
@@ -1353,6 +1413,56 @@ class MainWindow(QMainWindow):
             db.close()
 
     def _create_reports_page(self) -> QWidget:
+        page = QWidget(self)
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(30, 30, 30, 30)
+        layout.setSpacing(15)
+
+        header = QLabel("Reporting Portal")
+        header.setStyleSheet("font-size: 22px; font-weight: bold; color: #2c3e50;")
+        layout.addWidget(header)
+
+        subtitle = QLabel("Open interactive dashboards in your browser (recommended for best performance and compatibility).")
+        subtitle.setStyleSheet("color: #7f8c8d;")
+        subtitle.setWordWrap(True)
+        layout.addWidget(subtitle)
+
+        btn_row = QHBoxLayout()
+        open_dash = QPushButton("Open Dashboard")
+        open_builder = QPushButton("Template Builder")
+        open_sched = QPushButton("Schedules")
+
+        open_dash.setObjectName("primaryButton")
+        open_builder.setObjectName("resetButton")
+        open_sched.setObjectName("resetButton")
+
+        def open_url(url: str) -> None:
+            try:
+                from PyQt6.QtGui import QDesktopServices
+                from PyQt6.QtCore import QUrl
+
+                QDesktopServices.openUrl(QUrl(url))
+            except Exception as e:
+                self._show_error("Browser Error", str(e))
+
+        open_dash.clicked.connect(lambda: open_url("http://localhost:9000/dashboard"))
+        open_builder.clicked.connect(lambda: open_url("http://localhost:9000/builder"))
+        open_sched.clicked.connect(lambda: open_url("http://localhost:9000/schedules"))
+
+        btn_row.addWidget(open_dash)
+        btn_row.addWidget(open_builder)
+        btn_row.addWidget(open_sched)
+        btn_row.addStretch(1)
+        layout.addLayout(btn_row)
+
+        note = QLabel("If the portal does not open, ensure the Reporting Server is running on http://localhost:9000.")
+        note.setStyleSheet("color: #95a5a6; font-size: 11px;")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        layout.addStretch(1)
+        return page
+
         page = QWidget(self)
         layout = QVBoxLayout(page)
         layout.setContentsMargins(30, 30, 30, 30)
@@ -6392,7 +6502,8 @@ class MainWindow(QMainWindow):
         if key == "dashboard":
             self._refresh_dashboard()
         elif key == "reports":
-            self._reload_sales()
+            if hasattr(self, "sales_table_model"):
+                self._reload_sales()
         elif key == "inventory":
             self._reload_inventory()
         elif key == "customers":
@@ -6412,6 +6523,8 @@ class MainWindow(QMainWindow):
         if hasattr(self, "report_page"):
             self.report_page.refresh_data()
             return
+        if not hasattr(self, "sales_table_model"):
+            return
 
         search = self.sales_search_input.text().strip() if hasattr(self, "sales_search_input") else ""
         status = self.sales_status_combo.currentText() if hasattr(self, "sales_status_combo") else "All"
@@ -6419,18 +6532,44 @@ class MainWindow(QMainWindow):
             status = "All"
         period = self.sales_period_combo.currentText() if hasattr(self, "sales_period_combo") else "All Time"
 
-        flt = SalesFilter(
-            search_text=search,
-            status=status,
-            period=period,
-            payment_mode="All",
-            limit=500,
-        )
-
         db = SessionLocal()
         data: List[SalesRow] = []
         try:
-            rows = report_service.get_sales(db, flt)
+            query = (
+                db.query(Invoice)
+                .join(Customer, isouter=True)
+                .options(
+                    joinedload(Invoice.customer),
+                    joinedload(Invoice.items).joinedload(InvoiceItem.motorcycle),
+                )
+                .order_by(Invoice.datetime.desc())
+            )
+
+            if search:
+                value = f"%{search}%"
+                query = query.filter(
+                    (Invoice.invoice_number.ilike(value))
+                    | (Customer.name.ilike(value))
+                    | (Customer.cnic.ilike(value))
+                )
+
+            if status == "Synced":
+                query = query.filter(Invoice.is_fiscalized.is_(True))
+            elif status == "Pending":
+                query = query.filter(Invoice.is_fiscalized.is_(False), Invoice.sync_status != "FAILED")
+            elif status == "Failed":
+                query = query.filter(Invoice.sync_status == "FAILED")
+
+            now = dt.datetime.now()
+            if period == "Today":
+                start_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                end_dt = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+                query = query.filter(Invoice.datetime >= start_dt, Invoice.datetime <= end_dt)
+            elif period in ("This Month", "Current Month"):
+                start_dt = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                query = query.filter(Invoice.datetime >= start_dt)
+
+            rows = query.limit(500).all()
             
             # Update the total count label
             if hasattr(self, "report_total_count_label"):
@@ -7484,6 +7623,11 @@ class MainWindow(QMainWindow):
         """Ensure background services are stopped when the application closes."""
         try:
             logger.info("Application shutting down. Stopping background services...")
+            try:
+                if getattr(self, "_settings_subscription_token", None):
+                    settings_service.unsubscribe(self._settings_subscription_token)
+            except Exception:
+                pass
             form_capture_service.stop_capture_session()
             
             # Cleanup DB connections

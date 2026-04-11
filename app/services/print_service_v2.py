@@ -5,8 +5,6 @@ import base64
 import datetime as dt
 from typing import Dict, Any, List, Optional
 from jinja2 import Environment, FileSystemLoader
-from PyQt6.QtWebEngineCore import QWebEnginePage
-from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QPushButton, QHBoxLayout, QMessageBox, QApplication, QWidget
 from PyQt6.QtCore import Qt, QUrl
 
@@ -26,7 +24,7 @@ class PrintServiceV2:
             os.makedirs(self.template_dir, exist_ok=True)
             
         self.jinja_env = Environment(loader=FileSystemLoader(self.template_dir))
-        self.active_view: Optional[QWebEngineView] = None
+        self.active_view: Optional[object] = None
 
     def _get_business_info(self) -> Dict[str, str]:
         """Fetches current business configuration for template population."""
@@ -121,15 +119,36 @@ class PrintPreviewDialog(QDialog):
         
         layout.addWidget(toolbar)
 
-        # Web View for Preview
-        self.web_view = QWebEngineView()
-        self.web_view.setHtml(html_content)
-        layout.addWidget(self.web_view)
+        self._html_content = html_content
+        self.web_view = None
+        try:
+            from PyQt6.QtWebEngineWidgets import QWebEngineView
+
+            self.web_view = QWebEngineView()
+            self.web_view.setHtml(html_content)
+            layout.addWidget(self.web_view)
+        except Exception as e:
+            msg = QWidget()
+            msg_layout = QVBoxLayout(msg)
+            msg_layout.setContentsMargins(20, 20, 20, 20)
+            msg_layout.setSpacing(12)
+
+            lbl = QPushButton(f"Web preview is unavailable on this system.\nOpen in browser to print.\n\nError: {e}")
+            lbl.setEnabled(False)
+            msg_layout.addWidget(lbl)
+
+            open_btn = QPushButton("Open in Browser")
+            open_btn.clicked.connect(self._open_in_browser)
+            msg_layout.addWidget(open_btn)
+
+            layout.addWidget(msg)
 
     def _handle_print(self):
         """Initiates the native print dialog."""
-        self.web_view.page().printToPdf(lambda data: self._on_pdf_ready(data)) # Optional: save to pdf
-        # Direct print
+        if not self.web_view:
+            self._open_in_browser()
+            return
+        self.web_view.page().printToPdf(lambda data: self._on_pdf_ready(data))
         from PyQt6.QtPrintSupport import QPrintDialog, QPrinter
         printer = QPrinter(QPrinter.PrinterMode.HighResolution)
         print_dialog = QPrintDialog(printer, self)
@@ -139,6 +158,19 @@ class PrintPreviewDialog(QDialog):
     def _on_pdf_ready(self, data):
         # This can be used to auto-save a copy if needed
         pass
+
+    def _open_in_browser(self):
+        try:
+            from PyQt6.QtGui import QDesktopServices
+            from tempfile import NamedTemporaryFile
+
+            with NamedTemporaryFile(delete=False, suffix=".html", mode="w", encoding="utf-8") as f:
+                f.write(self._html_content or "")
+                path = f.name
+            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+        except Exception as e:
+            logger.error(f"Open-in-browser print fallback failed: {e}", exc_info=True)
+            QMessageBox.critical(self, "Print Error", f"Unable to open browser for printing: {e}")
 
 # Singleton instance for easy access across the app
 print_service_v2 = PrintServiceV2()

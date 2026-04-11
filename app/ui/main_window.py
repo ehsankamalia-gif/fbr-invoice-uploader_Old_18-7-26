@@ -165,6 +165,10 @@ class App(ctk.CTk):
         # Initialize Auto-Git Sync if enabled
         self.update_auto_sync_status()
 
+        self._settings_subscription_token = settings_service.subscribe(self._on_settings_event)
+        self._active_fbr_settings_snapshot = settings_service.get_active_settings()
+        self._last_settings_revision = settings_service.get_revision()
+
     def update_auto_sync_status(self):
         """Starts or stops the auto-sync manager based on current settings."""
         config = settings_service.get_app_config()
@@ -182,6 +186,11 @@ class App(ctk.CTk):
     def on_closing(self):
         """Clean up resources before closing"""
         try:
+            if getattr(self, "_settings_subscription_token", None):
+                settings_service.unsubscribe(self._settings_subscription_token)
+        except Exception:
+            pass
+        try:
             auto_git_manager.stop()
         except Exception:
             pass
@@ -194,6 +203,60 @@ class App(ctk.CTk):
         except Exception as e:
             print(f"Error stopping sync service: {e}")
         self.destroy()
+
+    def _on_settings_event(self, event: dict):
+        if not self.winfo_exists():
+            return
+        self.after(0, lambda: self._apply_settings_event(event))
+
+    def _apply_settings_event(self, event: dict):
+        try:
+            event_type = event.get("type")
+            if event_type not in ("fbr_settings_saved", "fbr_active_environment_changed"):
+                return
+            
+            revision = int(event.get("revision") or 0)
+            last_rev = int(getattr(self, "_last_settings_revision", 0) or 0)
+            if revision and revision <= last_rev:
+                logger.info(f"Ignoring stale FBR settings event: type={event_type} revision={revision} last={last_rev}")
+                return
+            if revision:
+                self._last_settings_revision = revision
+
+            new_active_settings = settings_service.get_active_settings()
+            old_active_settings = getattr(self, "_active_fbr_settings_snapshot", {}) or {}
+            changed_keys = [
+                k for k in new_active_settings.keys()
+                if old_active_settings.get(k) != new_active_settings.get(k)
+            ]
+
+            self._active_fbr_settings_snapshot = dict(new_active_settings)
+
+            if hasattr(self, "update_env_badge"):
+                self.update_env_badge()
+
+            self._sync_invoice_form_with_fbr_settings(old_active_settings, new_active_settings, changed_keys)
+            logger.info(f"FBR settings event applied: type={event_type} revision={revision} changed={changed_keys}")
+        except Exception as e:
+            logger.error(f"Failed to apply settings event: {e}", exc_info=True)
+
+    def _sync_invoice_form_with_fbr_settings(self, before: dict, after: dict, changed_keys: list[str]):
+        if not hasattr(self, "inv_num_var"):
+            return
+
+        try:
+            current_inv = (self.inv_num_var.get() or "").strip()
+            from app.services.settings_service import should_regenerate_invoice_number
+            if should_regenerate_invoice_number(current_inv, before.get("usin") or "", changed_keys):
+                self.generate_invoice_number()
+
+            if "tax_rate" in changed_keys and getattr(self, "current_price_obj", None) is None:
+                try:
+                    self.calculate_totals()
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.error(f"Invoice form sync failed: {e}", exc_info=True)
 
     def on_browser_data_captured(self, chassis):
         """Called when data is captured in the background browser."""

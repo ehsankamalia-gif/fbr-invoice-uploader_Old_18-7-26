@@ -24,7 +24,10 @@ from app.db.models import (
     SMSCampaign,
     SMSQueue,
     SMSConfiguration,
-    AuditLog
+    AuditLog,
+    ReportTemplate,
+    ReportSchedule,
+    ReportRun
 )
 import logging
 
@@ -298,6 +301,7 @@ def run_migrations():
                 (5, "Add Gateway Credentials to SMS and WhatsApp configurations", _migration_v5_add_gateway_credentials),
                 (6, "Add secret_key and business_name to fbr_configurations", _migration_v6_add_fbr_fields),
                 (7, "Add unique constraint to sms_campaigns.name", _migration_v7_add_sms_campaign_unique_name),
+                (8, "Add reporting templates/schedules/runs tables", _migration_v8_add_reporting_tables),
             ]
 
             for version, description, func in migrations:
@@ -482,6 +486,37 @@ def _migration_v7_add_sms_campaign_unique_name(conn) -> bool:
         return True
     except Exception as e:
         logger.error(f"Migration v7 failed: {e}", exc_info=True)
+        return False
+
+
+def _migration_v8_add_reporting_tables(conn) -> bool:
+    try:
+        is_sqlite = "sqlite" in str(engine.url)
+        tables = [
+            ("report_templates", ReportTemplate.__table__),
+            ("report_schedules", ReportSchedule.__table__),
+            ("report_runs", ReportRun.__table__),
+        ]
+
+        for table_name, table in tables:
+            try:
+                if is_sqlite:
+                    result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name=:t"), {"t": table_name}).fetchone()
+                else:
+                    result = conn.execute(text("SHOW TABLES LIKE :t"), {"t": table_name}).fetchone()
+            except Exception:
+                result = None
+
+            if not result:
+                table.create(bind=conn)
+                try:
+                    conn.commit()
+                except Exception:
+                    pass
+
+        return True
+    except Exception as e:
+        logger.error(f"Migration v8 failed: {e}", exc_info=True)
         return False
 
 def get_db():

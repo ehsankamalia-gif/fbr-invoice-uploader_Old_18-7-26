@@ -5,13 +5,23 @@ from pathlib import Path
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from app.db.session import check_connection, init_db
+from reporting.server import start_reporting_server
 
 def main() -> None:
     # --- Fix for QWebEngine GPU Crash on some Windows machines ---
     # Force software rendering if needed
     os.environ["QT_QUICK_BACKEND"] = "software"
     os.environ["QTWEBENGINE_DISABLE_GPU"] = "1"
-    os.environ["QT_ANGLE_PLATFORM"] = "d3d9" # Sometimes d3d9 works better than d3d11 when gpu is failing
+    os.environ["QT_OPENGL"] = "software"
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
+        "--ignore-gpu-blocklist "
+        "--disable-gpu "
+        "--disable-gpu-compositing "
+        "--disable-d3d11 "
+        "--disable-features=VizDisplayCompositor "
+        "--log-level=3 "
+        "--no-sandbox"
+    )
     
     base_dir = Path(__file__).resolve().parent.parent
     if str(base_dir) not in sys.path:
@@ -27,15 +37,15 @@ def main() -> None:
         settings_service.initialize_if_connected()
     except Exception as e:
         print(f"Database initialization failed: {e}")
+    
+    start_reporting_server()
 
     # NOW import MainWindow
     from app.qt_ui.main_window import MainWindow
 
     # Add Chromium flags to further ensure stability
     sys_args = sys.argv
-    sys_args.append("--disable-gpu")
     sys_args.append("--no-sandbox")
-    sys_args.append("--disable-software-rasterizer")
     
     app = QApplication(sys_args)
 

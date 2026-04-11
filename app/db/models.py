@@ -419,3 +419,49 @@ class AppConfiguration(Base):
     
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
 
+
+class ReportTemplate(Base):
+    __tablename__ = "report_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(120), nullable=False, unique=True)
+    description = Column(String(500), nullable=True)
+    definition = Column(JSON, nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_by_user_id = Column(Integer, nullable=True)
+    created_by_role = Column(String(20), default="admin")
+    created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
+    updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow, index=True)
+
+
+class ReportSchedule(Base):
+    __tablename__ = "report_schedules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    template_id = Column(Integer, ForeignKey("report_templates.id"), nullable=False, index=True)
+    enabled = Column(Boolean, default=True, index=True)
+    interval_minutes = Column(Integer, default=60)
+    export_format = Column(String(10), default="pdf")
+    recipients = Column(JSON, nullable=True)
+    last_run_at = Column(DateTime, nullable=True, index=True)
+    created_by_user_id = Column(Integer, nullable=True)
+    created_by_role = Column(String(20), default="admin")
+    created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
+    updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow, index=True)
+
+    template = relationship("ReportTemplate")
+
+
+class ReportRun(Base):
+    __tablename__ = "report_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    schedule_id = Column(Integer, ForeignKey("report_schedules.id"), nullable=False, index=True)
+    status = Column(String(20), default="STARTED", index=True)
+    started_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
+    finished_at = Column(DateTime, nullable=True, index=True)
+    file_path = Column(String(500), nullable=True)
+    error_message = Column(String(1000), nullable=True)
+
+    schedule = relationship("ReportSchedule")
+

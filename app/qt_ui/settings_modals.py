@@ -218,8 +218,7 @@ class FBRSecurityDialog(BaseSettingsDialog):
 
     def _load_data(self):
         """Initial load of data into the dialog."""
-        # Get current global environment setting (SANDBOX or PRODUCTION)
-        current_env = os.getenv("FBR_ENV", "SANDBOX")
+        current_env = settings_service.get_active_environment()
         self.env_combo.setCurrentText(current_env)
         self._load_env_settings(current_env)
 
