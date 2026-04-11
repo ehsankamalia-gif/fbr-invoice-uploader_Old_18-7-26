@@ -3945,6 +3945,7 @@ class MainWindow(QMainWindow):
             QTableView::item {
                 padding: 12px;
                 border-bottom: 1px solid #f1f1f1;
+                border-right: 1px solid #f1f1f1;
             }
             QTableView::item:hover {
                 background-color: #f1f8ff;
@@ -3956,7 +3957,8 @@ class MainWindow(QMainWindow):
                 font-weight: bold; 
                 text-transform: uppercase; 
                 font-size: 11px; 
-                border: none; 
+                border: none;
+                border-right: 1px solid #e9ecef;
                 border-bottom: 2px solid #e9ecef; 
             }
         """)
@@ -4406,13 +4408,25 @@ class MainWindow(QMainWindow):
                 value = f"%{search}%"
                 query = query.filter(ProductModel.model_name.ilike(value))
 
-            rows = query.order_by(ProductModel.model_name).all()
+            rows = query.order_by(ProductModel.model_name, Price.id).all()
 
             for p in rows:
+                color = ""
+                opt = getattr(p, "optional_features", None)
+                if opt and isinstance(opt, dict):
+                    raw = opt.get("colors") or opt.get("color") or ""
+                    raw_str = str(raw or "")
+                    parts: List[str] = []
+                    for part in raw_str.split(","):
+                        value = re.sub(r"[^A-Za-z]", "", (part or "")).upper()
+                        if value and value not in parts:
+                            parts.append(value)
+                    color = ", ".join(parts) if parts else ""
                 data.append(
                     PriceRow(
                         id=p.id,
                         model=p.product_model.model_name,
+                        color=color,
                         base_price=p.base_price,
                         tax=p.tax_amount,
                         levy=p.levy_amount,
@@ -4516,26 +4530,85 @@ class MainWindow(QMainWindow):
                     model_combo.setEnabled(False) # Don't change model on edit
             form_grid.addWidget(model_combo, 0, 1)
 
+            # Color
+            form_grid.addWidget(QLabel("Color:"), 1, 0)
+            color_input = QLineEdit(row_data.color if row_data else "")
+            form_grid.addWidget(color_input, 1, 1)
+
+            color_error = QLabel("")
+            color_error.setStyleSheet("color: #e74c3c; font-weight: normal;")
+            form_grid.addWidget(color_error, 2, 1)
+
+            def set_color_error(message: str) -> None:
+                color_error.setText(message or "")
+                if message:
+                    color_input.setStyleSheet("border: 1px solid #e74c3c; border-radius: 4px; padding: 8px;")
+                else:
+                    color_input.setStyleSheet("")
+
+            def _sanitize_color_text(raw: str) -> tuple[str, bool, bool]:
+                raw_str = str(raw or "")
+                ends_with_comma = raw_str.rstrip().endswith(",")
+                filtered = re.sub(r"[^A-Za-z,\\s]", "", raw_str)
+                had_invalid = filtered != raw_str
+                uppered = "".join((ch.upper() if ch.isalpha() else ch) for ch in filtered)
+                collapsed = re.sub(r"\\s+", "", uppered)
+                collapsed = re.sub(r",+", ",", collapsed)
+                collapsed = collapsed.lstrip(",")
+                if ends_with_comma and collapsed and not collapsed.endswith(","):
+                    collapsed = f"{collapsed},"
+                is_typing_partial = collapsed.endswith(",")
+                return collapsed, had_invalid, is_typing_partial
+
+            def parse_colors(raw: str) -> tuple[List[str], bool]:
+                normalized, had_invalid, _ = _sanitize_color_text(raw)
+                colors: List[str] = []
+                for part in normalized.split(","):
+                    value = (part or "").strip()
+                    if not value:
+                        continue
+                    if not re.fullmatch(r"[A-Z]+", value):
+                        had_invalid = True
+                        continue
+                    if value not in colors:
+                        colors.append(value)
+                return colors, had_invalid
+
+            def normalize_color_entry() -> None:
+                raw = color_input.text() or ""
+                normalized, had_invalid, is_typing_partial = _sanitize_color_text(raw)
+                if normalized != raw:
+                    color_input.blockSignals(True)
+                    color_input.setText(normalized)
+                    color_input.blockSignals(False)
+                if had_invalid:
+                    set_color_error("Use comma-separated colors with letters A-Z only (e.g., RED,BLACK,BLUE). Invalid characters were removed.")
+                else:
+                    set_color_error("")
+
+            color_input.textChanged.connect(normalize_color_entry)
+            normalize_color_entry()
+
             # Base Price
-            form_grid.addWidget(QLabel("Base Price:"), 1, 0)
+            form_grid.addWidget(QLabel("Base Price:"), 3, 0)
             base_input = QLineEdit(str(row_data.base_price) if row_data else "0")
-            form_grid.addWidget(base_input, 1, 1)
+            form_grid.addWidget(base_input, 3, 1)
 
             # Sales Tax
-            form_grid.addWidget(QLabel("Sales Tax:"), 2, 0)
+            form_grid.addWidget(QLabel("Sales Tax:"), 4, 0)
             tax_input = QLineEdit(str(row_data.tax) if row_data else "0")
-            form_grid.addWidget(tax_input, 2, 1)
+            form_grid.addWidget(tax_input, 4, 1)
 
             # Further Tax
-            form_grid.addWidget(QLabel("Further Tax/Levy:"), 3, 0)
+            form_grid.addWidget(QLabel("Further Tax/Levy:"), 5, 0)
             levy_input = QLineEdit(str(row_data.levy) if row_data else "0")
-            form_grid.addWidget(levy_input, 3, 1)
+            form_grid.addWidget(levy_input, 5, 1)
 
             # Total Price (Auto calculated)
-            form_grid.addWidget(QLabel("Total Price:"), 4, 0)
+            form_grid.addWidget(QLabel("Total Price:"), 6, 0)
             total_lbl = QLabel(f"Rs. {row_data.total:,.2f}" if row_data else "Rs. 0.00")
             total_lbl.setStyleSheet("color: #27ae60; font-size: 16px;")
-            form_grid.addWidget(total_lbl, 4, 1)
+            form_grid.addWidget(total_lbl, 6, 1)
 
             def update_total():
                 try:
@@ -4560,16 +4633,40 @@ class MainWindow(QMainWindow):
             layout.addWidget(btn_box)
 
             if dialog.exec() == QDialog.DialogCode.Accepted:
+                colors, _ = parse_colors(color_input.text() or "")
+                if not colors:
+                    QMessageBox.warning(dialog, "Validation Error", "Color is required. Enter one or more colors separated by commas (e.g., RED,BLACK,BLUE).")
+                    return
+                colors_str = ",".join(colors)
+
                 b = float(base_input.text() or 0)
                 t = float(tax_input.text() or 0)
                 l = float(levy_input.text() or 0)
                 model_id = model_combo.currentData()
                 
                 # If editing, expire old price and create new one (Audit trail)
+                now = dt.datetime.utcnow()
                 if row_data:
                     old_price = db.query(Price).filter(Price.id == row_data.id).first()
                     if old_price:
-                        old_price.expiration_date = dt.datetime.utcnow()
+                        old_price.expiration_date = now
+
+                active_prices = db.query(Price).filter(
+                    Price.product_model_id == model_id,
+                    Price.expiration_date.is_(None),
+                ).all()
+                for ap in active_prices:
+                    opt = getattr(ap, "optional_features", None)
+                    ap_colors: List[str] = []
+                    if opt and isinstance(opt, dict):
+                        raw = opt.get("colors") or opt.get("color") or ""
+                        raw_str = str(raw or "")
+                        for part in raw_str.split(","):
+                            value = re.sub(r"[^A-Za-z]", "", (part or "")).upper()
+                            if value and value not in ap_colors:
+                                ap_colors.append(value)
+                    if any(c in colors for c in ap_colors):
+                        ap.expiration_date = now
                 
                 new_price = Price(
                     product_model_id=model_id,
@@ -4577,7 +4674,8 @@ class MainWindow(QMainWindow):
                     tax_amount=t,
                     levy_amount=l,
                     total_price=b + t + l,
-                    effective_date=dt.datetime.utcnow()
+                    optional_features={"color": colors_str, "colors": colors_str},
+                    effective_date=now
                 )
                 db.add(new_price)
                 db.commit()
@@ -8015,6 +8113,7 @@ class PriceRow:
         self,
         id: int,
         model: str,
+        color: str,
         base_price: float,
         tax: float,
         levy: float,
@@ -8023,6 +8122,7 @@ class PriceRow:
     ) -> None:
         self.id = id
         self.model = model
+        self.color = color
         self.base_price = base_price
         self.tax = tax
         self.levy = levy
@@ -8031,7 +8131,7 @@ class PriceRow:
 
 
 class PricesTableModel(QAbstractTableModel):
-    headers = ["Model Name", "Base Price", "Sales Tax", "Further Tax", "Total Price", "Effective Date"]
+    headers = ["Model Name", "Color", "Base Price", "Sales Tax", "Further Tax", "Total Price", "Effective Date"]
 
     def __init__(self) -> None:
         super().__init__()
@@ -8053,18 +8153,20 @@ class PricesTableModel(QAbstractTableModel):
             if col == 0:
                 return row.model
             if col == 1:
-                return f"{row.base_price:,.2f}"
+                return row.color
             if col == 2:
-                return f"{row.tax:,.2f}"
+                return f"{row.base_price:,.2f}"
             if col == 3:
-                return f"{row.levy:,.2f}"
+                return f"{row.tax:,.2f}"
             if col == 4:
-                return f"{row.total:,.2f}"
+                return f"{row.levy:,.2f}"
             if col == 5:
+                return f"{row.total:,.2f}"
+            if col == 6:
                 return row.effective_date.strftime("%Y-%m-%d") if row.effective_date else "N/A"
         
         if role == Qt.ItemDataRole.TextAlignmentRole:
-            if col > 0:
+            if col > 1:
                 return Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
             return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
             

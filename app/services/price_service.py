@@ -5,6 +5,7 @@ from app.db.session import SessionLocal
 from datetime import datetime
 import json
 import logging
+import re
 from typing import List, Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -81,12 +82,17 @@ class PriceService:
         prices = self.get_active_prices_for_model(model_name, db)
         if not prices:
             return None
-            
+
+        target = re.sub(r"[^A-Za-z]", "", (color or "")).lower()
+        if not target:
+            return prices[0]
+
         # 1. Try to find exact match where color is in the price's color list
         for p in prices:
             if p.optional_features and isinstance(p.optional_features, dict):
-                colors_str = p.optional_features.get("colors", "")
-                if color and color.lower() in [c.strip().lower() for c in colors_str.split(",")]:
+                colors_str = p.optional_features.get("colors") or p.optional_features.get("color") or ""
+                candidates = [re.sub(r"[^A-Za-z]", "", c.strip()).lower() for c in str(colors_str).split(",")]
+                if target in [c for c in candidates if c]:
                     return p
         
         # 2. If no color-specific match, return the first available price (fallback)
@@ -169,12 +175,39 @@ class PriceService:
                 db.add(product_model)
                 db.flush()
 
-            # 2. Expire ALL current active prices
             now = datetime.utcnow()
-            db.query(Price).filter(
+            # 2. Expire current active prices for the same model+color (if provided),
+            #    otherwise expire all active prices for the model (legacy behavior).
+            target_colors: List[str] = []
+            if optional_features and isinstance(optional_features, dict):
+                raw = optional_features.get("colors") or optional_features.get("color") or ""
+                raw_str = str(raw or "")
+                for part in raw_str.split(","):
+                    value = re.sub(r"[^A-Za-z]", "", part or "").upper()
+                    if value and value not in target_colors:
+                        target_colors.append(value)
+
+            active_prices = db.query(Price).filter(
                 Price.product_model_id == product_model.id,
-                Price.expiration_date.is_(None)
-            ).update({Price.expiration_date: now}, synchronize_session=False)
+                Price.expiration_date.is_(None),
+            ).all()
+
+            if target_colors:
+                for ap in active_prices:
+                    opt = getattr(ap, "optional_features", None)
+                    ap_colors: List[str] = []
+                    if opt and isinstance(opt, dict):
+                        raw = opt.get("colors") or opt.get("color") or ""
+                        raw_str = str(raw or "")
+                        for part in raw_str.split(","):
+                            value = re.sub(r"[^A-Za-z]", "", part or "").upper()
+                            if value and value not in ap_colors:
+                                ap_colors.append(value)
+                    if any(c in target_colors for c in ap_colors):
+                        ap.expiration_date = now
+            else:
+                for ap in active_prices:
+                    ap.expiration_date = now
             
             # 3. Create new price
             new_price = Price(
