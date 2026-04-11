@@ -86,7 +86,7 @@ class FBRClient:
                 url, 
                 json=payload, 
                 headers=headers, 
-                timeout=10,
+                timeout=(10, 60),
                 verify=is_production # FBR uses self-signed certs in SANDBOX but valid certs in PRODUCTION
             )
             

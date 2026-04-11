@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
 from app.db.models import Invoice
 from app.services.invoice_service import invoice_service
+from app.services.settings_service import settings_service
 from app.core.logger import logger
 
 class SyncService:
@@ -87,19 +88,29 @@ class SyncService:
 
     def _check_connectivity(self):
         try:
-            # Check multiple endpoints to be sure
-            endpoints = [
+            active = settings_service.get_active_settings()
+            base_url = (active.get("base_url") or "").strip()
+            env = (active.get("env") or "SANDBOX").upper()
+            is_production = env == "PRODUCTION"
+
+            endpoints = []
+            if base_url:
+                if base_url.endswith("/PostData"):
+                    endpoints.append(base_url)
+                else:
+                    endpoints.append(f"{base_url.rstrip('/')}/PostData")
+            endpoints.extend([
                 "https://www.google.com",
                 "https://www.cloudflare.com",
-                "https://fbr.gov.pk" # Attempt FBR too if possible, though it might block pings
-            ]
+            ])
             
             connected = False
             for url in endpoints:
                 try:
-                    requests.get(url, timeout=5)
-                    connected = True
-                    break # One success is enough
+                    resp = requests.get(url, timeout=5, verify=is_production)
+                    if resp.status_code in (200, 201, 202, 400, 401, 403, 404):
+                        connected = True
+                        break
                 except requests.RequestException:
                     continue
             

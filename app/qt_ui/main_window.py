@@ -423,6 +423,12 @@ class MainWindow(QMainWindow):
         self._last_settings_revision = settings_service.get_revision()
 
         self._update_app_branding(self._active_fbr_settings_snapshot.get("business_name", "Ehsan Trader"))
+        try:
+            from app.services.sync_service import sync_service
+            self._sync_service = sync_service
+            self._sync_service.start()
+        except Exception as e:
+            logger.error(f"Failed to start background sync service: {e}", exc_info=True)
 
     def _on_settings_event(self, event: dict) -> None:
         QTimer.singleShot(0, lambda e=event: self._apply_settings_event(e))
@@ -7636,6 +7642,11 @@ class MainWindow(QMainWindow):
             # Stop SMS scheduler
             from app.services.sms_service import sms_service
             sms_service.stop_scheduler()
+            try:
+                if getattr(self, "_sync_service", None):
+                    self._sync_service.stop()
+            except Exception as e:
+                logger.error(f"Failed to stop background sync service: {e}", exc_info=True)
                 
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")

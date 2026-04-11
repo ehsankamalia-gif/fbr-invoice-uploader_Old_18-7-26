@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
 from app.db.models import Invoice, ReportTemplate, ReportSchedule, ReportRun, AuditLog
+from app.services.invoice_service import invoice_service
 
 
 def get_db() -> Session:
@@ -82,6 +83,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_retry_lock = threading.Lock()
+_last_retry_at: Dict[str, float] = {}
 
 
 DEFAULT_TEMPLATE = {
@@ -196,6 +200,7 @@ def _render_dashboard_html() -> str:
       <title>Reporting Portal</title>
       <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
       <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist@2.32.0/plotly.min.js"></script>
+      <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     </head>
     <body class="bg-light">
       <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
@@ -294,8 +299,16 @@ def _render_dashboard_html() -> str:
         function renderTable(title, rows) {
           const col = document.createElement('div');
           col.className = 'col-12';
-          const head = `<thead><tr><th>Invoice</th><th>Date</th><th>POS</th><th>Mode</th><th>Total</th><th>Status</th></tr></thead>`;
-          const body = rows.map(r => `<tr><td>${r.invoice_number}</td><td>${r.datetime}</td><td>${r.pos_id}</td><td>${r.payment_mode}</td><td>${r.total_amount.toFixed(2)}</td><td>${r.sync_status}</td></tr>`).join('');
+          const head = `<thead><tr><th>Invoice</th><th>Date</th><th>POS</th><th>Mode</th><th>Total</th><th>Status</th><th style="width: 110px;">Action</th></tr></thead>`;
+          const body = rows.map(r => {
+            const inv = r.invoice_number;
+            const statusTd = `<td data-status-for="${inv}">${r.sync_status}</td>`;
+            const canRetry = (r.sync_status || '').toUpperCase() === 'PENDING';
+            const btn = canRetry
+              ? `<button type="button" class="btn btn-sm btn-outline-primary retry-btn" data-invoice="${inv}">Retry</button>`
+              : `<span class="text-muted small">—</span>`;
+            return `<tr data-invoice-row="${inv}"><td>${inv}</td><td>${r.datetime}</td><td>${r.pos_id}</td><td>${r.payment_mode}</td><td>${r.total_amount.toFixed(2)}</td>${statusTd}<td>${btn}</td></tr>`;
+          }).join('');
           col.innerHTML = `<div class="card"><div class="card-header fw-bold">${title}</div><div class="card-body p-0"><div class="table-responsive"><table class="table table-sm mb-0">${head}<tbody>${body}</tbody></table></div></div></div>`;
           return col;
         }
@@ -338,6 +351,71 @@ def _render_dashboard_html() -> str:
             if (widget.type === 'table') w.appendChild(renderTable(widget.title, widget.value));
           });
         }
+        function toast(message, kind) {
+          const id = 'toast_' + Math.random().toString(36).slice(2);
+          const bg = kind === 'success' ? 'text-bg-success' : (kind === 'error' ? 'text-bg-danger' : 'text-bg-secondary');
+          const el = document.createElement('div');
+          el.innerHTML = `
+            <div class="toast-container position-fixed bottom-0 end-0 p-3">
+              <div id="${id}" class="toast align-items-center ${bg} border-0" role="alert" aria-live="assertive" aria-atomic="true">
+                <div class="d-flex">
+                  <div class="toast-body">${message}</div>
+                  <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                </div>
+              </div>
+            </div>`;
+          document.body.appendChild(el);
+          const toastEl = document.getElementById(id);
+          const t = new bootstrap.Toast(toastEl, { delay: 4500 });
+          t.show();
+          toastEl.addEventListener('hidden.bs.toast', () => el.remove());
+        }
+        async function retryInvoice(invoiceNumber, buttonEl) {
+          if (!invoiceNumber || !buttonEl) return;
+          const now = Date.now();
+          const last = parseInt(buttonEl.getAttribute('data-last-click') || '0', 10);
+          if (now - last < 15000) {
+            toast('Please wait before retrying again.', 'info');
+            return;
+          }
+          buttonEl.setAttribute('data-last-click', String(now));
+          const originalHtml = buttonEl.innerHTML;
+          buttonEl.disabled = true;
+          buttonEl.innerHTML = `<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Retrying`;
+          const statusCell = document.querySelector(`td[data-status-for="${invoiceNumber}"]`);
+          if (statusCell) statusCell.textContent = 'RETRYING';
+          try {
+            const res = await fetch(`/api/invoices/${encodeURIComponent(invoiceNumber)}/retry`, { method: 'POST', headers: headers() });
+            const data = await res.json();
+            if (!res.ok) {
+              const msg = data && (data.detail || data.message) ? (data.detail || data.message) : 'Retry failed.';
+              toast(msg, 'error');
+              if (statusCell) statusCell.textContent = 'PENDING';
+              buttonEl.disabled = false;
+              buttonEl.innerHTML = originalHtml;
+              return;
+            }
+            const newStatus = (data && data.sync_status) ? data.sync_status : 'PENDING';
+            if (statusCell) statusCell.textContent = newStatus;
+            if (newStatus.toUpperCase() === 'SYNCED') {
+              toast(`Invoice ${invoiceNumber} uploaded successfully.`, 'success');
+              buttonEl.outerHTML = `<span class="text-muted small">—</span>`;
+            } else if (newStatus.toUpperCase() === 'FAILED') {
+              toast(data && data.message ? data.message : `Invoice ${invoiceNumber} failed.`, 'error');
+              buttonEl.disabled = false;
+              buttonEl.innerHTML = originalHtml;
+            } else {
+              toast(data && data.message ? data.message : `Invoice ${invoiceNumber} is still pending.`, 'info');
+              buttonEl.disabled = false;
+              buttonEl.innerHTML = originalHtml;
+            }
+          } catch (e) {
+            toast(`Network error: ${e}`, 'error');
+            if (statusCell) statusCell.textContent = 'PENDING';
+            buttonEl.disabled = false;
+            buttonEl.innerHTML = originalHtml;
+          }
+        }
         function setAuto(on) {
           state.auto = on;
           const btn = document.getElementById('autoBtn');
@@ -365,6 +443,14 @@ def _render_dashboard_html() -> str:
           document.getElementById('exportXlsx').addEventListener('click', () => exportFmt('xlsx'));
           document.getElementById('exportPdf').addEventListener('click', () => exportFmt('pdf'));
           document.getElementById('exportPptx').addEventListener('click', () => exportFmt('pptx'));
+          document.addEventListener('click', (ev) => {
+            const t = ev.target;
+            if (!t || !t.classList) return;
+            if (t.classList.contains('retry-btn')) {
+              ev.preventDefault();
+              retryInvoice(t.getAttribute('data-invoice'), t);
+            }
+          });
           setAuto(true);
           await loadDashboard();
         }
@@ -977,6 +1063,80 @@ def api_dashboard(
         metric = w.get("metric")
         widgets.append({"type": w.get("type"), "metric": metric, "title": w.get("title"), "value": metrics.get(metric)})
     return JSONResponse({"template": {"id": tmpl.id, "name": tmpl.name}, "widgets": widgets})
+
+
+@app.post("/api/invoices/{invoice_number}/retry")
+def retry_invoice_upload(
+    invoice_number: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
+    x_user_role: Optional[str] = Header(default=None, alias="X-User-Role"),
+) -> JSONResponse:
+    role = _get_role(x_user_role)
+    _require_auth(x_api_key, role)
+    inv_num = (invoice_number or "").strip()
+    if not inv_num:
+        raise HTTPException(status_code=400, detail="invoice_number required")
+
+    with _retry_lock:
+        now = time.time()
+        last = _last_retry_at.get(inv_num, 0.0)
+        if now - last < 30.0:
+            raise HTTPException(status_code=429, detail="Too many retry attempts. Please wait and try again.")
+        _last_retry_at[inv_num] = now
+
+    inv = db.query(Invoice).filter(Invoice.invoice_number == inv_num).first()
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if (inv.sync_status or "").upper() != "PENDING":
+        return JSONResponse(
+            {
+                "invoice_number": inv.invoice_number,
+                "sync_status": inv.sync_status,
+                "message": "Retry not available for this status.",
+            }
+        )
+
+    inv.fbr_response_message = "Manual retry requested."
+    db.add(inv)
+    db.commit()
+    db.refresh(inv)
+
+    try:
+        invoice_service.sync_invoice(db, inv)
+        db.commit()
+        db.refresh(inv)
+    except Exception as e:
+        db.rollback()
+        inv = db.query(Invoice).filter(Invoice.invoice_number == inv_num).first()
+        status = inv.sync_status if inv else "PENDING"
+        msg = str(e)
+        return JSONResponse(
+            {
+                "invoice_number": inv_num,
+                "sync_status": status,
+                "message": msg,
+            },
+            status_code=200,
+        )
+
+    _audit(
+        db,
+        action="RETRY_SYNC",
+        resource_type="INVOICE",
+        resource_id=int(inv.id),
+        details={"invoice_number": inv.invoice_number, "sync_status": inv.sync_status, "triggered_by": role},
+        request=request,
+    )
+
+    return JSONResponse(
+        {
+            "invoice_number": inv.invoice_number,
+            "sync_status": inv.sync_status,
+            "message": inv.fbr_response_message or "",
+        }
+    )
 
 
 @app.get("/export/{fmt}")

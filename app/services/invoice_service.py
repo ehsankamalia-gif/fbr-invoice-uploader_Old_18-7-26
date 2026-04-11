@@ -342,7 +342,7 @@ class InvoiceService:
             logger.warning(f"Network error syncing {invoice.invoice_number}: {re}")
             invoice.sync_status = "PENDING"
             invoice.status_updated_at = datetime.utcnow()
-            invoice.fbr_response_message = "Network Error - Queued for retry"
+            invoice.fbr_response_message = f"Network Error - Queued for retry: {str(re)[:300]}"
             db.add(invoice)
 
         except RetryError as re:
@@ -355,7 +355,7 @@ class InvoiceService:
                     logger.warning(f"Max retries exhausted for {invoice.invoice_number} due to Network Error: {original_exception}")
                     invoice.sync_status = "PENDING"
                     invoice.status_updated_at = datetime.utcnow()
-                    invoice.fbr_response_message = "Network Error (Max Retries) - Queued for retry"
+                    invoice.fbr_response_message = f"Network Error (Max Retries) - Queued for retry: {str(original_exception)[:300]}"
                 else:
                     logger.error(f"Max retries exhausted for {invoice.invoice_number} due to Logic Error: {original_exception}")
                     invoice.sync_status = "FAILED"
