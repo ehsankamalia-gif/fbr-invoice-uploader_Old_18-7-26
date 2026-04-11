@@ -4270,7 +4270,7 @@ class MainWindow(QMainWindow):
                 background-color: white; 
                 border: 1px solid #e0e0e0; 
                 border-radius: 12px; 
-                gridline-color: #f1f1f1; 
+                gridline-color: #e0e0e0; 
                 alternate-background-color: #fafafa;
                 selection-background-color: #e3f2fd;
                 selection-color: #1976d2;
@@ -4278,7 +4278,8 @@ class MainWindow(QMainWindow):
             }
             QTableView::item {
                 padding: 12px;
-                border-bottom: 1px solid #f1f1f1;
+                border-bottom: 1px solid #e9ecef;
+                border-right: 1px solid #e9ecef;
             }
             QTableView::item:hover {
                 background-color: #f1f8ff;
@@ -4290,7 +4291,8 @@ class MainWindow(QMainWindow):
                 font-weight: bold; 
                 text-transform: uppercase; 
                 font-size: 11px; 
-                border: none; 
+                border: none;
+                border-right: 1px solid #e9ecef;
                 border-bottom: 2px solid #e9ecef; 
             }
         """)
@@ -4355,12 +4357,14 @@ class MainWindow(QMainWindow):
         self.prices_table_view.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.prices_table_view.setSelectionMode(QTableView.SelectionMode.SingleSelection)
         self.prices_table_view.setAlternatingRowColors(True)
-        self.prices_table_view.setShowGrid(False)
+        self.prices_table_view.setShowGrid(True)
+        self.prices_table_view.setGridStyle(Qt.PenStyle.SolidLine)
         self.prices_table_view.doubleClicked.connect(self._on_price_row_double_clicked)
         
-        # Responsive Columns
-        self.prices_table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        # Resizable Columns
+        self.prices_table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.prices_table_view.horizontalHeader().setStretchLastSection(True)
+        self.prices_table_view.horizontalHeader().setMinimumSectionSize(80)
         self.prices_table_view.verticalHeader().setVisible(False)
         
         table_layout.addWidget(self.prices_table_view)
