@@ -68,6 +68,7 @@ from sqlalchemy.orm import joinedload
 from app.core import config
 from app.core.config import settings
 from app.db.session import SessionLocal, close_all_db_connections
+from app.utils.string_utils import to_uppercase_preserving
 from app.db.models import (
     Motorcycle,
     ProductModel,
@@ -2045,8 +2046,12 @@ class MainWindow(QMainWindow):
         g1_title.setObjectName("groupTitle")
         group1_layout.addWidget(g1_title, 0, 0, 1, 4)
 
+        self.invoice_preserve_info_checkbox = QCheckBox("Preserve invoice and customer information")
+        self.invoice_preserve_info_checkbox.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        group1_layout.addWidget(self.invoice_preserve_info_checkbox, 1, 0, 1, 4)
+
         # Invoice Number
-        group1_layout.addWidget(QLabel("Invoice Number"), 1, 0)
+        group1_layout.addWidget(QLabel("Invoice Number"), 2, 0)
         inv_num_layout = QHBoxLayout()
         inv_num_layout.setSpacing(0)
         self.invoice_number_input = QLineEdit()
@@ -2082,7 +2087,7 @@ class MainWindow(QMainWindow):
         generate_btn.clicked.connect(self._generate_invoice_number)  # type: ignore[arg-type]
         inv_num_layout.addWidget(self.invoice_number_input)
         inv_num_layout.addWidget(generate_btn)
-        group1_layout.addLayout(inv_num_layout, 1, 1)
+        group1_layout.addLayout(inv_num_layout, 2, 1)
 
         # QR Code & FBR Invoice Number Layout
         qr_fbr_layout = QHBoxLayout()
@@ -2114,13 +2119,13 @@ class MainWindow(QMainWindow):
         self.invoice_fbr_number_display.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         qr_fbr_layout.addWidget(self.invoice_fbr_number_display)
         
-        group1_layout.addLayout(qr_fbr_layout, 1, 3)
+        group1_layout.addLayout(qr_fbr_layout, 2, 3)
 
         # CNIC
-        group1_layout.addWidget(QLabel("ID Card (CNIC)"), 2, 0)
+        group1_layout.addWidget(QLabel("ID Card (CNIC)"), 3, 0)
         self.invoice_buyer_cnic_input = QLineEdit()
         self.invoice_buyer_cnic_input.setPlaceholderText("12345-1234567-1")
-        group1_layout.addWidget(self.invoice_buyer_cnic_input, 2, 1)
+        group1_layout.addWidget(self.invoice_buyer_cnic_input, 3, 1)
 
         def format_invoice_cnic_input():
             text = self.invoice_buyer_cnic_input.text()
@@ -2159,13 +2164,13 @@ class MainWindow(QMainWindow):
         self.invoice_buyer_cnic_input.textChanged.connect(format_invoice_cnic_input)
 
         # NTN
-        group1_layout.addWidget(QLabel("NTN (Optional)"), 2, 2)
+        group1_layout.addWidget(QLabel("NTN (Optional)"), 3, 2)
         self.invoice_buyer_ntn_input = QLineEdit()
         self.invoice_buyer_ntn_input.textChanged.connect(self._on_invoice_ntn_changed)
-        group1_layout.addWidget(self.invoice_buyer_ntn_input, 2, 3)
+        group1_layout.addWidget(self.invoice_buyer_ntn_input, 3, 3)
 
         # Buyer Name & Father Name (Side by Side)
-        group1_layout.addWidget(QLabel("Buyer Name"), 3, 0)
+        group1_layout.addWidget(QLabel("Buyer Name"), 4, 0)
         
         buyer_name_layout = QHBoxLayout()
         buyer_name_layout.setSpacing(0)
@@ -2210,11 +2215,11 @@ class MainWindow(QMainWindow):
         search_dealer_btn.clicked.connect(self._open_dealer_search_dialog)
         buyer_name_layout.addWidget(search_dealer_btn)
         
-        group1_layout.addLayout(buyer_name_layout, 3, 1)
+        group1_layout.addLayout(buyer_name_layout, 4, 1)
 
-        group1_layout.addWidget(QLabel("Father Name"), 3, 2)
+        group1_layout.addWidget(QLabel("Father Name"), 4, 2)
         self.invoice_buyer_father_input = QLineEdit()
-        group1_layout.addWidget(self.invoice_buyer_father_input, 3, 3)
+        group1_layout.addWidget(self.invoice_buyer_father_input, 4, 3)
 
         # Allow only alphabetics and spaces for father name
         def format_invoice_father_input():
@@ -2225,10 +2230,10 @@ class MainWindow(QMainWindow):
         self.invoice_buyer_father_input.textChanged.connect(format_invoice_father_input)
 
         # Phone & Address
-        group1_layout.addWidget(QLabel("Cell (Phone)"), 4, 0)
+        group1_layout.addWidget(QLabel("Cell (Phone)"), 5, 0)
         self.invoice_buyer_phone_input = QLineEdit()
         self.invoice_buyer_phone_input.setPlaceholderText("03021234567")
-        group1_layout.addWidget(self.invoice_buyer_phone_input, 4, 1)
+        group1_layout.addWidget(self.invoice_buyer_phone_input, 5, 1)
         
         # Auto-format Phone Number as user types
         def format_invoice_phone_input():
@@ -2242,9 +2247,23 @@ class MainWindow(QMainWindow):
 
         self.invoice_buyer_phone_input.textChanged.connect(format_invoice_phone_input)
 
-        group1_layout.addWidget(QLabel("Address"), 4, 2)
+        group1_layout.addWidget(QLabel("Address"), 5, 2)
         self.invoice_buyer_address_input = QLineEdit()
-        group1_layout.addWidget(self.invoice_buyer_address_input, 4, 3)
+        group1_layout.addWidget(self.invoice_buyer_address_input, 5, 3)
+
+        def uppercase_invoice_address():
+            text = self.invoice_buyer_address_input.text()
+            normalized = to_uppercase_preserving(text)
+            if normalized != text:
+                pos = self.invoice_buyer_address_input.cursorPosition()
+                self.invoice_buyer_address_input.blockSignals(True)
+                self.invoice_buyer_address_input.setText(normalized)
+                self.invoice_buyer_address_input.setCursorPosition(min(pos, len(normalized)))
+                self.invoice_buyer_address_input.blockSignals(False)
+                self._check_invoice_form_completeness()
+
+        self.invoice_buyer_address_input.textChanged.connect(uppercase_invoice_address)
+        self.invoice_buyer_address_input.editingFinished.connect(uppercase_invoice_address)
 
         container_layout.addWidget(group1)
 
@@ -2347,7 +2366,7 @@ class MainWindow(QMainWindow):
         reset_btn = QPushButton("Reset Form")
         reset_btn.setObjectName("resetButton")
         reset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        reset_btn.clicked.connect(self._reset_invoice_form)  # type: ignore[arg-type]
+        reset_btn.clicked.connect(self._on_invoice_reset_clicked)  # type: ignore[arg-type]
         button_layout.addWidget(reset_btn)
 
         self.invoice_submit_btn = QPushButton("Submit to FBR")
@@ -5272,6 +5291,51 @@ class MainWindow(QMainWindow):
         if not chassis:
             self._show_error("Validation Error", "Chassis number is required.")
             return False
+        chassis_upper = chassis.strip().upper()
+        db_check = SessionLocal()
+        try:
+            if invoice_service.is_chassis_uploaded_to_fbr(db_check, chassis_upper):
+                from app.db.models import Invoice, InvoiceItem, Motorcycle
+                inv = (
+                    db_check.query(Invoice)
+                    .join(InvoiceItem)
+                    .join(Motorcycle, InvoiceItem.motorcycle_id == Motorcycle.id)
+                    .filter(Motorcycle.chassis_number == chassis_upper, Invoice.is_fiscalized == True)
+                    .order_by(Invoice.datetime.desc())
+                    .first()
+                )
+                fbr_id = inv.fbr_invoice_number if inv else None
+                detail = f"\n\nFBR Invoice: {fbr_id}" if fbr_id else ""
+                self._show_error(
+                    "Duplicate Chassis Detected",
+                    f"Chassis number {chassis_upper} has already been uploaded to FBR and cannot be submitted again.{detail}",
+                )
+                return False
+
+            from app.db.models import Invoice, InvoiceItem, Motorcycle
+            bike = db_check.query(Motorcycle).filter(Motorcycle.chassis_number == chassis_upper).first()
+            if bike and (bike.status or "").upper() != "IN_STOCK":
+                inv = (
+                    db_check.query(Invoice)
+                    .join(InvoiceItem)
+                    .filter(InvoiceItem.motorcycle_id == bike.id)
+                    .order_by(Invoice.datetime.desc())
+                    .first()
+                )
+                inv_detail = ""
+                if inv:
+                    if inv.fbr_invoice_number:
+                        inv_detail = f"\n\nInvoice: {inv.invoice_number}\nFBR Invoice: {inv.fbr_invoice_number}"
+                    else:
+                        inv_detail = f"\n\nInvoice: {inv.invoice_number}\nStatus: Not uploaded to FBR yet"
+
+                self._show_error(
+                    "Duplicate Chassis Detected",
+                    f"Chassis number {chassis_upper} is already marked as {bike.status} and cannot be submitted again.{inv_detail}",
+                )
+                return False
+        finally:
+            db_check.close()
         engine = self.invoice_engine_input.text().strip()
         if not engine:
             self._show_error("Validation Error", "Engine number is required.")
@@ -5481,8 +5545,7 @@ class MainWindow(QMainWindow):
 
             self._show_success(title, msg)
             
-            self._reset_invoice_form()
-            self._generate_invoice_number()
+            self._clear_invoice_form_after_submission()
             self._update_fbr_submitted_counter()
             
             # Queue SMS if enabled
@@ -5526,6 +5589,8 @@ class MainWindow(QMainWindow):
     def _reset_invoice_form(self) -> None:
         self._is_dealer_selected = False
         self._invoice_current_price = None
+        if hasattr(self, "invoice_preserve_info_checkbox"):
+            self.invoice_preserve_info_checkbox.setChecked(False)
         self.invoice_buyer_cnic_input.clear()
         self.invoice_buyer_ntn_input.clear()
         self.invoice_buyer_name_input.clear()
@@ -5544,6 +5609,36 @@ class MainWindow(QMainWindow):
         self.invoice_total_spin.setValue(0.0)
         self.invoice_fbr_number_display.setText("")
         self._display_invoice_qr(None)
+        self._check_invoice_form_completeness()
+
+    def _clear_invoice_form_after_submission(self) -> None:
+        preserve = False
+        if hasattr(self, "invoice_preserve_info_checkbox"):
+            preserve = self.invoice_preserve_info_checkbox.isChecked()
+        if not preserve:
+            self._reset_invoice_form()
+            self._generate_invoice_number()
+            return
+
+        self._invoice_current_price = None
+        self.invoice_model_combo.setCurrentIndex(0)
+        self.invoice_color_combo.clear()
+        self.invoice_payment_mode_combo.setCurrentIndex(0)
+        self.invoice_chassis_input.clear()
+        self.invoice_engine_input.clear()
+        self.invoice_quantity_spin.setValue(1)
+        self.invoice_amount_spin.setValue(0.0)
+        self.invoice_tax_spin.setValue(0.0)
+        self.invoice_further_tax_spin.setValue(0.0)
+        self.invoice_total_spin.setValue(0.0)
+        self.invoice_fbr_number_display.setText("")
+        self._display_invoice_qr(None)
+        self._generate_invoice_number()
+        self._check_invoice_form_completeness()
+
+    def _on_invoice_reset_clicked(self) -> None:
+        self._reset_invoice_form()
+        self._generate_invoice_number()
 
     def _handle_post_submission_print(self, invoice: Invoice) -> None:
         """Independent print handler that offers printing options without blocking UI."""
