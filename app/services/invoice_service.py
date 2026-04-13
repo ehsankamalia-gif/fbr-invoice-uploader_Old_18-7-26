@@ -7,10 +7,69 @@ from app.api.fbr_client import fbr_client
 from app.core.logger import logger
 from app.services.captured_data_service import captured_data_service
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 import json
 
 class InvoiceService:
+    def _ensure_sold_inventory_for_fiscalized_invoice(self, db: Session, invoice: Invoice, invoice_in: InvoiceCreate) -> None:
+        if not invoice or not invoice.is_fiscalized:
+            return
+
+        for idx, item_in in enumerate(invoice_in.items or []):
+            chassis = (getattr(item_in, "chassis_number", None) or "").strip().upper()
+            if not chassis:
+                continue
+
+            engine_raw = (getattr(item_in, "engine_number", None) or "").strip()
+            engine = engine_raw.upper() if engine_raw else f"UNKNOWN-{chassis}"
+
+            bike = db.query(Motorcycle).filter(Motorcycle.chassis_number == chassis).first()
+            if not bike:
+                model_name = (getattr(item_in, "model_name", None) or "").strip()
+                color = (getattr(item_in, "color", None) or "").strip().upper()
+                if not model_name:
+                    logger.warning(f"AUDIT: Out-of-stock chassis {chassis} submitted, but model_name missing; inventory entry not created.")
+                    continue
+
+                product_model = db.query(ProductModel).filter(ProductModel.model_name == model_name).first()
+                if not product_model:
+                    product_model = ProductModel(model_name=model_name, make="Honda")
+                    db.add(product_model)
+                    db.flush()
+
+                bike = Motorcycle(
+                    chassis_number=chassis,
+                    engine_number=engine,
+                    product_model_id=product_model.id,
+                    year=datetime.now().year,
+                    color=color or None,
+                    cost_price=0.0,
+                    sale_price=0.0,
+                    status="SOLD",
+                    purchase_date=datetime.now(),
+                )
+                db.add(bike)
+                db.flush()
+                logger.info(f"AUDIT: Created SOLD inventory entry for out-of-stock chassis {chassis} after successful FBR submission.")
+            else:
+                prev_status = (bike.status or "").upper()
+                if prev_status != "SOLD":
+                    bike.status = "SOLD"
+                    db.add(bike)
+                    logger.info(f"AUDIT: Updated inventory status for chassis {chassis}: {prev_status} -> SOLD (after successful FBR submission).")
+
+            try:
+                if invoice.items and idx < len(invoice.items):
+                    invoice.items[idx].motorcycle_id = bike.id
+                    db.add(invoice.items[idx])
+            except Exception:
+                pass
+
+            try:
+                captured_data_service.delete_by_chassis(db, chassis)
+            except Exception as cleanup_err:
+                logger.error(f"AUDIT: Failed to delete captured data for chassis {chassis}: {cleanup_err}")
+
     def is_chassis_used_in_posted_invoice(self, db: Session, chassis_number: str) -> bool:
         """
         Check if a chassis number has been used in any posted invoice.
@@ -81,54 +140,18 @@ class InvoiceService:
             total_quantity += item.quantity
             total_amount += line_total
 
-            # Inventory Logic: Check and Update Status
             motorcycle_id = None
             if item.chassis_number:
-                # Find bike by chassis
-                lookup_chassis = item.chassis_number.upper()
+                lookup_chassis = item.chassis_number.upper().strip()
                 bike = db.query(Motorcycle).filter(Motorcycle.chassis_number == lookup_chassis).first()
                 if bike:
-                    if bike.status != "IN_STOCK":
-                        # Check if it was sold in a fiscalized invoice?
-                        # Simplified: If status is not IN_STOCK, error.
-                        raise ValueError(f"Motorcycle Chassis {lookup_chassis} is already {bike.status}")
-                    
-                    # Mark as SOLD
-                    bike.status = "SOLD"
                     motorcycle_id = bike.id
-                    db.add(bike) # Ensure update is tracked
+                    if (bike.status or "").upper() != "IN_STOCK":
+                        logger.info(
+                            f"AUDIT: Chassis {lookup_chassis} is out-of-stock ({bike.status}); proceeding with FBR submission per workflow."
+                        )
                 else:
-                    # Create new motorcycle if details are provided (User Request: Add to inventory as SOLD)
-                    if getattr(item, 'model_name', None) and getattr(item, 'color', None):
-                        product_model = db.query(ProductModel).filter(ProductModel.model_name == item.model_name).first()
-                        if product_model:
-                            # Use 0.0 for prices as per user request (Do not save price in inventory for auto-created bikes)
-                            # Handle empty engine number by making it unique to avoid IntegrityError
-                            engine_num = (item.engine_number or "").strip()
-                            if not engine_num or engine_num.upper() == "UNKNOWN":
-                                engine_num = f"UNKNOWN-{lookup_chassis}"
-                            else:
-                                engine_num = engine_num.upper()
-
-                            new_bike = Motorcycle(
-                                chassis_number=lookup_chassis,
-                                engine_number=engine_num,
-                                product_model_id=product_model.id,
-                                year=datetime.now().year,
-                                color=item.color.upper(),
-                                cost_price=0.0, 
-                                sale_price=0.0,
-                                status="SOLD",
-                                purchase_date=datetime.now()
-                            )
-                            db.add(new_bike)
-                            db.flush() # To get ID
-                            motorcycle_id = new_bike.id
-                            logger.info(f"Created new SOLD motorcycle for chassis {item.chassis_number}")
-                        else:
-                             logger.warning(f"Model {item.model_name} not found. Cannot create motorcycle for chassis {item.chassis_number}.")
-                    else:
-                        logger.warning(f"Chassis {item.chassis_number} not found in Inventory. Missing model/color to create.")
+                    logger.info(f"AUDIT: Chassis {lookup_chassis} not found in inventory; proceeding with FBR submission per workflow.")
 
             db_item = InvoiceItem(
                 item_code=item.item_code,
@@ -217,9 +240,18 @@ class InvoiceService:
             # 3. Attempt Immediate Sync
             logger.info(f"AUDIT: Attempting immediate FBR upload for {invoice_in.invoice_number}...")
             self.sync_invoice(db, db_invoice)
-            
+
             db.commit()
             db.refresh(db_invoice)
+
+            if db_invoice.is_fiscalized:
+                try:
+                    self._ensure_sold_inventory_for_fiscalized_invoice(db, db_invoice, invoice_in)
+                    db.commit()
+                    db.refresh(db_invoice)
+                except Exception as inv_err:
+                    db.rollback()
+                    logger.error(f"AUDIT: Inventory adjustment failed after FBR success for {invoice_in.invoice_number}: {inv_err}", exc_info=True)
             return db_invoice
 
         except Exception as e:

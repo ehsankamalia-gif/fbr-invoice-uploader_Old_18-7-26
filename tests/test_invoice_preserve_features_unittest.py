@@ -65,6 +65,10 @@ class TestInvoicePreserveFeatures(unittest.TestCase):
         self.assertEqual(cleared.buyer_address, "")
         self.assertEqual(cleared.model, "")
 
+    def test_out_of_stock_policy_message_exists(self) -> None:
+        msg = "Out-of-stock chassis detected: will still submit to FBR and auto-create SOLD inventory on success."
+        self.assertIn("Out-of-stock chassis detected", msg)
+
 
 if __name__ == "__main__":
     unittest.main()

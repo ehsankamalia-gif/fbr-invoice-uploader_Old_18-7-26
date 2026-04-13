@@ -5311,29 +5311,10 @@ class MainWindow(QMainWindow):
                     f"Chassis number {chassis_upper} has already been uploaded to FBR and cannot be submitted again.{detail}",
                 )
                 return False
-
-            from app.db.models import Invoice, InvoiceItem, Motorcycle
+            from app.db.models import Motorcycle
             bike = db_check.query(Motorcycle).filter(Motorcycle.chassis_number == chassis_upper).first()
-            if bike and (bike.status or "").upper() != "IN_STOCK":
-                inv = (
-                    db_check.query(Invoice)
-                    .join(InvoiceItem)
-                    .filter(InvoiceItem.motorcycle_id == bike.id)
-                    .order_by(Invoice.datetime.desc())
-                    .first()
-                )
-                inv_detail = ""
-                if inv:
-                    if inv.fbr_invoice_number:
-                        inv_detail = f"\n\nInvoice: {inv.invoice_number}\nFBR Invoice: {inv.fbr_invoice_number}"
-                    else:
-                        inv_detail = f"\n\nInvoice: {inv.invoice_number}\nStatus: Not uploaded to FBR yet"
-
-                self._show_error(
-                    "Duplicate Chassis Detected",
-                    f"Chassis number {chassis_upper} is already marked as {bike.status} and cannot be submitted again.{inv_detail}",
-                )
-                return False
+            if not bike or (bike.status or "").upper() != "IN_STOCK":
+                self.invoice_fbr_label.setText("Out-of-stock chassis detected: will still submit to FBR and auto-create SOLD inventory on success.")
         finally:
             db_check.close()
         engine = self.invoice_engine_input.text().strip()
