@@ -152,6 +152,68 @@ class MySQLRestoreWorker(QObject):
             self.error.emit(str(e))
 
 
+class ClearableDateEdit(QDateEdit):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._empty_date = QDate(1900, 1, 1)
+        self.setCalendarPopup(True)
+        self.setDisplayFormat("dd-MM-yyyy")
+        self.setMinimumDate(self._empty_date)
+        self.setSpecialValueText("")
+        self.setDate(QDate.currentDate())
+        le = self.lineEdit()
+        if le:
+            le.setClearButtonEnabled(True)
+            le.setPlaceholderText("DD-MM-YYYY")
+        self.editingFinished.connect(self._normalize_date_text)
+
+    def clear_date(self) -> None:
+        self.setDate(self._empty_date)
+
+    def is_empty(self) -> bool:
+        return self.date() == self._empty_date
+
+    def keyPressEvent(self, event) -> None:
+        key = event.key()
+        mods = event.modifiers()
+        if key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
+            self.clear_date()
+            return
+        if mods == Qt.KeyboardModifier.ControlModifier and key == Qt.Key.Key_T:
+            self.setDate(QDate.currentDate())
+            return
+        if mods == Qt.KeyboardModifier.ControlModifier and key == Qt.Key.Key_Y:
+            self.setDate(QDate.currentDate().addDays(-1))
+            return
+        if key == Qt.Key.Key_F4:
+            self.showPopup()
+            return
+        super().keyPressEvent(event)
+
+    def _normalize_date_text(self) -> None:
+        le = self.lineEdit()
+        if not le:
+            return
+        raw = (le.text() or "").strip()
+        if not raw:
+            self.clear_date()
+            return
+
+        parsed = QDate.fromString(raw, "dd-MM-yyyy")
+        if not parsed.isValid():
+            digits = "".join(ch for ch in raw if ch.isdigit())
+            if len(digits) == 8:
+                d = int(digits[0:2])
+                m = int(digits[2:4])
+                y = int(digits[4:8])
+                parsed = QDate(y, m, d)
+
+        if parsed.isValid():
+            self.setDate(parsed)
+        else:
+            self.clear_date()
+
+
 class InvoiceSubmissionWorker(QThread):
     """Background worker for invoice creation and sync to prevent UI freezing."""
     finished = pyqtSignal(int) # Returns invoice ID
@@ -6195,9 +6257,7 @@ class MainWindow(QMainWindow):
         form.addWidget(QLabel("Cash Source"), 1, 0)
         form.addWidget(cash_type_combo, 1, 1)
 
-        date_edit = QDateEdit()
-        date_edit.setCalendarPopup(True)
-        date_edit.setDisplayFormat("dd-MM-yyyy")
+        date_edit = ClearableDateEdit()
         if row_data.timestamp:
             date_edit.setDate(QDate(row_data.timestamp.year, row_data.timestamp.month, row_data.timestamp.day))
         form.addWidget(QLabel("Transaction Date"), 2, 0)
@@ -6242,6 +6302,9 @@ class MainWindow(QMainWindow):
                     txn.reference_number = ref_input.text().strip()
                     txn.description = desc_input.text().strip()
                     
+                    if isinstance(date_edit, ClearableDateEdit) and date_edit.is_empty():
+                        raise ValueError("Transaction Date is required.")
+
                     qdate = date_edit.date()
                     selected_dt = dt.datetime(qdate.year(), qdate.month(), qdate.day())
                     txn.timestamp = selected_dt
@@ -6361,9 +6424,7 @@ class MainWindow(QMainWindow):
         form.addWidget(QLabel("Cash Source"), 1, 0)
         form.addWidget(cash_type_combo, 1, 1)
 
-        date_edit = QDateEdit()
-        date_edit.setCalendarPopup(True)
-        date_edit.setDisplayFormat("dd-MM-yyyy")
+        date_edit = ClearableDateEdit()
         date_edit.setDate(QDate.currentDate())
         form.addWidget(QLabel("Transaction Date"), 2, 0)
         form.addWidget(date_edit, 2, 1)
@@ -6433,6 +6494,9 @@ class MainWindow(QMainWindow):
                     raise ValueError("Amount must be greater than zero.")
                 
                 # Get selected date
+                if isinstance(date_edit, ClearableDateEdit) and date_edit.is_empty():
+                    raise ValueError("Transaction Date is required.")
+
                 qdate = date_edit.date()
                 selected_dt = dt.datetime(qdate.year(), qdate.month(), qdate.day())
                 
@@ -7300,11 +7364,11 @@ class MainWindow(QMainWindow):
                 phone_input.setText(phone_digits)
                 phone_input.setCursorPosition(len(phone_digits))
                 phone_input.blockSignals(False)
-            if not re.match(r"^03\\d{9}$", phone_digits):
+            if not re.match(r"^03\d{9}$", phone_digits):
                 return False, "Invalid phone format (03XXXXXXXXX).", phone_input
             if not address:
                 return False, "Address is required.", address_input
-            if ntn and not re.match(r"^\\d{7}(-\\d)?$", ntn):
+            if ntn and not re.match(r"^\d{7}(-\d)?$", ntn):
                 return False, "Invalid NTN format (1234567-8).", ntn_input
             if customer_service.get_customer_by_cnic(cnic):
                 return False, "Customer with this CNIC already exists.", cnic_input
