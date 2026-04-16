@@ -85,6 +85,7 @@ from app.services.invoice_service import invoice_service
 from app.services.price_service import price_service
 from app.services.settings_service import settings_service
 from app.services.dealer_service import dealer_service
+from app.services.customer_service import customer_service
 from app.services.form_capture_service import form_capture_service
 from app.services.backup_service import backup_service
 from app.services.print_service_v2 import print_service_v2
@@ -5425,6 +5426,10 @@ class MainWindow(QMainWindow):
             db.close()
 
     def _submit_invoice(self) -> None:
+        if not self.invoice_submit_btn.isEnabled():
+            logger.warning("Duplicate _submit_invoice call prevented (button already disabled).")
+            return
+
         if not self._validate_invoice_form():
             return
         
@@ -5838,6 +5843,11 @@ class MainWindow(QMainWindow):
         # Action Buttons
         action_bar = QHBoxLayout()
         action_bar.setSpacing(15)
+
+        add_btn = QPushButton("＋ Add Customer")
+        add_btn.setStyleSheet("background-color: #2ecc71; color: white; border: none; font-weight: bold; padding: 10px 20px; border-radius: 8px;")
+        add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        add_btn.clicked.connect(self._on_add_customer_clicked)
         
         edit_btn = QPushButton("✎ Edit Customer")
         edit_btn.setObjectName("resetButton")
@@ -5851,6 +5861,7 @@ class MainWindow(QMainWindow):
         delete_btn.clicked.connect(self._on_delete_customer_clicked)
         
         action_bar.addStretch(1)
+        action_bar.addWidget(add_btn)
         action_bar.addWidget(edit_btn)
         action_bar.addWidget(delete_btn)
         layout.addLayout(action_bar)
@@ -7065,6 +7076,283 @@ class MainWindow(QMainWindow):
             return
         self._on_edit_customer_clicked()
 
+    def _on_add_customer_clicked(self) -> None:
+        self._open_add_customer_dialog()
+        self._reload_customers()
+
+    def _open_add_customer_dialog(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Add New Customer")
+        dialog.setMinimumSize(520, 560)
+        dialog.setStyleSheet("""
+            QDialog { background-color: #f8f9fa; }
+            QLabel { font-weight: bold; color: #2c3e50; }
+            QLineEdit {
+                padding: 8px;
+                border: 1px solid #ced4da;
+                border-radius: 4px;
+                background-color: white;
+            }
+            QLineEdit:focus {
+                border: 2px solid #2ecc71;
+                background-color: #f7fbfe;
+            }
+        """)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(30, 30, 30, 30)
+        layout.setSpacing(15)
+
+        form_grid = QGridLayout()
+        form_grid.setSpacing(12)
+
+        name_input = QLineEdit()
+        father_input = QLineEdit()
+        cnic_input = QLineEdit()
+        phone_input = QLineEdit()
+        address_input = QLineEdit()
+        ntn_input = QLineEdit()
+
+        form_grid.addWidget(QLabel("Full Name:"), 0, 0)
+        name_input.setPlaceholderText("Customer full name")
+        form_grid.addWidget(name_input, 0, 1)
+
+        form_grid.addWidget(QLabel("Father Name:"), 1, 0)
+        father_input.setPlaceholderText("Father's name")
+        form_grid.addWidget(father_input, 1, 1)
+
+        form_grid.addWidget(QLabel("CNIC / ID Card:"), 2, 0)
+        cnic_input.setPlaceholderText("XXXXX-XXXXXXX-X")
+        form_grid.addWidget(cnic_input, 2, 1)
+
+        form_grid.addWidget(QLabel("Phone:"), 3, 0)
+        phone_input.setPlaceholderText("03XXXXXXXXX")
+        form_grid.addWidget(phone_input, 3, 1)
+
+        form_grid.addWidget(QLabel("Address:"), 4, 0)
+        address_input.setPlaceholderText("Customer address")
+        form_grid.addWidget(address_input, 4, 1)
+
+        form_grid.addWidget(QLabel("NTN (Optional):"), 5, 0)
+        ntn_input.setPlaceholderText("1234567-8")
+        form_grid.addWidget(ntn_input, 5, 1)
+
+        def apply_uppercase_lineedit(le: QLineEdit) -> None:
+            text = le.text()
+            upper = to_uppercase_preserving(text)
+            if upper != text:
+                pos = le.cursorPosition()
+                le.blockSignals(True)
+                le.setText(upper)
+                le.setCursorPosition(pos)
+                le.blockSignals(False)
+
+        def filter_alpha_and_uppercase(le: QLineEdit) -> None:
+            text = le.text()
+            filtered = "".join(c for c in text if c.isalpha() or c.isspace())
+            upper = to_uppercase_preserving(filtered)
+            if upper != text:
+                pos = le.cursorPosition()
+                le.blockSignals(True)
+                le.setText(upper)
+                le.setCursorPosition(min(pos, len(upper)))
+                le.blockSignals(False)
+
+        def format_cnic_input() -> None:
+            text = cnic_input.text()
+            pos = cnic_input.cursorPosition()
+            digits_before = len([c for c in text[:pos] if c.isdigit()])
+            digits = "".join(c for c in text if c.isdigit())[:13]
+
+            if len(digits) <= 5:
+                formatted = digits
+            elif len(digits) <= 12:
+                formatted = f"{digits[:5]}-{digits[5:]}"
+            else:
+                formatted = f"{digits[:5]}-{digits[5:12]}-{digits[12:]}"
+
+            def cursor_from_digits_count(value: str, count: int) -> int:
+                seen = 0
+                for i, ch in enumerate(value):
+                    if ch.isdigit():
+                        seen += 1
+                        if seen >= count:
+                            return i + 1
+                return len(value)
+
+            if formatted != text:
+                cnic_input.blockSignals(True)
+                cnic_input.setText(formatted)
+                cnic_input.setCursorPosition(cursor_from_digits_count(formatted, digits_before))
+                cnic_input.blockSignals(False)
+
+            if len(formatted) == 15:
+                check_cnic_exists(formatted)
+
+        def check_cnic_exists(cnic: str) -> None:
+            if not cnic or len(cnic) != 15:
+                return
+            db = SessionLocal()
+            try:
+                existing = db.query(Customer).filter(Customer.cnic == cnic).first()
+                if existing:
+                    from app.updater.toast_notification import ToastNotification
+
+                    kind = existing.type.lower() if hasattr(existing.type, "lower") else str(existing.type).lower()
+                    msg = f"A {kind} named '{existing.name}' with this CNIC already exists."
+                    toast = ToastNotification(
+                        title="CNIC Already Exists",
+                        message=msg,
+                        parent=self,
+                        duration_ms=5000,
+                        show_action=False,
+                        bg_color="#e67e22",
+                        position="top-right",
+                    )
+                    toast.show_notification()
+            finally:
+                db.close()
+
+        def format_phone_input() -> None:
+            text = phone_input.text()
+            pos = phone_input.cursorPosition()
+            digits_before = len([c for c in text[:pos] if c.isdigit()])
+            digits = "".join(c for c in text if c.isdigit())[:11]
+
+            def cursor_from_digits_count(value: str, count: int) -> int:
+                seen = 0
+                for i, ch in enumerate(value):
+                    if ch.isdigit():
+                        seen += 1
+                        if seen >= count:
+                            return i + 1
+                return len(value)
+
+            if digits != text:
+                phone_input.blockSignals(True)
+                phone_input.setText(digits)
+                phone_input.setCursorPosition(cursor_from_digits_count(digits, digits_before))
+                phone_input.blockSignals(False)
+
+        name_input.textChanged.connect(lambda: filter_alpha_and_uppercase(name_input))
+        father_input.textChanged.connect(lambda: filter_alpha_and_uppercase(father_input))
+        address_input.textChanged.connect(lambda: apply_uppercase_lineedit(address_input))
+        cnic_input.textChanged.connect(format_cnic_input)
+        phone_input.textChanged.connect(format_phone_input)
+        ntn_input.textChanged.connect(lambda: None)
+
+        layout.addLayout(form_grid)
+        layout.addStretch(1)
+
+        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        save_btn = btn_box.button(QDialogButtonBox.StandardButton.Save)
+        if save_btn:
+            save_btn.setAutoDefault(False)
+            save_btn.setDefault(False)
+        cancel_btn = btn_box.button(QDialogButtonBox.StandardButton.Cancel)
+        if cancel_btn:
+            cancel_btn.setAutoDefault(False)
+
+        class EnterKeyFilter(QObject):
+            def __init__(self, next_field, on_last, parent_dialog):
+                super().__init__(parent_dialog)
+                self.next_field = next_field
+                self.on_last = on_last
+                self.parent_dialog = parent_dialog
+
+            def eventFilter(self, obj, event):
+                if event.type() == QEvent.Type.KeyPress and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                    if self.next_field:
+                        self.next_field.setFocus()
+                    else:
+                        self.on_last()
+                    return True
+                return super().eventFilter(obj, event)
+
+        def validate_inputs() -> tuple[bool, str, QLineEdit | None]:
+            name = name_input.text().strip()
+            father = father_input.text().strip()
+            cnic_raw = cnic_input.text().strip()
+            phone_raw = phone_input.text().strip()
+            address = address_input.text().strip()
+            ntn = ntn_input.text().strip()
+
+            if not name:
+                return False, "Full Name is required.", name_input
+            if not father:
+                return False, "Father Name is required.", father_input
+            if not cnic_raw:
+                return False, "CNIC is required.", cnic_input
+            cnic_digits = "".join(c for c in cnic_raw if c.isdigit())
+            if len(cnic_digits) != 13:
+                return False, "Invalid CNIC format (33302-1234567-1).", cnic_input
+            cnic = f"{cnic_digits[:5]}-{cnic_digits[5:12]}-{cnic_digits[12]}"
+            if cnic != cnic_raw:
+                cnic_input.blockSignals(True)
+                cnic_input.setText(cnic)
+                cnic_input.setCursorPosition(len(cnic))
+                cnic_input.blockSignals(False)
+            if not phone_raw:
+                return False, "Phone is required.", phone_input
+            phone_digits = "".join(c for c in phone_raw if c.isdigit())
+            if phone_digits != phone_raw:
+                phone_input.blockSignals(True)
+                phone_input.setText(phone_digits)
+                phone_input.setCursorPosition(len(phone_digits))
+                phone_input.blockSignals(False)
+            if not re.match(r"^03\\d{9}$", phone_digits):
+                return False, "Invalid phone format (03XXXXXXXXX).", phone_input
+            if not address:
+                return False, "Address is required.", address_input
+            if ntn and not re.match(r"^\\d{7}(-\\d)?$", ntn):
+                return False, "Invalid NTN format (1234567-8).", ntn_input
+            if customer_service.get_customer_by_cnic(cnic):
+                return False, "Customer with this CNIC already exists.", cnic_input
+            return True, "", None
+
+        def on_save() -> None:
+            ok, msg, focus = validate_inputs()
+            if not ok:
+                QMessageBox.warning(self, "Validation Error", msg)
+                if focus:
+                    focus.setFocus()
+                return
+
+            try:
+                customer_service.create_customer(
+                    cnic=cnic_input.text().strip(),
+                    name=name_input.text().strip(),
+                    father_name=father_input.text().strip(),
+                    phone=phone_input.text().strip(),
+                    address=address_input.text().strip(),
+                    ntn=ntn_input.text().strip(),
+                    customer_type=CustomerType.INDIVIDUAL,
+                )
+                QMessageBox.information(self, "Success", "Customer created successfully.")
+                dialog.accept()
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to create customer: {e}")
+
+        btn_box.accepted.connect(on_save)
+        btn_box.rejected.connect(dialog.reject)
+        layout.addWidget(btn_box)
+
+        name_input.installEventFilter(EnterKeyFilter(father_input, on_save, dialog))
+        father_input.installEventFilter(EnterKeyFilter(cnic_input, on_save, dialog))
+        cnic_input.installEventFilter(EnterKeyFilter(phone_input, on_save, dialog))
+        phone_input.installEventFilter(EnterKeyFilter(address_input, on_save, dialog))
+        address_input.installEventFilter(EnterKeyFilter(ntn_input, on_save, dialog))
+        ntn_input.installEventFilter(EnterKeyFilter(None, on_save, dialog))
+
+        QWidget.setTabOrder(name_input, father_input)
+        QWidget.setTabOrder(father_input, cnic_input)
+        QWidget.setTabOrder(cnic_input, phone_input)
+        QWidget.setTabOrder(phone_input, address_input)
+        QWidget.setTabOrder(address_input, ntn_input)
+
+        name_input.setFocus()
+        dialog.exec()
+
     def _on_edit_customer_clicked(self) -> None:
         selection = self.customers_table_view.selectionModel().selectedRows()
         if not selection:
@@ -7483,16 +7771,31 @@ class MainWindow(QMainWindow):
         # Auto-format CNIC as user types
         def format_cnic_input():
             text = cnic_input.text()
-            digits = "".join(c for c in text if c.isdigit())
-            formatted = digits
-            if len(digits) > 5:
-                formatted = digits[:5] + "-" + digits[5:]
-            if len(digits) > 12:
-                formatted = formatted[:13] + "-" + formatted[13:]
-            if len(formatted) > 15:
-                formatted = formatted[:15]
+            pos = cnic_input.cursorPosition()
+            digits_before = len([c for c in text[:pos] if c.isdigit()])
+            digits = "".join(c for c in text if c.isdigit())[:13]
+
+            if len(digits) <= 5:
+                formatted = digits
+            elif len(digits) <= 12:
+                formatted = f"{digits[:5]}-{digits[5:]}"
+            else:
+                formatted = f"{digits[:5]}-{digits[5:12]}-{digits[12:]}"
+
+            def cursor_from_digits_count(value: str, count: int) -> int:
+                seen = 0
+                for i, ch in enumerate(value):
+                    if ch.isdigit():
+                        seen += 1
+                        if seen >= count:
+                            return i + 1
+                return len(value)
+
             if formatted != text:
+                cnic_input.blockSignals(True)
                 cnic_input.setText(formatted)
+                cnic_input.setCursorPosition(cursor_from_digits_count(formatted, digits_before))
+                cnic_input.blockSignals(False)
             
             # Real-time CNIC validation
             if len(formatted) == 15:

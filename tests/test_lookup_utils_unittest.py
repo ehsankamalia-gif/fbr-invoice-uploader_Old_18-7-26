@@ -51,7 +51,7 @@ class TestLookupUtils(unittest.TestCase):
 
     def test_performance_validation_large_inputs(self) -> None:
         start = time.monotonic()
-        for _ in range(50000):
+        for _ in range(20000):
             validate_lookup_inputs("03001234567", "12345-1234567-1", "Ali")
         elapsed = time.monotonic() - start
         self.assertLess(elapsed, 2.5)

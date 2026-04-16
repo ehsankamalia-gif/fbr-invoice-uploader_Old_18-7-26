@@ -2738,7 +2738,12 @@ class App(ctk.CTk):
             db.close()
 
     def submit_invoice(self):
-        # 1. Confirmation Dialog
+        # 1. Re-entry Guard (Check if button is already disabled)
+        if self.submit_btn.cget("state") == "disabled":
+            logger.warning("Prevented duplicate submission attempt while button is disabled.")
+            return
+
+        # 2. Confirmation Dialog
         if not messagebox.askyesno("Confirm Submission", "Are you sure you want to submit this invoice to FBR?"):
             return
 

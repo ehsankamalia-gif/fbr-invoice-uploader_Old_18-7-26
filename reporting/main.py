@@ -881,6 +881,7 @@ def _render_lookup_html() -> str:
               </div>
             </div>
             <div class="modal-footer">
+              <button type="button" class="btn btn-outline-primary" onclick="printInvoice()">Print</button>
               <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
             </div>
           </div>
@@ -942,6 +943,29 @@ def _render_lookup_html() -> str:
           } catch (e) {
             return false;
           }
+        }
+
+        function printInvoice() {
+          const body = document.getElementById('invoiceDetailBody').innerHTML;
+          const title = document.getElementById('invoiceDetailTitle').textContent;
+          const printWindow = window.open('', '_blank');
+          printWindow.document.write('<html><head><title>' + title + '</title>');
+          printWindow.document.write('<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">');
+          printWindow.document.write('<style>.mono { font-family: monospace; } hr { margin: 1rem 0; } .badge { border: 1px solid #ccc; color: black !important; background: none !important; }</style>');
+          printWindow.document.write('</head><body>');
+          printWindow.document.write('<div class="container py-4">');
+          printWindow.document.write('<h2 class="mb-4">' + title + '</h2>');
+          printWindow.document.write(body);
+          printWindow.document.write('</div>');
+          printWindow.document.write('</body></html>');
+          printWindow.document.close();
+          printWindow.onload = function() {
+            setTimeout(() => {
+              printWindow.focus();
+              printWindow.print();
+              printWindow.close();
+            }, 250);
+          };
         }
 
         function updateActionButtons() {
@@ -1028,6 +1052,7 @@ def _render_lookup_html() -> str:
               <td class="text-end">${escapeHtml((it.total_amount ?? '').toString())}</td>
               <td>${escapeHtml(it.model || '')}</td>
               <td class="mono">${escapeHtml(it.chassis_number || '')}</td>
+              <td class="mono">${escapeHtml(it.engine_number || '')}</td>
             </tr>
           `).join('');
 
@@ -1086,10 +1111,11 @@ def _render_lookup_html() -> str:
                     <th class="text-end">Total</th>
                     <th>Model</th>
                     <th class="mono">Chassis</th>
+                    <th class="mono">Engine</th>
                   </tr>
                 </thead>
                 <tbody>
-                  ${itemsRows || `<tr><td colspan="9" class="text-muted">No items.</td></tr>`}
+                  ${itemsRows || `<tr><td colspan="10" class="text-muted">No items.</td></tr>`}
                 </tbody>
               </table>
             </div>

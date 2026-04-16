@@ -113,22 +113,27 @@ class CustomerFrame(ctk.CTkFrame):
     def validate_alpha(self, var):
         val = var.get()
         new_val = "".join([c for c in val if c.isalpha() or c.isspace()])
+        new_val = new_val.upper()
         if val != new_val:
             var.set(new_val)
+
+    def _force_uppercase(self, var):
+        val = var.get()
+        up = (val or "").upper()
+        if val != up:
+            var.set(up)
 
     def validate_cnic(self, *args):
         value = self.cnic_var.get()
         # Auto-format: XXXXX-XXXXXXX-X
-        clean_digits = ''.join(filter(str.isdigit, value))
-        
-        formatted = clean_digits
-        if len(clean_digits) > 5:
-             formatted = clean_digits[:5] + '-' + clean_digits[5:]
-        if len(clean_digits) > 12:
-             formatted = formatted[:13] + '-' + formatted[13:]
-             
-        if len(formatted) > 15:
-            formatted = formatted[:15]
+        clean_digits = ''.join(filter(str.isdigit, value))[:13]
+
+        if len(clean_digits) <= 5:
+            formatted = clean_digits
+        elif len(clean_digits) <= 12:
+            formatted = clean_digits[:5] + '-' + clean_digits[5:]
+        else:
+            formatted = clean_digits[:5] + '-' + clean_digits[5:12] + '-' + clean_digits[12:]
             
         if value != formatted:
             self.cnic_var.set(formatted)
@@ -197,6 +202,7 @@ class CustomerFrame(ctk.CTkFrame):
         # 6. Address
         ctk.CTkLabel(self.form_frame, text="Address").grid(row=6, column=0, padx=10, pady=5, sticky="e")
         self.address_var = ctk.StringVar()
+        self.address_var.trace_add("write", lambda *args: self._force_uppercase(self.address_var))
         self.address_entry = ctk.CTkEntry(self.form_frame, textvariable=self.address_var)
         self.address_entry.grid(row=6, column=1, padx=10, pady=5, sticky="ew")
 
@@ -210,6 +216,7 @@ class CustomerFrame(ctk.CTkFrame):
         self.lbl_business = ctk.CTkLabel(self.form_frame, text="Business Name")
         self.lbl_business.grid(row=8, column=0, padx=10, pady=5, sticky="e")
         self.business_name_var = ctk.StringVar()
+        self.business_name_var.trace_add("write", lambda *args: self._force_uppercase(self.business_name_var))
         self.business_name_entry = ctk.CTkEntry(self.form_frame, textvariable=self.business_name_var)
         self.business_name_entry.grid(row=8, column=1, padx=10, pady=5, sticky="ew")
         

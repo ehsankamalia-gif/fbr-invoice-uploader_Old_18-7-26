@@ -91,7 +91,7 @@ class InvoiceService:
     def is_chassis_uploaded_to_fbr(self, db: Session, chassis_number: str) -> bool:
         """
         Check if a chassis number has already been uploaded to FBR.
-        Returns True if the chassis is linked to a fiscalized invoice.
+        Returns True if the chassis is linked to a fiscalized invoice OR a pending sync.
         """
         if not chassis_number:
             return False
@@ -104,7 +104,8 @@ class InvoiceService:
             InvoiceItem.motorcycle_id.in_(
                 db.query(Motorcycle.id).filter(Motorcycle.chassis_number == chassis_number)
             ),
-            Invoice.is_fiscalized == True
+            # Block if it's already fiscalized OR currently pending/retrying
+            (Invoice.is_fiscalized == True) | (Invoice.sync_status == "PENDING")
         ).first()
         
         return exists is not None
@@ -118,12 +119,21 @@ class InvoiceService:
         total_amount = 0.0
 
         db_items = []
+        seen_chassis = set()
         for item in invoice_in.items:
-            # 1. Mandatory Duplicate Upload Prevention
+            # 1. Internal duplicate check (same invoice)
             if item.chassis_number:
+                if item.chassis_number.upper() in seen_chassis:
+                    logger.error(f"AUDIT FAILURE: Duplicate chassis {item.chassis_number} in the same invoice items list.")
+                    raise ValueError(f"Duplicate chassis {item.chassis_number} found in the items list.")
+                seen_chassis.add(item.chassis_number.upper())
+
+            # 2. Mandatory Duplicate Upload Prevention (Database check)
+            if item.chassis_number:
+                logger.info(f"AUDIT: Validating uniqueness for chassis {item.chassis_number} before sync.")
                 if self.is_chassis_uploaded_to_fbr(db, item.chassis_number):
-                    logger.error(f"AUDIT FAILURE: Attempted to re-upload chassis {item.chassis_number} which is already fiscalized.")
-                    raise ValueError(f"This Chassis number {item.chassis_number} is already uploaded to FBR.")
+                    logger.error(f"AUDIT FAILURE: Attempted to re-upload chassis {item.chassis_number} which is already fiscalized or pending sync.")
+                    raise ValueError(f"This Chassis number {item.chassis_number} is already uploaded to FBR or has a pending submission.")
 
             # Trust input values from price table as per user request
             sale_value = item.sale_value
@@ -302,7 +312,9 @@ class InvoiceService:
                         "further_tax": item.further_tax,
                         "total_amount": item.total_amount,
                         "pct_code": item.pct_code,
-                        "discount": item.discount
+                        "discount": item.discount,
+                        "chassis_number": item.motorcycle.chassis_number if item.motorcycle else None,
+                        "engine_number": item.motorcycle.engine_number if item.motorcycle else None
                     } for item in invoice.items
                 ]
             }

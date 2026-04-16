@@ -62,6 +62,11 @@ class FBRClient:
             # Validate payload before sending
             self._validate_payload(payload)
             
+            # Identify USIN and Chassis for logging
+            usin = payload.get("USIN")
+            chassis_nums = [it.get("ChassisNumber") for it in payload.get("Items", []) if it.get("ChassisNumber")]
+            logger.info(f"FBR Sync: Preparing transmission for USIN: {usin}, Chassis: {chassis_nums}")
+            
             # Generate and add Signature if secret_key is provided
             secret_key = settings.get("secret_key")
             if secret_key:
@@ -221,6 +226,8 @@ class FBRClient:
                 "AdditionalTax": round(float(item.get("further_tax", 0.0)), 2), # Explicit Additional Tax field
                 "AdditionalTaxCharged": round(float(item.get("further_tax", 0.0)), 2), # Alias
                 "OtherTax": round(float(item.get("further_tax", 0.0)), 2), # Alias for compatibility
+                "ChassisNumber": str(item.get("chassis_number", "")) if item.get("chassis_number") else None,
+                "EngineNumber": str(item.get("engine_number", "")) if item.get("engine_number") else None,
                 "InvoiceType": default_invoice_type_int
             })
 
