@@ -203,6 +203,39 @@ def _render_dashboard_html() -> str:
       <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
       <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist@2.32.0/plotly.min.js"></script>
       <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+      <style>
+        .date-field { position: relative; }
+        .date-popover {
+          position: absolute;
+          top: calc(100% + 6px);
+          left: 0;
+          z-index: 1056;
+          width: 292px;
+          background: #fff;
+          border: 1px solid rgba(0,0,0,.15);
+          border-radius: .5rem;
+          box-shadow: 0 .5rem 1rem rgba(0,0,0,.15);
+          padding: .5rem;
+        }
+        .date-popover .dp-head { display: flex; align-items: center; justify-content: space-between; gap: .25rem; margin-bottom: .25rem; }
+        .date-popover .dp-title { font-weight: 600; }
+        .date-popover .dp-btn { border: 1px solid rgba(0,0,0,.15); background: #f8f9fa; border-radius: .375rem; padding: .25rem .5rem; }
+        .date-popover .dp-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: .15rem; }
+        .date-popover .dp-dow { font-size: .75rem; color: #6c757d; text-align: center; padding: .25rem 0; }
+        .date-popover .dp-day {
+          border: 1px solid transparent;
+          background: transparent;
+          border-radius: .375rem;
+          padding: .35rem 0;
+          text-align: center;
+          cursor: pointer;
+        }
+        .date-popover .dp-day:hover { background: #eef5ff; }
+        .date-popover .dp-day[aria-selected="true"] { background: #0d6efd; color: #fff; }
+        .date-popover .dp-day.dp-muted { color: #adb5bd; }
+        .date-input.is-invalid { border-color: #dc3545; padding-right: calc(1.5em + .75rem); }
+        .date-input.is-valid { border-color: #198754; padding-right: calc(1.5em + .75rem); }
+      </style>
     </head>
     <body class="bg-light">
       <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
@@ -227,11 +260,23 @@ def _render_dashboard_html() -> str:
                   </div>
                   <div class="col-6 col-md-2">
                     <label class="form-label">From</label>
-                    <input class="form-control" type="date" id="fromDate"/>
+                    <div class="input-group date-field" data-date-field>
+                      <input class="form-control date-input" type="text" id="fromDate" autocomplete="off" inputmode="text"
+                             aria-label="From date" placeholder="YYYY-MM-DD or DD/MM/YYYY or MM/DD/YYYY"/>
+                      <button class="btn btn-outline-secondary date-clear" type="button" aria-label="Clear date">×</button>
+                      <button class="btn btn-outline-secondary date-open" type="button" aria-label="Open calendar">📅</button>
+                    </div>
+                    <div class="invalid-feedback d-block" id="fromDateError" style="display:none;"></div>
                   </div>
                   <div class="col-6 col-md-2">
                     <label class="form-label">To</label>
-                    <input class="form-control" type="date" id="toDate"/>
+                    <div class="input-group date-field" data-date-field>
+                      <input class="form-control date-input" type="text" id="toDate" autocomplete="off" inputmode="text"
+                             aria-label="To date" placeholder="YYYY-MM-DD or DD/MM/YYYY or MM/DD/YYYY"/>
+                      <button class="btn btn-outline-secondary date-clear" type="button" aria-label="Clear date">×</button>
+                      <button class="btn btn-outline-secondary date-open" type="button" aria-label="Open calendar">📅</button>
+                    </div>
+                    <div class="invalid-feedback d-block" id="toDateError" style="display:none;"></div>
                   </div>
                   <div class="col-12 col-md-2">
                     <label class="form-label">Status</label>
@@ -263,6 +308,339 @@ def _render_dashboard_html() -> str:
       </main>
       <script>
         const state = { auto: true, timer: null, templateId: null, role: 'sales', token: '' };
+        function pad2(n) { return String(n).padStart(2, '0'); }
+        function toIsoDate(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
+        function isValidYMD(y, m, d) {
+          if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return false;
+          if (y < 1900 || y > 2100) return false;
+          if (m < 1 || m > 12) return false;
+          if (d < 1 || d > 31) return false;
+          const dt = new Date(Date.UTC(y, m - 1, d));
+          return dt.getUTCFullYear() === y && (dt.getUTCMonth() + 1) === m && dt.getUTCDate() === d;
+        }
+
+        function parseFlexibleDate(raw) {
+          const s = String(raw || '').trim();
+          if (!s) return { ok: true, iso: '' };
+
+          const isoMatch = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+          if (isoMatch) {
+            const y = Number(isoMatch[1]), m = Number(isoMatch[2]), d = Number(isoMatch[3]);
+            if (!isValidYMD(y, m, d)) return { ok: false, reason: 'Invalid date.' };
+            return { ok: true, iso: `${y}-${pad2(m)}-${pad2(d)}` };
+          }
+
+          const parts = s.split(/[\/\-\.]/).map(x => x.trim()).filter(Boolean);
+          if (parts.length === 3 && parts.every(p => /^\d+$/.test(p))) {
+            const a = Number(parts[0]), b = Number(parts[1]), c = Number(parts[2]);
+
+            if (parts[0].length === 4) {
+              const y = a, m = b, d = c;
+              if (!isValidYMD(y, m, d)) return { ok: false, reason: 'Invalid date.' };
+              return { ok: true, iso: `${y}-${pad2(m)}-${pad2(d)}` };
+            }
+
+            let d = a, m = b, y = c;
+            if (a <= 12 && b <= 12) { d = a; m = b; }
+            else if (a > 12 && b <= 12) { d = a; m = b; }
+            else if (b > 12 && a <= 12) { m = a; d = b; }
+            else { d = a; m = b; }
+
+            if (y < 100) y = 2000 + y;
+            if (!isValidYMD(y, m, d)) return { ok: false, reason: 'Invalid date.' };
+            return { ok: true, iso: `${y}-${pad2(m)}-${pad2(d)}` };
+          }
+
+          const digits = s.replace(/\D/g, '');
+          if (digits.length === 8) {
+            const first4 = Number(digits.slice(0, 4));
+            if (first4 >= 1900 && first4 <= 2100) {
+              const y = first4, m = Number(digits.slice(4, 6)), d = Number(digits.slice(6, 8));
+              if (!isValidYMD(y, m, d)) return { ok: false, reason: 'Invalid date.' };
+              return { ok: true, iso: `${y}-${pad2(m)}-${pad2(d)}` };
+            }
+            const d = Number(digits.slice(0, 2)), m = Number(digits.slice(2, 4)), y = Number(digits.slice(4, 8));
+            if (!isValidYMD(y, m, d)) return { ok: false, reason: 'Invalid date.' };
+            return { ok: true, iso: `${y}-${pad2(m)}-${pad2(d)}` };
+          }
+
+          return { ok: false, reason: 'Use YYYY-MM-DD, DD/MM/YYYY, or MM/DD/YYYY.' };
+        }
+
+        function setDateInputState(input, errorEl, iso, ok, message) {
+          input.dataset.iso = iso || '';
+          if (ok) {
+            input.classList.remove('is-invalid');
+            if (iso) input.classList.add('is-valid');
+            else input.classList.remove('is-valid');
+            if (errorEl) { errorEl.style.display = 'none'; errorEl.textContent = ''; }
+          } else {
+            input.classList.remove('is-valid');
+            input.classList.add('is-invalid');
+            if (errorEl) { errorEl.style.display = 'block'; errorEl.textContent = message || 'Invalid date.'; }
+          }
+        }
+
+        function buildCalendar(popover, ctx) {
+          popover.innerHTML = '';
+          popover.tabIndex = -1;
+          popover.setAttribute('role', 'dialog');
+          popover.setAttribute('aria-label', 'Calendar');
+
+          const head = document.createElement('div');
+          head.className = 'dp-head';
+
+          const prev = document.createElement('button');
+          prev.type = 'button';
+          prev.className = 'dp-btn';
+          prev.textContent = '‹';
+          prev.setAttribute('aria-label', 'Previous month');
+
+          const next = document.createElement('button');
+          next.type = 'button';
+          next.className = 'dp-btn';
+          next.textContent = '›';
+          next.setAttribute('aria-label', 'Next month');
+
+          const title = document.createElement('div');
+          title.className = 'dp-title';
+
+          head.appendChild(prev);
+          head.appendChild(title);
+          head.appendChild(next);
+          popover.appendChild(head);
+
+          const grid = document.createElement('div');
+          grid.className = 'dp-grid';
+          popover.appendChild(grid);
+
+          function render() {
+            const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+            title.textContent = `${monthNames[ctx.viewMonth]} ${ctx.viewYear}`;
+
+            grid.innerHTML = '';
+            const dows = ['Mo','Tu','We','Th','Fr','Sa','Su'];
+            dows.forEach(x => {
+              const el = document.createElement('div');
+              el.className = 'dp-dow';
+              el.textContent = x;
+              grid.appendChild(el);
+            });
+
+            const first = new Date(Date.UTC(ctx.viewYear, ctx.viewMonth, 1));
+            const firstDow = (first.getUTCDay() + 6) % 7;
+            const daysInMonth = new Date(Date.UTC(ctx.viewYear, ctx.viewMonth + 1, 0)).getUTCDate();
+            const daysPrevMonth = new Date(Date.UTC(ctx.viewYear, ctx.viewMonth, 0)).getUTCDate();
+
+            const totalCells = 42;
+            const selectedIso = ctx.selectedIso;
+            const todayIso = toIsoDate(new Date());
+
+            for (let i = 0; i < totalCells; i++) {
+              const cellIndex = i - firstDow + 1;
+              let y = ctx.viewYear, m = ctx.viewMonth + 1, d = cellIndex;
+              let muted = false;
+              if (cellIndex <= 0) {
+                muted = true;
+                const pm = new Date(Date.UTC(ctx.viewYear, ctx.viewMonth, 0));
+                y = pm.getUTCFullYear(); m = pm.getUTCMonth() + 1; d = daysPrevMonth + cellIndex;
+              } else if (cellIndex > daysInMonth) {
+                muted = true;
+                const nm = new Date(Date.UTC(ctx.viewYear, ctx.viewMonth + 1, 1));
+                y = nm.getUTCFullYear(); m = nm.getUTCMonth() + 1; d = cellIndex - daysInMonth;
+              }
+              const iso = `${y}-${pad2(m)}-${pad2(d)}`;
+              const btn = document.createElement('button');
+              btn.type = 'button';
+              btn.className = `dp-day${muted ? ' dp-muted' : ''}`;
+              btn.textContent = String(d);
+              btn.dataset.iso = iso;
+              btn.setAttribute('role', 'gridcell');
+              btn.setAttribute('aria-selected', iso === selectedIso ? 'true' : 'false');
+              btn.setAttribute('aria-label', iso);
+              if (iso === todayIso) btn.style.borderColor = 'rgba(13,110,253,.35)';
+
+              btn.addEventListener('click', () => ctx.onSelect(iso));
+              grid.appendChild(btn);
+            }
+          }
+
+          prev.addEventListener('click', () => {
+            const d = new Date(Date.UTC(ctx.viewYear, ctx.viewMonth, 1));
+            d.setUTCMonth(d.getUTCMonth() - 1);
+            ctx.viewYear = d.getUTCFullYear();
+            ctx.viewMonth = d.getUTCMonth();
+            render();
+          });
+          next.addEventListener('click', () => {
+            const d = new Date(Date.UTC(ctx.viewYear, ctx.viewMonth, 1));
+            d.setUTCMonth(d.getUTCMonth() + 1);
+            ctx.viewYear = d.getUTCFullYear();
+            ctx.viewMonth = d.getUTCMonth();
+            render();
+          });
+
+          popover.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') { ctx.close(); return; }
+            const move = (deltaDays) => {
+              const base = ctx.selectedIso ? new Date(ctx.selectedIso + 'T00:00:00Z') : new Date(Date.UTC(ctx.viewYear, ctx.viewMonth, 1));
+              base.setUTCDate(base.getUTCDate() + deltaDays);
+              const iso = toIsoDate(new Date(base.getTime()));
+              ctx.onSelect(iso, true);
+            };
+            if (e.key === 'ArrowLeft') { e.preventDefault(); move(-1); }
+            if (e.key === 'ArrowRight') { e.preventDefault(); move(1); }
+            if (e.key === 'ArrowUp') { e.preventDefault(); move(-7); }
+            if (e.key === 'ArrowDown') { e.preventDefault(); move(7); }
+            if (e.key === 'Enter') { e.preventDefault(); if (ctx.selectedIso) ctx.onSelect(ctx.selectedIso); }
+          });
+
+          render();
+        }
+
+        function initDateField(inputId, errorId) {
+          const input = document.getElementById(inputId);
+          const errorEl = document.getElementById(errorId);
+          if (!input) return;
+
+          const container = input.closest('[data-date-field]');
+          if (!container) return;
+
+          const clearBtn = container.querySelector('.date-clear');
+          const openBtn = container.querySelector('.date-open');
+
+          const popover = document.createElement('div');
+          popover.className = 'date-popover';
+          popover.hidden = true;
+          container.appendChild(popover);
+
+          function close() { popover.hidden = true; }
+          function open(focusPopover) {
+            const iso = input.dataset.iso || '';
+            const base = iso ? new Date(iso + 'T00:00:00Z') : new Date();
+            const ctx = {
+              viewYear: base.getUTCFullYear(),
+              viewMonth: base.getUTCMonth(),
+              selectedIso: iso,
+              onSelect: (newIso, keepOpen) => {
+                input.value = newIso;
+                setDateInputState(input, errorEl, newIso, true, '');
+                ctx.selectedIso = newIso;
+                const d = new Date(newIso + 'T00:00:00Z');
+                ctx.viewYear = d.getUTCFullYear();
+                ctx.viewMonth = d.getUTCMonth();
+                buildCalendar(popover, ctx);
+                if (!keepOpen) {
+                  close();
+                  input.focus();
+                }
+              },
+              close,
+            };
+            buildCalendar(popover, ctx);
+            popover.hidden = false;
+            if (focusPopover) popover.focus();
+          }
+
+          function validateLive() {
+            const raw = input.value || '';
+            const digitsOnly = raw.replace(/\D/g, '');
+            if (digitsOnly && digitsOnly === raw) {
+              let formatted = raw;
+              if ((digitsOnly.startsWith('19') || digitsOnly.startsWith('20')) && digitsOnly.length <= 8) {
+                if (digitsOnly.length <= 4) formatted = digitsOnly;
+                else if (digitsOnly.length <= 6) formatted = `${digitsOnly.slice(0,4)}-${digitsOnly.slice(4)}`;
+                else formatted = `${digitsOnly.slice(0,4)}-${digitsOnly.slice(4,6)}-${digitsOnly.slice(6)}`;
+              } else if (digitsOnly.length <= 8) {
+                if (digitsOnly.length <= 2) formatted = digitsOnly;
+                else if (digitsOnly.length <= 4) formatted = `${digitsOnly.slice(0,2)}-${digitsOnly.slice(2)}`;
+                else formatted = `${digitsOnly.slice(0,2)}-${digitsOnly.slice(2,4)}-${digitsOnly.slice(4)}`;
+              }
+              if (formatted !== raw) {
+                const prevLen = raw.length;
+                input.value = formatted;
+                try { input.setSelectionRange(formatted.length, formatted.length); } catch (e) {}
+                if (formatted.length < prevLen) input.value = formatted;
+              }
+            }
+
+            const parsed = parseFlexibleDate(input.value);
+            if (parsed.ok) setDateInputState(input, errorEl, parsed.iso, true, '');
+            else setDateInputState(input, errorEl, '', false, parsed.reason);
+          }
+
+          input.addEventListener('input', validateLive);
+          input.addEventListener('blur', () => {
+            const parsed = parseFlexibleDate(input.value);
+            if (parsed.ok) {
+              input.value = parsed.iso || '';
+              setDateInputState(input, errorEl, parsed.iso, true, '');
+            } else {
+              setDateInputState(input, errorEl, '', false, parsed.reason);
+            }
+          });
+          input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+              const parsed = parseFlexibleDate(input.value);
+              if (parsed.ok) {
+                input.value = parsed.iso || '';
+                setDateInputState(input, errorEl, parsed.iso, true, '');
+              } else {
+                setDateInputState(input, errorEl, '', false, parsed.reason);
+              }
+              return;
+            }
+            if (e.key === 'ArrowDown' && e.altKey) { e.preventDefault(); open(true); return; }
+            if (e.key === 'F4') { e.preventDefault(); open(true); return; }
+            if (e.key === 'Escape') { close(); return; }
+          });
+
+          if (openBtn) openBtn.addEventListener('click', () => (popover.hidden ? open(false) : close()));
+          if (clearBtn) clearBtn.addEventListener('click', () => {
+            input.value = '';
+            setDateInputState(input, errorEl, '', true, '');
+            close();
+          });
+
+          document.addEventListener('click', (e) => { if (!container.contains(e.target)) close(); });
+        }
+
+        function getIsoDateValue(inputId) {
+          const input = document.getElementById(inputId);
+          if (!input) return '';
+          const parsed = parseFlexibleDate(input.value);
+          if (parsed.ok) return parsed.iso || '';
+          return '';
+        }
+
+        function getIsoDateValueOrWarn(inputId, errorId) {
+          const input = document.getElementById(inputId);
+          const errorEl = document.getElementById(errorId);
+          if (!input) return '';
+          const parsed = parseFlexibleDate(input.value);
+          if (parsed.ok) return parsed.iso || '';
+          if ((input.value || '').trim()) {
+            setDateInputState(input, errorEl, '', false, parsed.reason);
+            input.focus();
+            return null;
+          }
+          return '';
+        }
+
+        function setDateFieldValue(inputId, errorId, value) {
+          const input = document.getElementById(inputId);
+          const errorEl = document.getElementById(errorId);
+          if (!input) return;
+          const parsed = parseFlexibleDate(value);
+          if (parsed.ok) {
+            input.value = parsed.iso || '';
+            setDateInputState(input, errorEl, parsed.iso, true, '');
+          } else {
+            input.value = String(value || '');
+            setDateInputState(input, errorEl, '', false, parsed.reason);
+          }
+        }
+
         function qs() {
           const p = new URLSearchParams(window.location.search);
           return {
@@ -340,8 +718,10 @@ def _render_dashboard_html() -> str:
         async function loadDashboard() {
           const sel = document.getElementById('templateSelect');
           state.templateId = sel.value;
-          const from_date = document.getElementById('fromDate').value;
-          const to_date = document.getElementById('toDate').value;
+          const from_date = getIsoDateValueOrWarn('fromDate', 'fromDateError');
+          if (from_date === null) return;
+          const to_date = getIsoDateValueOrWarn('toDate', 'toDateError');
+          if (to_date === null) return;
           const status = document.getElementById('status').value;
           const url = `/api/dashboard?template_id=${encodeURIComponent(state.templateId)}&from_date=${encodeURIComponent(from_date)}&to_date=${encodeURIComponent(to_date)}&status=${encodeURIComponent(status)}`;
           const res = await fetch(url, { headers: headers() });
@@ -427,16 +807,20 @@ def _render_dashboard_html() -> str:
           if (on) state.timer = setInterval(loadDashboard, 15000);
         }
         function exportFmt(fmt) {
-          const from_date = document.getElementById('fromDate').value;
-          const to_date = document.getElementById('toDate').value;
+          const from_date = getIsoDateValueOrWarn('fromDate', 'fromDateError');
+          if (from_date === null) return;
+          const to_date = getIsoDateValueOrWarn('toDate', 'toDateError');
+          if (to_date === null) return;
           const status = document.getElementById('status').value;
           const url = `/export/${fmt}?template_id=${encodeURIComponent(state.templateId)}&from_date=${encodeURIComponent(from_date)}&to_date=${encodeURIComponent(to_date)}&status=${encodeURIComponent(status)}`;
           window.location.href = url;
         }
         async function init() {
           const q = qs();
-          document.getElementById('fromDate').value = q.from_date;
-          document.getElementById('toDate').value = q.to_date;
+          initDateField('fromDate', 'fromDateError');
+          initDateField('toDate', 'toDateError');
+          setDateFieldValue('fromDate', 'fromDateError', q.from_date);
+          setDateFieldValue('toDate', 'toDateError', q.to_date);
           document.getElementById('status').value = q.status;
           await loadTemplates();
           document.getElementById('applyBtn').addEventListener('click', loadDashboard);

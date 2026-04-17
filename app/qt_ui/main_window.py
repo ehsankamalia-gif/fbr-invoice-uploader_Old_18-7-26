@@ -79,6 +79,7 @@ from app.db.models import (
     SpareLedgerTransaction,
     CustomerType,
     CapturedData,
+    AdvanceBooking,
 )
 from app.api.schemas import InvoiceCreate, InvoiceItemCreate
 from app.services.invoice_service import invoice_service
@@ -86,6 +87,7 @@ from app.services.price_service import price_service
 from app.services.settings_service import settings_service
 from app.services.dealer_service import dealer_service
 from app.services.customer_service import customer_service
+from app.services.advance_booking_service import advance_booking_service
 from app.services.form_capture_service import form_capture_service
 from app.services.backup_service import backup_service
 from app.services.print_service_v2 import print_service_v2
@@ -156,29 +158,107 @@ class ClearableDateEdit(QDateEdit):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._empty_date = QDate(1900, 1, 1)
+        self._digit_buffer = ""
         self.setCalendarPopup(True)
         self.setDisplayFormat("dd-MM-yyyy")
-        self.setMinimumDate(self._empty_date)
-        self.setSpecialValueText("")
+        self.setDateRange(self._empty_date, QDate(2100, 12, 31))
+        self.setSpecialValueText(" ")
         self.setDate(QDate.currentDate())
         le = self.lineEdit()
         if le:
             le.setClearButtonEnabled(True)
             le.setPlaceholderText("DD-MM-YYYY")
+            le.textChanged.connect(self._on_text_changed)
         self.editingFinished.connect(self._normalize_date_text)
 
     def clear_date(self) -> None:
         self.setDate(self._empty_date)
+        le = self.lineEdit()
+        if le:
+            le.setText("")
+        self.setStyleSheet("")
 
     def is_empty(self) -> bool:
         return self.date() == self._empty_date
 
+    def focusInEvent(self, event) -> None:
+        self._reset_digit_buffer()
+        super().focusInEvent(event)
+
+    def focusOutEvent(self, event) -> None:
+        self._reset_digit_buffer()
+        super().focusOutEvent(event)
+
+    def textFromDateTime(self, dt_value) -> str:
+        try:
+            if dt_value and dt_value.date() == self._empty_date:
+                return ""
+        except Exception:
+            pass
+        return super().textFromDateTime(dt_value)
+
+    def _reset_digit_buffer(self) -> None:
+        self._digit_buffer = ""
+
+    def _render_digit_buffer(self) -> str:
+        d = self._digit_buffer[0:2]
+        m = self._digit_buffer[2:4]
+        y = self._digit_buffer[4:8]
+        if len(self._digit_buffer) <= 2:
+            return d
+        if len(self._digit_buffer) <= 4:
+            return f"{d}-{m}"
+        return f"{d}-{m}-{y}"
+
     def keyPressEvent(self, event) -> None:
         key = event.key()
         mods = event.modifiers()
-        if key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
-            self.clear_date()
+        txt = event.text() or ""
+
+        if txt.isdigit():
+            if not self._digit_buffer:
+                le = self.lineEdit()
+                if le:
+                    if le.hasSelectedText() or self.is_empty():
+                        self.clear_date()
+            if len(self._digit_buffer) < 8:
+                self._digit_buffer += txt
+            le = self.lineEdit()
+            if le:
+                le.blockSignals(True)
+                le.setText(self._render_digit_buffer())
+                le.setCursorPosition(len(le.text()))
+                le.blockSignals(False)
+
+            if len(self._digit_buffer) == 8:
+                d = int(self._digit_buffer[0:2])
+                m = int(self._digit_buffer[2:4])
+                y = int(self._digit_buffer[4:8])
+                parsed = QDate(y, m, d)
+                if parsed.isValid():
+                    self.setDate(parsed)
+                    self.setStyleSheet("")
+                else:
+                    self.setStyleSheet("QDateEdit { border: 2px solid #e74c3c; background-color: #fff; }")
+                self._reset_digit_buffer()
             return
+
+        if key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
+            if self._digit_buffer:
+                self._digit_buffer = self._digit_buffer[:-1]
+                le = self.lineEdit()
+                if le:
+                    le.blockSignals(True)
+                    le.setText(self._render_digit_buffer())
+                    le.setCursorPosition(len(le.text()))
+                    le.blockSignals(False)
+                if not self._digit_buffer:
+                    self.setStyleSheet("")
+                return
+            le = self.lineEdit()
+            if mods == Qt.KeyboardModifier.ControlModifier or (le and le.hasSelectedText()) or (le and not (le.text() or "").strip()):
+                self.clear_date()
+                return
         if mods == Qt.KeyboardModifier.ControlModifier and key == Qt.Key.Key_T:
             self.setDate(QDate.currentDate())
             return
@@ -188,7 +268,83 @@ class ClearableDateEdit(QDateEdit):
         if key == Qt.Key.Key_F4:
             self.showPopup()
             return
+        if mods == Qt.KeyboardModifier.AltModifier and key == Qt.Key.Key_Down:
+            self.showPopup()
+            return
         super().keyPressEvent(event)
+
+    def _parse_user_date(self, raw: str) -> QDate | None:
+        s = (raw or "").strip()
+        if not s:
+            return None
+
+        for fmt in ("dd-MM-yyyy", "dd/MM/yyyy", "dd.MM.yyyy", "yyyy-MM-dd", "yyyy/MM/dd", "yyyy.MM.dd"):
+            dt_parsed = QDate.fromString(s, fmt)
+            if dt_parsed.isValid():
+                return dt_parsed
+
+        digits = "".join(ch for ch in s if ch.isdigit())
+        if len(digits) == 8:
+            y_first = int(digits[0:4])
+            if 1900 <= y_first <= 2100:
+                y = y_first
+                m = int(digits[4:6])
+                d = int(digits[6:8])
+                dt_parsed = QDate(y, m, d)
+                if dt_parsed.isValid():
+                    return dt_parsed
+            d = int(digits[0:2])
+            m = int(digits[2:4])
+            y = int(digits[4:8])
+            dt_parsed = QDate(y, m, d)
+            if dt_parsed.isValid():
+                return dt_parsed
+
+        parts = re.split(r"[^0-9]", s)
+        parts = [p for p in parts if p]
+        if len(parts) == 3 and all(p.isdigit() for p in parts):
+            a = int(parts[0])
+            b = int(parts[1])
+            c = int(parts[2])
+
+            if len(parts[0]) == 4:
+                y, m, d = a, b, c
+                dt_parsed = QDate(y, m, d)
+                if dt_parsed.isValid():
+                    return dt_parsed
+
+            d, m, y = a, b, c
+            if a <= 12 and b <= 12:
+                d, m = a, b
+            elif a <= 12 and b > 12:
+                m, d = a, b
+            else:
+                d, m = a, b
+
+            if y < 100:
+                y = 2000 + y
+            dt_parsed = QDate(y, m, d)
+            if dt_parsed.isValid():
+                return dt_parsed
+
+        return None
+
+    def _on_text_changed(self, text: str) -> None:
+        raw = (text or "").strip()
+        if not raw:
+            self.setStyleSheet("")
+            return
+
+        digits = "".join(ch for ch in raw if ch.isdigit())
+        if digits and len(digits) < 8:
+            self.setStyleSheet("")
+            return
+
+        parsed = self._parse_user_date(raw)
+        if parsed and parsed.isValid():
+            self.setStyleSheet("")
+            return
+        self.setStyleSheet("QDateEdit { border: 2px solid #e74c3c; background-color: #fff; }")
 
     def _normalize_date_text(self) -> None:
         le = self.lineEdit()
@@ -199,17 +355,10 @@ class ClearableDateEdit(QDateEdit):
             self.clear_date()
             return
 
-        parsed = QDate.fromString(raw, "dd-MM-yyyy")
-        if not parsed.isValid():
-            digits = "".join(ch for ch in raw if ch.isdigit())
-            if len(digits) == 8:
-                d = int(digits[0:2])
-                m = int(digits[2:4])
-                y = int(digits[4:8])
-                parsed = QDate(y, m, d)
-
-        if parsed.isValid():
+        parsed = self._parse_user_date(raw)
+        if parsed and parsed.isValid():
             self.setDate(parsed)
+            self.setStyleSheet("")
         else:
             self.clear_date()
 
@@ -815,6 +964,7 @@ class MainWindow(QMainWindow):
         self._add_page("prices", self._create_prices_page(), "Prices")
         self._add_page("customers", self._create_customers_page(), "Customers")
         self._add_page("dealers", self._create_dealers_page(), "Dealers")
+        self._add_page("advance_booking", self._create_advance_booking_page(), "Advance Booking")
         self._add_page("spare_ledger", self._create_spare_ledger_page(), "Spare Ledger")
         self._add_page("sms", self._create_sms_page(), "SMS Module")
         self._add_page("whatsapp", self._create_whatsapp_page(), "Whatsapp Module")
@@ -831,6 +981,7 @@ class MainWindow(QMainWindow):
             "prices": "💰",
             "customers": "👥",
             "dealers": "🏢",
+            "advance_booking": "🧾",
             "spare_ledger": "📒",
             "sms": "💬",
             "whatsapp": "📱",
@@ -842,7 +993,7 @@ class MainWindow(QMainWindow):
 
         self.menu_groups = {
             "GENERAL": ["dashboard", "welcome"],
-            "SALES": ["invoice", "reports", "print_document"],
+            "SALES": ["invoice", "reports", "advance_booking", "print_document"],
             "INVENTORY": ["inventory", "prices", "spare_ledger", "captured_data"],
             "DIRECTORY": ["customers", "dealers"],
             "SYSTEM": ["sms", "whatsapp", "settings"]
@@ -6081,6 +6232,411 @@ class MainWindow(QMainWindow):
 
         return page
 
+    def _create_advance_booking_page(self) -> QWidget:
+        page = QWidget(self)
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(30, 30, 30, 30)
+        layout.setSpacing(25)
+
+        page.setStyleSheet("""
+            QWidget { background-color: #f8f9fa; }
+            QLabel#pageHeader { font-size: 26px; font-weight: bold; color: #2c3e50; }
+            QFrame#card { background-color: white; border: 1px solid #e0e0e0; border-radius: 12px; }
+            QLabel.fieldLabel { color: #7f8c8d; font-weight: bold; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+            QLineEdit, QComboBox, QDoubleSpinBox { padding: 10px 15px; border: 1px solid #dee2e6; border-radius: 8px; background-color: #ffffff; font-size: 13px; }
+            QLineEdit:focus, QDoubleSpinBox:focus { border: 2px solid #3498db; background-color: #f7fbfe; }
+            QPushButton#primaryButton { background-color: #3498db; color: white; border: none; border-radius: 8px; font-weight: bold; padding: 10px 20px; }
+            QPushButton#primaryButton:hover { background-color: #2980b9; }
+            QPushButton#resetButton { background-color: #f8f9fa; color: #2c3e50; border: 1px solid #dee2e6; border-radius: 8px; font-weight: bold; padding: 10px 20px; }
+            QPushButton#resetButton:hover { background-color: #e9ecef; }
+            QTableView {
+                background-color: white;
+                border: 1px solid #e0e0e0;
+                border-radius: 12px;
+                gridline-color: #f1f1f1;
+                alternate-background-color: #fafafa;
+                selection-background-color: #e3f2fd;
+                selection-color: #1976d2;
+                outline: none;
+            }
+            QHeaderView::section {
+                background-color: #f8f9fa;
+                color: #5a6268;
+                padding: 15px;
+                font-weight: bold;
+                text-transform: uppercase;
+                font-size: 11px;
+                border: none;
+                border-bottom: 2px solid #e9ecef;
+            }
+        """)
+
+        header_widget = QWidget()
+        header_layout = QHBoxLayout(header_widget)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+
+        header_v = QVBoxLayout()
+        header = QLabel("Motorcycle Advance Booking")
+        header.setObjectName("pageHeader")
+        header_v.addWidget(header)
+
+        subtitle = QLabel("Create advance bookings and print duplicate receipts (Customer + Showroom copies).")
+        subtitle.setStyleSheet("color: #7f8c8d; font-size: 13px;")
+        header_v.addWidget(subtitle)
+
+        header_layout.addLayout(header_v)
+        header_layout.addStretch(1)
+        layout.addWidget(header_widget)
+
+        form_card = QFrame()
+        form_card.setObjectName("card")
+        form_layout = QGridLayout(form_card)
+        form_layout.setContentsMargins(25, 20, 25, 20)
+        form_layout.setHorizontalSpacing(20)
+        form_layout.setVerticalSpacing(14)
+
+        def make_label(text: str) -> QLabel:
+            lbl = QLabel(text)
+            lbl.setProperty("class", "fieldLabel")
+            return lbl
+
+        self.ab_customer_name = QLineEdit()
+        self.ab_customer_name.setPlaceholderText("Customer Name")
+        self.ab_model_combo = QComboBox()
+        self.ab_model_combo.setEditable(False)
+        self.ab_model_combo.setPlaceholderText("Select model")
+        self.ab_color_combo = QComboBox()
+        self.ab_color_combo.setEditable(False)
+        self.ab_color_combo.setPlaceholderText("Select color")
+
+        def force_upper(le: QLineEdit) -> None:
+            t = le.text()
+            up = to_uppercase_preserving(t)
+            if up != t:
+                pos = le.cursorPosition()
+                le.blockSignals(True)
+                le.setText(up)
+                le.setCursorPosition(pos)
+                le.blockSignals(False)
+
+        self.ab_customer_name.textChanged.connect(lambda: force_upper(self.ab_customer_name))
+        self.ab_model_combo.currentTextChanged.connect(self._on_ab_model_changed)  # type: ignore[arg-type]
+        self.ab_color_combo.currentTextChanged.connect(self._on_ab_color_changed)  # type: ignore[arg-type]
+
+        self.ab_total_price = QDoubleSpinBox()
+        self.ab_total_price.setMaximum(1000000000)
+        self.ab_total_price.setDecimals(0)
+        self.ab_total_price.setPrefix("Rs. ")
+        self.ab_total_price.setValue(0)
+        self.ab_total_price.setEnabled(False)
+
+        self.ab_advance_paid = QDoubleSpinBox()
+        self.ab_advance_paid.setMaximum(1000000000)
+        self.ab_advance_paid.setDecimals(0)
+        self.ab_advance_paid.setPrefix("Rs. ")
+        self.ab_advance_paid.setValue(0)
+
+        self.ab_balance = QLineEdit()
+        self.ab_balance.setReadOnly(True)
+        self.ab_balance.setPlaceholderText("Balance Amount")
+
+        def update_balance() -> None:
+            total = float(self.ab_total_price.value())
+            adv = float(self.ab_advance_paid.value())
+            bal = total - adv
+            self.ab_balance.setText(f"Rs. {bal:,.0f}")
+
+        self.ab_total_price.valueChanged.connect(update_balance)
+        self.ab_advance_paid.valueChanged.connect(update_balance)
+        update_balance()
+
+        form_layout.addWidget(make_label("Customer Name"), 0, 0)
+        form_layout.addWidget(self.ab_customer_name, 0, 1)
+        form_layout.addWidget(make_label("Motorcycle Model"), 0, 2)
+        form_layout.addWidget(self.ab_model_combo, 0, 3)
+
+        form_layout.addWidget(make_label("Color"), 1, 0)
+        form_layout.addWidget(self.ab_color_combo, 1, 1)
+        form_layout.addWidget(make_label("Total Price"), 1, 2)
+        form_layout.addWidget(self.ab_total_price, 1, 3)
+
+        form_layout.addWidget(make_label("Advance Paid"), 2, 0)
+        form_layout.addWidget(self.ab_advance_paid, 2, 1)
+        form_layout.addWidget(make_label("Balance Amount"), 2, 2)
+        form_layout.addWidget(self.ab_balance, 2, 3)
+
+        btn_bar = QHBoxLayout()
+        btn_bar.addStretch(1)
+
+        save_btn = QPushButton("💾 Save Booking & Print")
+        save_btn.setObjectName("primaryButton")
+        save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        save_btn.clicked.connect(self._save_advance_booking)
+
+        refresh_btn = QPushButton("↻ Refresh")
+        refresh_btn.setObjectName("resetButton")
+        refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        refresh_btn.clicked.connect(self._refresh_advance_booking_page)
+
+        print_btn = QPushButton("🖨️ Print Selected")
+        print_btn.setObjectName("resetButton")
+        print_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        print_btn.clicked.connect(self._print_selected_advance_booking)
+
+        btn_bar.addWidget(print_btn)
+        btn_bar.addWidget(refresh_btn)
+        btn_bar.addWidget(save_btn)
+
+        form_layout.addLayout(btn_bar, 3, 0, 1, 4)
+        layout.addWidget(form_card)
+
+        class EnterToNextFilter(QObject):
+            def __init__(self, next_widget, on_last, parent_widget):
+                super().__init__(parent_widget)
+                self.next_widget = next_widget
+                self.on_last = on_last
+                self.parent_widget = parent_widget
+
+            def eventFilter(self, obj, event):
+                if event.type() == QEvent.Type.KeyPress and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                    if self.next_widget:
+                        self.next_widget.setFocus()
+                    else:
+                        self.on_last()
+                    return True
+                return super().eventFilter(obj, event)
+
+        self.ab_customer_name.installEventFilter(EnterToNextFilter(self.ab_model_combo, self._save_advance_booking, page))
+        self.ab_model_combo.installEventFilter(EnterToNextFilter(self.ab_color_combo, self._save_advance_booking, page))
+        self.ab_color_combo.installEventFilter(EnterToNextFilter(self.ab_advance_paid, self._save_advance_booking, page))
+        self.ab_advance_paid.installEventFilter(EnterToNextFilter(None, self._save_advance_booking, page))
+
+        QWidget.setTabOrder(self.ab_customer_name, self.ab_model_combo)
+        QWidget.setTabOrder(self.ab_model_combo, self.ab_color_combo)
+        QWidget.setTabOrder(self.ab_color_combo, self.ab_advance_paid)
+
+        table_container = QFrame()
+        table_container.setObjectName("card")
+        table_layout = QVBoxLayout(table_container)
+        table_layout.setContentsMargins(1, 1, 1, 1)
+
+        self.ab_table_model = AdvanceBookingsTableModel()
+        self.ab_table_view = QTableView()
+        self.ab_table_view.setModel(self.ab_table_model)
+        self.ab_table_view.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self.ab_table_view.setSelectionMode(QTableView.SelectionMode.SingleSelection)
+        self.ab_table_view.setAlternatingRowColors(True)
+        self.ab_table_view.setShowGrid(False)
+        self.ab_table_view.doubleClicked.connect(lambda _i: self._print_selected_advance_booking())
+        self.ab_table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.ab_table_view.horizontalHeader().setStretchLastSection(True)
+        self.ab_table_view.verticalHeader().setVisible(False)
+
+        table_layout.addWidget(self.ab_table_view)
+        layout.addWidget(table_container, 1)
+
+        self._load_ab_models()
+        self._reload_advance_bookings()
+        self.ab_customer_name.setFocus()
+
+        return page
+
+    def _reload_advance_bookings(self) -> None:
+        if not hasattr(self, "ab_table_model"):
+            return
+        db = SessionLocal()
+        try:
+            bookings = advance_booking_service.list_bookings(db, limit=300)
+            rows: List[AdvanceBookingRow] = []
+            for b in bookings:
+                rows.append(
+                    AdvanceBookingRow(
+                        booking_number=b.booking_number,
+                        created_at=b.created_at,
+                        customer_name=b.customer_name,
+                        motorcycle_model=b.motorcycle_model,
+                        color=b.color,
+                        total_price=float(b.total_price or 0.0),
+                        advance_paid=float(b.advance_paid or 0.0),
+                        balance_amount=float(b.balance_amount or 0.0),
+                        status=b.status or "",
+                    )
+                )
+            self.ab_table_model.update_rows(rows)
+        except Exception as e:
+            logger.error(f"Advance booking reload failed: {e}", exc_info=True)
+            self._show_error("Error", f"Failed to load bookings: {e}")
+        finally:
+            db.close()
+
+    def _refresh_advance_booking_page(self) -> None:
+        self._load_ab_models()
+        self._reload_advance_bookings()
+
+    def _load_ab_models(self) -> None:
+        if not hasattr(self, "ab_model_combo"):
+            return
+
+        prices = price_service.get_all_active_prices()
+        models: List[str] = []
+        colors: List[str] = []
+        for p in prices:
+            if p.product_model and p.product_model.model_name and p.product_model.model_name not in models:
+                models.append(p.product_model.model_name)
+            opt = getattr(p, "optional_features", None)
+            if opt and isinstance(opt, dict):
+                colors_str = opt.get("colors") or opt.get("color") or ""
+                if colors_str:
+                    for part in str(colors_str).split(","):
+                        value = part.strip()
+                        if value and value not in colors:
+                            colors.append(value)
+
+        self.ab_model_combo.blockSignals(True)
+        self.ab_model_combo.clear()
+        self.ab_model_combo.addItem("")
+        for m in models:
+            self.ab_model_combo.addItem(m)
+        self.ab_model_combo.blockSignals(False)
+
+        self.ab_color_combo.blockSignals(True)
+        self.ab_color_combo.clear()
+        self.ab_color_combo.addItem("")
+        for c in colors:
+            self.ab_color_combo.addItem(c)
+        self.ab_color_combo.blockSignals(False)
+
+        self._ab_current_price = None
+        self.ab_total_price.blockSignals(True)
+        self.ab_total_price.setValue(0)
+        self.ab_total_price.blockSignals(False)
+
+    def _on_ab_model_changed(self, model_name: str) -> None:
+        if not hasattr(self, "ab_color_combo"):
+            return
+        self._update_ab_price()
+
+    def _on_ab_color_changed(self, color: str) -> None:
+        self._update_ab_price()
+
+    def _update_ab_price(self) -> None:
+        model_name = self.ab_model_combo.currentText() if hasattr(self, "ab_model_combo") else ""
+        color = self.ab_color_combo.currentText() if hasattr(self, "ab_color_combo") else ""
+
+        if not model_name or not color:
+            self._ab_current_price = None
+            self.ab_total_price.blockSignals(True)
+            self.ab_total_price.setValue(0)
+            self.ab_total_price.blockSignals(False)
+            return
+
+        price = price_service.get_price_by_model_and_color(model_name, color)
+        self._ab_current_price = price
+        self.ab_total_price.blockSignals(True)
+        self.ab_total_price.setValue(float(getattr(price, "total_price", 0) or 0) if price else 0)
+        self.ab_total_price.blockSignals(False)
+
+    def _save_advance_booking(self) -> None:
+        name = (self.ab_customer_name.text() or "").strip()
+        model = (self.ab_model_combo.currentText() or "").strip()
+        color = (self.ab_color_combo.currentText() or "").strip()
+        total = float(self.ab_total_price.value())
+        advance = float(self.ab_advance_paid.value())
+
+        if not name:
+            self._show_error("Validation Error", "Customer Name is required.")
+            self.ab_customer_name.setFocus()
+            return
+        if not model:
+            self._show_error("Validation Error", "Motorcycle Model is required.")
+            self.ab_model_combo.setFocus()
+            return
+        if not color:
+            self._show_error("Validation Error", "Color is required.")
+            self.ab_color_combo.setFocus()
+            return
+        if total <= 0:
+            self._show_error("Validation Error", "Price is not available for the selected Model/Color. Please update Price List first.")
+            self.ab_color_combo.setFocus()
+            return
+        if advance < 0 or advance > total:
+            self._show_error("Validation Error", "Advance Paid must be between 0 and Total Price.")
+            self.ab_advance_paid.setFocus()
+            return
+
+        db = SessionLocal()
+        try:
+            booking = advance_booking_service.create_booking(
+                db=db,
+                customer_name=name,
+                motorcycle_model=model,
+                color=color,
+                total_price=total,
+                advance_paid=advance,
+            )
+            html = print_service_v2.render_advance_booking_receipt(
+                {
+                    "booking_number": booking.booking_number,
+                    "created_at": booking.created_at,
+                    "customer_name": booking.customer_name,
+                    "motorcycle_model": booking.motorcycle_model,
+                    "color": booking.color,
+                    "total_price": booking.total_price,
+                    "advance_paid": booking.advance_paid,
+                    "balance_amount": booking.balance_amount,
+                }
+            )
+            print_service_v2.print_html(html, f"Advance Booking Receipt - {booking.booking_number}")
+            self._reload_advance_bookings()
+            self.ab_customer_name.clear()
+            self.ab_model_combo.setCurrentIndex(0)
+            self.ab_color_combo.setCurrentIndex(0)
+            self.ab_total_price.blockSignals(True)
+            self.ab_total_price.setValue(0)
+            self.ab_total_price.blockSignals(False)
+            self.ab_advance_paid.setValue(0)
+            self.ab_customer_name.setFocus()
+        except Exception as e:
+            logger.error(f"Advance booking save failed: {e}", exc_info=True)
+            self._show_error("Error", f"Failed to save booking: {e}")
+        finally:
+            db.close()
+
+    def _print_selected_advance_booking(self) -> None:
+        if not hasattr(self, "ab_table_view"):
+            return
+        selection = self.ab_table_view.selectionModel().selectedRows()
+        if not selection:
+            self._show_error("Selection Required", "Please select a booking to print.")
+            return
+        row = selection[0].row()
+        row_data = self.ab_table_model._rows[row]
+
+        db = SessionLocal()
+        try:
+            booking = advance_booking_service.get_by_booking_number(db, row_data.booking_number)
+            if not booking:
+                self._show_error("Error", "Booking not found.")
+                return
+            html = print_service_v2.render_advance_booking_receipt(
+                {
+                    "booking_number": booking.booking_number,
+                    "created_at": booking.created_at,
+                    "customer_name": booking.customer_name,
+                    "motorcycle_model": booking.motorcycle_model,
+                    "color": booking.color,
+                    "total_price": booking.total_price,
+                    "advance_paid": booking.advance_paid,
+                    "balance_amount": booking.balance_amount,
+                }
+            )
+            print_service_v2.print_html(html, f"Advance Booking Receipt - {booking.booking_number}")
+        except Exception as e:
+            logger.error(f"Advance booking print failed: {e}", exc_info=True)
+            self._show_error("Print Error", f"Failed to print receipt: {e}")
+        finally:
+            db.close()
+
     def _create_spare_ledger_page(self) -> QWidget:
         page = QWidget(self)
         layout = QVBoxLayout(page)
@@ -6769,6 +7325,9 @@ class MainWindow(QMainWindow):
             self._reload_customers()
         elif key == "dealers":
             self._reload_dealers()
+        elif key == "advance_booking":
+            self._load_ab_models()
+            self._reload_advance_bookings()
         elif key == "prices":
             self._reload_prices()
         elif key == "spare_ledger":
@@ -8270,6 +8829,30 @@ class DealerRow:
         self.ntn = ntn
 
 
+class AdvanceBookingRow:
+    def __init__(
+        self,
+        booking_number: str,
+        created_at: dt.datetime | None,
+        customer_name: str,
+        motorcycle_model: str,
+        color: str,
+        total_price: float,
+        advance_paid: float,
+        balance_amount: float,
+        status: str,
+    ) -> None:
+        self.booking_number = booking_number
+        self.created_at = created_at
+        self.customer_name = customer_name
+        self.motorcycle_model = motorcycle_model
+        self.color = color
+        self.total_price = total_price
+        self.advance_paid = advance_paid
+        self.balance_amount = balance_amount
+        self.status = status
+
+
 class SpareLedgerRow:
     def __init__(
         self,
@@ -8550,6 +9133,71 @@ class DealersTableModel(QAbstractTableModel):
         return super().headerData(section, orientation, role)
 
     def update_rows(self, rows: List[DealerRow]) -> None:
+        self.beginResetModel()
+        self._rows = rows
+        self.endResetModel()
+
+
+class AdvanceBookingsTableModel(QAbstractTableModel):
+    headers = ["Booking #", "Date", "Customer", "Model", "Color", "Total", "Advance", "Balance", "Status"]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._rows: List[AdvanceBookingRow] = []
+
+    def rowCount(self, parent: QModelIndex | None = None) -> int:
+        return len(self._rows)
+
+    def columnCount(self, parent: QModelIndex | None = None) -> int:
+        return len(self.headers)
+
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
+        if not index.isValid():
+            return None
+        row = self._rows[index.row()]
+        col = index.column()
+
+        if role == Qt.ItemDataRole.DisplayRole:
+            if col == 0:
+                return row.booking_number
+            if col == 1:
+                return row.created_at.strftime("%Y-%m-%d %H:%M") if row.created_at else ""
+            if col == 2:
+                return row.customer_name
+            if col == 3:
+                return row.motorcycle_model
+            if col == 4:
+                return row.color
+            if col == 5:
+                return f"{row.total_price:,.0f}"
+            if col == 6:
+                return f"{row.advance_paid:,.0f}"
+            if col == 7:
+                return f"{row.balance_amount:,.0f}"
+            if col == 8:
+                return row.status
+
+        if role == Qt.ItemDataRole.TextAlignmentRole:
+            if col in (5, 6, 7):
+                return Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            return Qt.AlignmentFlag.AlignCenter
+
+        if role == Qt.ItemDataRole.ForegroundRole and col == 8:
+            if (row.status or "").upper() == "ACTIVE":
+                return Qt.GlobalColor.darkGreen
+            return Qt.GlobalColor.darkYellow
+
+        return None
+
+    def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.ItemDataRole.DisplayRole):
+        if role != Qt.ItemDataRole.DisplayRole:
+            return None
+        if orientation == Qt.Orientation.Horizontal:
+            if 0 <= section < len(self.headers):
+                return self.headers[section]
+        return super().headerData(section, orientation, role)
+
+    def update_rows(self, rows: List[AdvanceBookingRow]) -> None:
         self.beginResetModel()
         self._rows = rows
         self.endResetModel()

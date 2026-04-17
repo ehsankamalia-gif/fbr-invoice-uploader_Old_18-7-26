@@ -69,6 +69,114 @@ class PrintServiceV2:
             logger.error(f"Failed to render authority letter template: {e}", exc_info=True)
             raise
 
+    def render_advance_booking_receipt(self, booking_data: Dict[str, Any]) -> str:
+        data = self._get_business_info()
+        data.update(booking_data or {})
+
+        created_at = data.get("created_at")
+        if isinstance(created_at, dt.datetime):
+            created_at_str = created_at.strftime("%Y-%m-%d %H:%M")
+        else:
+            created_at_str = str(created_at or dt.datetime.now().strftime("%Y-%m-%d %H:%M"))
+
+        def esc(v: object) -> str:
+            s = str(v if v is not None else "")
+            return (
+                s.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace('"', "&quot;")
+                .replace("'", "&#39;")
+            )
+
+        booking_number = esc(data.get("booking_number", ""))
+        customer_name = esc(data.get("customer_name", ""))
+        motorcycle_model = esc(data.get("motorcycle_model", ""))
+        color = esc(data.get("color", ""))
+        total_price = esc(f"{float(data.get('total_price', 0.0)):,.0f}")
+        advance_paid = esc(f"{float(data.get('advance_paid', 0.0)):,.0f}")
+        balance_amount = esc(f"{float(data.get('balance_amount', 0.0)):,.0f}")
+
+        business_name = esc(data.get("business_name", ""))
+        business_address = esc(data.get("business_address", ""))
+        business_phone = esc(data.get("business_phone", ""))
+
+        def render_copy(label: str) -> str:
+            return f"""
+              <div class="copy">
+                <div class="copy-title">{esc(label)}</div>
+                <div class="biz">
+                  <div class="biz-name">{business_name}</div>
+                  <div class="biz-meta">{business_address}</div>
+                  <div class="biz-meta">{business_phone}</div>
+                </div>
+                <div class="row"><span class="k">Booking #</span><span class="v mono">{booking_number}</span></div>
+                <div class="row"><span class="k">Date</span><span class="v">{esc(created_at_str)}</span></div>
+                <div class="hr"></div>
+                <div class="row"><span class="k">Customer</span><span class="v">{customer_name}</span></div>
+                <div class="row"><span class="k">Model</span><span class="v">{motorcycle_model}</span></div>
+                <div class="row"><span class="k">Color</span><span class="v">{color}</span></div>
+                <div class="hr"></div>
+                <div class="row"><span class="k">Total Price</span><span class="v text-end">Rs. {total_price}</span></div>
+                <div class="row"><span class="k">Advance Paid</span><span class="v text-end">Rs. {advance_paid}</span></div>
+                <div class="row total"><span class="k">Balance</span><span class="v text-end">Rs. {balance_amount}</span></div>
+                <div class="sign">
+                  <div class="sig-line"></div>
+                  <div class="sig-label">Signature / Stamp</div>
+                </div>
+              </div>
+            """
+
+        html = f"""
+        <!doctype html>
+        <html>
+          <head>
+            <meta charset="utf-8"/>
+            <meta name="viewport" content="width=device-width, initial-scale=1"/>
+            <title>Advance Booking Receipt</title>
+            <style>
+              @page {{ size: A4 landscape; margin: 10mm; }}
+              body {{ font-family: Arial, sans-serif; font-size: 12px; color: #111; }}
+              .wrap {{ display: flex; gap: 10mm; }}
+              .copy {{
+                flex: 1;
+                border: 1px solid #111;
+                padding: 8mm;
+                min-height: 160mm;
+                box-sizing: border-box;
+              }}
+              .copy-title {{
+                text-align: center;
+                font-weight: 700;
+                font-size: 14px;
+                margin-bottom: 6mm;
+                text-transform: uppercase;
+              }}
+              .biz {{ text-align: center; margin-bottom: 6mm; }}
+              .biz-name {{ font-weight: 700; font-size: 16px; }}
+              .biz-meta {{ font-size: 11px; }}
+              .row {{ display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; }}
+              .k {{ color: #333; }}
+              .v {{ font-weight: 600; }}
+              .mono {{ font-family: monospace; }}
+              .hr {{ border-top: 1px dashed #999; margin: 5mm 0; }}
+              .text-end {{ text-align: right; }}
+              .total .k, .total .v {{ font-size: 13px; font-weight: 800; }}
+              .sign {{ margin-top: 12mm; }}
+              .sig-line {{ border-top: 1px solid #111; width: 65%; margin-left: auto; }}
+              .sig-label {{ text-align: right; font-size: 10px; margin-top: 2mm; color: #333; }}
+            </style>
+          </head>
+          <body>
+            <div class="wrap">
+              {render_copy("Showroom Copy")}
+              {render_copy("Customer Copy")}
+            </div>
+          </body>
+        </html>
+        """
+        return html
+
     def print_html(self, html_content: str, title: str = "Print Document"):
         """Displays a print preview dialog and handles the printing process."""
         try:

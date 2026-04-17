@@ -100,6 +100,24 @@ class InvoiceItem(Base):
     
     invoice = relationship("Invoice", back_populates="items")
 
+
+class AdvanceBooking(Base):
+    __tablename__ = "advance_bookings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    booking_number = Column(String(50), unique=True, index=True, nullable=False)
+    created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
+
+    customer_name = Column(String(100), nullable=False)
+    motorcycle_model = Column(String(50), nullable=False)
+    color = Column(String(30), nullable=False)
+
+    total_price = Column(Float, nullable=False)
+    advance_paid = Column(Float, nullable=False)
+    balance_amount = Column(Float, nullable=False)
+
+    status = Column(String(20), default="ACTIVE", index=True)
+
 class CapturedData(Base):
     __tablename__ = "captured_data"
 
