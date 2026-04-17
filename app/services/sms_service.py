@@ -4,11 +4,13 @@ import base64
 import socket
 import uuid
 import time
+import threading
 from typing import List, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_result, RetryError
 from app.db.models import SMSQueue, SMSStatus, SMSConfiguration
 from app.db.session import SessionLocal
 import datetime as dt
+from sqlalchemy import or_
 from android_sms_gateway import APIClient, Message
 from android_sms_gateway.domain import TextMessage
 
@@ -19,6 +21,8 @@ class SMSService:
         # Connection pooling
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "FBR-Uploader/2.0 (Clean Architecture)"})
+        self._stop_event = threading.Event()
+        self._scheduler_thread: Optional[threading.Thread] = None
 
     def send_sms_via_wifi(self, ip: str, port: str, phone_number: str, msg_content: str, 
                           api_key: Optional[str] = None, 
@@ -274,11 +278,21 @@ class SMSService:
         db = SessionLocal()
         try:
             # Get config
-            config = db.query(SMSConfiguration).first()
-            if not config or not config.is_enabled:
+            config = db.query(SMSConfiguration).filter(SMSConfiguration.is_enabled == True).first()
+            if not config:
                 return
 
-            pending_items = db.query(SMSQueue).filter(SMSQueue.status == SMSStatus.PENDING).all()
+            now = dt.datetime.utcnow()
+            pending_items = (
+                db.query(SMSQueue)
+                .filter(SMSQueue.channel == "SMS")
+                .filter(SMSQueue.status.in_([SMSStatus.PENDING, SMSStatus.FAILED, SMSStatus.SCHEDULED]))
+                .filter(or_(SMSQueue.next_retry_at.is_(None), SMSQueue.next_retry_at <= now))
+                .filter(SMSQueue.retry_count < SMSQueue.max_retries)
+                .order_by(SMSQueue.id.asc())
+                .limit(25)
+                .all()
+            )
             for item in pending_items:
                 item.status = SMSStatus.SENDING
                 db.commit()
@@ -287,27 +301,25 @@ class SMSService:
                 error_msg = ""
 
                 # 1. Handle SMS Channel
-                if not config.is_enabled:
-                    error_msg = "SMS Notifications are disabled."
-                elif config.gateway_type == 'CLOUD' and config.api_url:
+                if (config.gateway_type or "").upper() == 'CLOUD' and config.api_url:
                     success, error_msg = self.send_sms_via_cloud(
-                        config.api_url,
-                        item.phone_number,
-                        item.message,
-                        config.api_key,
-                        config.cloud_username,
-                        config.cloud_password
+                        (config.api_url or "").strip(),
+                        (item.phone_number or "").strip(),
+                        (item.message or "").strip(),
+                        (config.api_key or None),
+                        (config.cloud_username or None),
+                        (config.cloud_password or None)
                     )
                 elif config.gateway_ip:
                     success, error_msg = self.send_sms_via_wifi(
-                        config.gateway_ip, 
-                        config.gateway_port, 
-                        item.phone_number, 
-                        item.message,
-                        config.api_key,
-                        config.gateway_username,
-                        config.gateway_password,
-                        use_https=config.use_https
+                        (config.gateway_ip or "").strip(),
+                        (config.gateway_port or "8080"),
+                        (item.phone_number or "").strip(),
+                        (item.message or "").strip(),
+                        (config.api_key or None),
+                        (config.gateway_username or None),
+                        (config.gateway_password or None),
+                        use_https=bool(getattr(config, "use_https", False))
                     )
                 else:
                     error_msg = "SMS Gateway not configured properly."
@@ -315,16 +327,25 @@ class SMSService:
                 if success:
                     item.status = SMSStatus.SENT
                     item.sent_at = dt.datetime.utcnow()
+                    item.error_message = None
+                    item.next_retry_at = None
                     logger.info(f"[QUEUE] {item.channel} {item.id} successfully sent to {item.phone_number}")
                 else:
-                    item.retry_count += 1
-                    item.error_message = error_msg
-                    if item.retry_count >= 3:
+                    item.retry_count = int(item.retry_count or 0) + 1
+                    item.error_message = (error_msg or "Unknown error")[:255]
+                    history = item.retry_history or []
+                    history.append({"ts": dt.datetime.utcnow().isoformat(), "attempt": int(item.retry_count), "error": item.error_message})
+                    item.retry_history = history
+
+                    if int(item.retry_count) >= int(item.max_retries or 3):
                         item.status = SMSStatus.FAILED
-                        logger.error(f"[QUEUE] {item.channel} {item.id} FAILED permanently after {item.retry_count} attempts: {error_msg}")
+                        item.next_retry_at = None
+                        logger.error(f"[QUEUE] {item.channel} {item.id} FAILED permanently after {item.retry_count} attempts: {item.error_message}")
                     else:
-                        item.status = SMSStatus.PENDING # Retry later
-                        logger.warning(f"[QUEUE] {item.channel} {item.id} failed attempt {item.retry_count}. Retrying later. Error: {error_msg}")
+                        item.status = SMSStatus.PENDING
+                        backoff = min(3600, 30 * (2 ** max(0, int(item.retry_count) - 1)))
+                        item.next_retry_at = dt.datetime.utcnow() + dt.timedelta(seconds=backoff)
+                        logger.warning(f"[QUEUE] {item.channel} {item.id} failed attempt {item.retry_count}. Retrying at {item.next_retry_at}. Error: {item.error_message}")
                 
                 db.commit()
         except Exception as e:
@@ -364,5 +385,42 @@ class SMSService:
             db.add(new_sms)
             
         db.commit()
+
+    def start_scheduler(self) -> None:
+        if self._scheduler_thread and self._scheduler_thread.is_alive():
+            return
+        self._stop_event.clear()
+        self._scheduler_thread = threading.Thread(target=self._run_scheduler, daemon=True)
+        self._scheduler_thread.start()
+        logger.info("SMS scheduler started.")
+
+    def stop_scheduler(self) -> None:
+        self._stop_event.set()
+        if self._scheduler_thread and self._scheduler_thread.is_alive():
+            self._scheduler_thread.join(timeout=2)
+        try:
+            self.session.close()
+        except Exception:
+            pass
+        logger.info("SMS scheduler stopped.")
+
+    def _run_scheduler(self) -> None:
+        while not self._stop_event.is_set():
+            delay = 5
+            db = SessionLocal()
+            db = SessionLocal()
+                config = db.query(SMSConfiguration).filter(SMSConfiguration.is_enabled == True).first()
+                if config:
+                    delay = int(getattr(config, "delay_seconds", 5) or 5)
+                    self.process_queue()
+                logger.error(f"SMS scheduler config read failed: {e}", exc_info=True)
+                logger.error(f"SMS scheduler tick failed: {e}", exc_info=True)
+                db.close()
+
+            try:
+                self.process_queue()
+            except Exception as e:
+                logger.error(f"SMS scheduler tick failed: {e}", exc_info=True)
+                db.close()
 
 sms_service = SMSService()
