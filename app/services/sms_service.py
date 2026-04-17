@@ -408,19 +408,20 @@ class SMSService:
         while not self._stop_event.is_set():
             delay = 5
             db = SessionLocal()
-            db = SessionLocal()
+            try:
                 config = db.query(SMSConfiguration).filter(SMSConfiguration.is_enabled == True).first()
                 if config:
                     delay = int(getattr(config, "delay_seconds", 5) or 5)
-                    self.process_queue()
+            except Exception as e:
                 logger.error(f"SMS scheduler config read failed: {e}", exc_info=True)
-                logger.error(f"SMS scheduler tick failed: {e}", exc_info=True)
+            finally:
                 db.close()
 
             try:
                 self.process_queue()
             except Exception as e:
                 logger.error(f"SMS scheduler tick failed: {e}", exc_info=True)
-                db.close()
+
+            time.sleep(max(1, int(delay)))
 
 sms_service = SMSService()
