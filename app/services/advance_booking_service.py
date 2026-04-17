@@ -333,6 +333,12 @@ class AdvanceBookingService:
         if required_balance > 0:
             booking.delivery_paid = float(getattr(booking, "delivery_paid", 0.0) or 0.0) + pay
             booking.balance_amount = 0.0
+
+        # Final safety check to prevent data corruption
+        if booking.advance_remaining < 0 or booking.balance_amount < 0:
+            db.rollback()
+            raise ValueError("Transaction aborted: Delivery would result in negative financial balances.")
+
         try:
             if apply_amount > 0:
                 db.add(
@@ -527,7 +533,7 @@ class AdvanceBookingService:
         return booking
 
     def get_summary(self, db: Session) -> dict:
-        total_advance = db.query(func.coalesce(func.sum(AdvanceBooking.advance_paid), 0.0)).scalar() or 0.0
+        # Active Bookings (Held)
         outstanding_advance = (
             db.query(func.coalesce(func.sum(AdvanceBooking.advance_remaining), 0.0))
             .filter(AdvanceBooking.status == "ACTIVE")
@@ -540,24 +546,47 @@ class AdvanceBookingService:
             .scalar()
             or 0.0
         )
-        delivered_count = (
-            db.query(func.count(AdvanceBooking.id))
-            .filter(AdvanceBooking.status == "DELIVERED")
-            .scalar()
-            or 0
-        )
         active_count = (
             db.query(func.count(AdvanceBooking.id))
             .filter(AdvanceBooking.status == "ACTIVE")
             .scalar()
             or 0
         )
+
+        # Delivered Bookings (Realized)
+        delivered_total_value = (
+            db.query(func.coalesce(func.sum(AdvanceBooking.total_price), 0.0))
+            .filter(AdvanceBooking.status == "DELIVERED")
+            .scalar()
+            or 0.0
+        )
+        delivered_advance = (
+            db.query(func.coalesce(func.sum(AdvanceBooking.advance_paid), 0.0))
+            .filter(AdvanceBooking.status == "DELIVERED")
+            .scalar()
+            or 0.0
+        )
+        delivered_balance_collected = (
+            db.query(func.coalesce(func.sum(AdvanceBooking.delivery_paid), 0.0))
+            .filter(AdvanceBooking.status == "DELIVERED")
+            .scalar()
+            or 0.0
+        )
+        delivered_count = (
+            db.query(func.count(AdvanceBooking.id))
+            .filter(AdvanceBooking.status == "DELIVERED")
+            .scalar()
+            or 0
+        )
+
         return {
-            "total_advance": float(total_advance),
             "outstanding_advance": float(outstanding_advance),
             "outstanding_balance": float(outstanding_balance),
-            "delivered_count": int(delivered_count),
             "active_count": int(active_count),
+            "delivered_total_value": float(delivered_total_value),
+            "delivered_advance": float(delivered_advance),
+            "delivered_balance": float(delivered_balance_collected),
+            "delivered_count": int(delivered_count),
         }
 
     def get_active_counts_by_model(self, db: Session, limit: int = 12) -> List[tuple[str, int]]:

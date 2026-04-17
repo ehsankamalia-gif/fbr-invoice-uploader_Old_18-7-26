@@ -6439,14 +6439,23 @@ class MainWindow(QMainWindow):
 
         stats_layout = QHBoxLayout()
         stats_layout.setSpacing(15)
-        self.ab_outstanding_advance_card = self._create_stat_card("OUTSTANDING BALANCE", "Rs. 0", "#2ecc71")
-        self.ab_total_advance_card = self._create_stat_card("TOTAL ADVANCE COLLECTED", "Rs. 0", "#27ae60")
-        self.ab_delivered_count_card = self._create_stat_card("BIKES DELIVERED", "0", "#3498db")
+        
+        # Active Stats
         self.ab_active_count_card = self._create_stat_card("ACTIVE BOOKINGS", "0", "#e67e22")
-        stats_layout.addWidget(self.ab_outstanding_advance_card, 1)
-        stats_layout.addWidget(self.ab_total_advance_card, 1)
-        stats_layout.addWidget(self.ab_delivered_count_card, 1)
+        self.ab_net_advance_card = self._create_stat_card("NET ADVANCE HELD", "Rs. 0", "#2ecc71")
+        self.ab_outstanding_balance_card = self._create_stat_card("PENDING BALANCE", "Rs. 0", "#e74c3c")
+        
+        # Delivered Stats
+        self.ab_delivered_count_card = self._create_stat_card("BIKES DELIVERED", "0", "#3498db")
+        self.ab_delivered_value_card = self._create_stat_card("TOTAL DELIVERED VALUE", "Rs. 0", "#2c3e50")
+        self.ab_realized_advance_card = self._create_stat_card("REALIZED (ADV+BAL)", "Rs. 0", "#27ae60")
+        
         stats_layout.addWidget(self.ab_active_count_card, 1)
+        stats_layout.addWidget(self.ab_net_advance_card, 1)
+        stats_layout.addWidget(self.ab_outstanding_balance_card, 1)
+        stats_layout.addWidget(self.ab_delivered_count_card, 1)
+        stats_layout.addWidget(self.ab_delivered_value_card, 1)
+        stats_layout.addWidget(self.ab_realized_advance_card, 1)
         stats_widget = QWidget()
         stats_widget.setLayout(stats_layout)
         container_layout.addWidget(stats_widget)
@@ -6709,14 +6718,23 @@ class MainWindow(QMainWindow):
     def _update_advance_booking_stats(self, db: Session) -> None:
         try:
             summary = advance_booking_service.get_summary(db)
-            if hasattr(self, "ab_outstanding_advance_card"):
-                self.ab_outstanding_advance_card.value_label.setText(f"Rs. {summary['outstanding_balance']:,.0f}")
-            if hasattr(self, "ab_total_advance_card"):
-                self.ab_total_advance_card.value_label.setText(f"Rs. {summary['total_advance']:,.0f}")
-            if hasattr(self, "ab_delivered_count_card"):
-                self.ab_delivered_count_card.value_label.setText(str(summary["delivered_count"]))
+            # Active
             if hasattr(self, "ab_active_count_card"):
                 self.ab_active_count_card.value_label.setText(str(summary["active_count"]))
+            if hasattr(self, "ab_net_advance_card"):
+                self.ab_net_advance_card.value_label.setText(f"Rs. {summary['outstanding_advance']:,.0f}")
+            if hasattr(self, "ab_outstanding_balance_card"):
+                self.ab_outstanding_balance_card.value_label.setText(f"Rs. {summary['outstanding_balance']:,.0f}")
+            
+            # Delivered
+            if hasattr(self, "ab_delivered_count_card"):
+                self.ab_delivered_count_card.value_label.setText(str(summary["delivered_count"]))
+            if hasattr(self, "ab_delivered_value_card"):
+                self.ab_delivered_value_card.value_label.setText(f"Rs. {summary['delivered_total_value']:,.0f}")
+            if hasattr(self, "ab_realized_advance_card"):
+                # Sum of advance + balance collected for delivered bikes
+                total_realized = summary["delivered_advance"] + summary["delivered_balance"]
+                self.ab_realized_advance_card.value_label.setText(f"Rs. {total_realized:,.0f}")
 
             if hasattr(self, "ab_model_cards_grid"):
                 counts = advance_booking_service.get_active_counts_by_model(db, limit=12)
