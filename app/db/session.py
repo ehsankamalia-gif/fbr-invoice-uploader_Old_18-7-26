@@ -302,6 +302,7 @@ def run_migrations():
                 (6, "Add secret_key and business_name to fbr_configurations", _migration_v6_add_fbr_fields),
                 (7, "Add unique constraint to sms_campaigns.name", _migration_v7_add_sms_campaign_unique_name),
                 (8, "Add reporting templates/schedules/runs tables", _migration_v8_add_reporting_tables),
+                (9, "Add booking_template to sms_configurations", _migration_v9_add_booking_template),
             ]
 
             for version, description, func in migrations:
@@ -517,6 +518,24 @@ def _migration_v8_add_reporting_tables(conn) -> bool:
         return True
     except Exception as e:
         logger.error(f"Migration v8 failed: {e}", exc_info=True)
+        return False
+
+def _migration_v9_add_booking_template(conn) -> bool:
+    """Adds the booking_template column to the sms_configurations table."""
+    try:
+        # Check if the column already exists
+        try:
+            conn.execute(text("SELECT booking_template FROM sms_configurations LIMIT 1"))
+        except Exception:
+            # Column is missing, add it
+            logger.info("Adding column 'booking_template' to 'sms_configurations'...")
+            conn.execute(text("ALTER TABLE sms_configurations ADD COLUMN booking_template VARCHAR(500)"))
+            try:
+                conn.commit()
+            except: pass
+        return True
+    except Exception as e:
+        logger.error(f"Migration v9 failed: {e}", exc_info=True)
         return False
 
 def get_db():

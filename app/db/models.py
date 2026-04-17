@@ -109,14 +109,45 @@ class AdvanceBooking(Base):
     created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
 
     customer_name = Column(String(100), nullable=False)
+    customer_phone = Column(String(20), nullable=True)
     motorcycle_model = Column(String(50), nullable=False)
+    model_code = Column(String(30), index=True, nullable=True)
+    model_seq = Column(Integer, index=True, nullable=True)
     color = Column(String(30), nullable=False)
 
     total_price = Column(Float, nullable=False)
     advance_paid = Column(Float, nullable=False)
     balance_amount = Column(Float, nullable=False)
+    delivery_paid = Column(Float, default=0.0, nullable=False)
 
     status = Column(String(20), default="ACTIVE", index=True)
+    delivered_at = Column(DateTime, nullable=True, index=True)
+    advance_remaining = Column(Float, default=0.0, nullable=False)
+    advance_applied = Column(Float, default=0.0, nullable=False)
+
+
+class AdvanceBookingModelCounter(Base):
+    __tablename__ = "advance_booking_model_counters"
+
+    id = Column(Integer, primary_key=True, index=True)
+    model_code = Column(String(30), unique=True, index=True, nullable=False)
+    last_seq = Column(Integer, default=0, nullable=False)
+    updated_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
+
+
+class AdvanceBookingAudit(Base):
+    __tablename__ = "advance_booking_audit"
+
+    id = Column(Integer, primary_key=True, index=True)
+    booking_number = Column(String(50), index=True, nullable=False)
+    action = Column(String(30), index=True, nullable=False)
+    amount = Column(Float, nullable=False)
+    before_advance_remaining = Column(Float, nullable=False)
+    after_advance_remaining = Column(Float, nullable=False)
+    before_balance_amount = Column(Float, nullable=True)
+    after_balance_amount = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
+    note = Column(String(255), nullable=True)
 
 class CapturedData(Base):
     __tablename__ = "captured_data"
@@ -412,6 +443,7 @@ class SMSConfiguration(Base):
     
     # Templates
     invoice_template = Column(String(500), default="Dear {customer}, your invoice {invoice_no} for Rs. {amount} has been generated. FBR ID: {fbr_id}")
+    booking_template = Column(String(500), default="Dear {customer}, your booking for {model} ({color}) is confirmed. Booking #: {booking_no}. Paid: Rs. {paid}. Balance: Rs. {balance}.")
     otp_template = Column(String(500), default="Your verification code is {code}")
     
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)

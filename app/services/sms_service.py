@@ -34,7 +34,24 @@ class SMSService:
         start_time = time.time()
         protocol = "https" if use_https else "http"
         
+        # Sanitize IP/Hostname: remove protocol prefixes and handle accidental port inclusion
+        ip = (ip or "").strip()
+        if "://" in ip:
+            ip = ip.split("://")[-1]
+        if ":" in ip:
+            # If user entered 192.168.1.10:8080, we extract the IP and potentially use that port if not specified
+            parts = ip.split(":")
+            ip = parts[0]
+            if not port or port == "8080":
+                port = parts[1]
+        
+        # Remove any trailing slashes or spaces
+        ip = ip.replace("/", "").strip()
+
         logger.info(f"[TX:{tx_id}] --- Starting SMS Send to {phone_number} at {protocol}://{ip}:{port} ---")
+        
+        if not ip:
+            return False, "Gateway IP/Hostname is empty after sanitization."
         
         def check_timeout():
             if time.time() - start_time > total_timeout:
@@ -47,8 +64,19 @@ class SMSService:
             sock_timeout = 5.0 if "." in ip and not ip.startswith(("192.", "10.", "172.16.")) else 2.5
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(sock_timeout)
-            result = sock.connect_ex((ip, int(port)))
-            sock.close()
+            
+            try:
+                p_int = int(port or "8080")
+            except ValueError:
+                return False, f"Invalid port: {port}. Please use a numeric port (e.g., 8080)."
+
+            try:
+                result = sock.connect_ex((ip, p_int))
+                sock.close()
+            except socket.gaierror:
+                return False, f"Invalid Gateway IP or Hostname: '{ip}'. Please ensure it is a correct IP address or domain name without 'http://'."
+            except Exception as e:
+                return False, f"Socket error: {str(e)}"
             if result != 0:
                 reason = "Port closed or unreachable" if result == 10061 else f"Error code {result}"
                 return False, f"Unreachable: {ip}:{port} ({reason}). Check gateway connectivity."

@@ -511,7 +511,7 @@ class SMSConfigDialog(BaseSettingsDialog):
         tmpl_group.setStyleSheet("background-color: #fcfcfc; border: 1px solid #dee2e6; border-radius: 4px;")
         tmpl_layout = QVBoxLayout(tmpl_group)
         
-        tmpl_title = QLabel("MESSAGE TEMPLATE")
+        tmpl_title = QLabel("INVOICE MESSAGE TEMPLATE")
         tmpl_title.setStyleSheet("color: #e67e22; font-size: 14px; border: none; font-weight: bold;")
         tmpl_layout.addWidget(tmpl_title)
         
@@ -522,6 +522,20 @@ class SMSConfigDialog(BaseSettingsDialog):
         help_text = QLabel("Variables: {customer}, {invoice_no}, {amount}, {fbr_id}")
         help_text.setStyleSheet("font-size: 11px; color: #7f8c8d; border: none;")
         tmpl_layout.addWidget(help_text)
+
+        # Booking Template
+        tmpl_layout.addSpacing(10)
+        booking_tmpl_title = QLabel("BOOKING MESSAGE TEMPLATE")
+        booking_tmpl_title.setStyleSheet("color: #27ae60; font-size: 14px; border: none; font-weight: bold;")
+        tmpl_layout.addWidget(booking_tmpl_title)
+        
+        self.booking_template_text = QTextEdit()
+        self.booking_template_text.setFixedHeight(80)
+        tmpl_layout.addWidget(self.booking_template_text)
+        
+        booking_help_text = QLabel("Variables: {customer}, {model}, {color}, {booking_no}, {paid}, {balance}")
+        booking_help_text.setStyleSheet("font-size: 11px; color: #7f8c8d; border: none;")
+        tmpl_layout.addWidget(booking_help_text)
         
         layout.addWidget(tmpl_group)
         
@@ -539,10 +553,22 @@ class SMSConfigDialog(BaseSettingsDialog):
         self.sms_api_key.setText(config.get("api_key", ""))
         
         self.template_text.setPlainText(config.get("invoice_template", ""))
+        self.booking_template_text.setPlainText(config.get("booking_template", ""))
 
     def _on_test_sms(self):
         ip = self.sms_ip.text().strip()
         port = self.sms_port.text().strip()
+        
+        # UI Level Sanitization: If user entered http://192.168.1.10, clean it up
+        if "://" in ip:
+            ip = ip.split("://")[-1]
+        if ":" in ip:
+            parts = ip.split(":")
+            ip = parts[0]
+            if not port or port == "8080":
+                port = parts[1]
+        ip = ip.replace("/", "").strip()
+        
         username = self.sms_username.text().strip()
         password = self.sms_password.text().strip()
         api_key = self.sms_api_key.text().strip()
@@ -572,7 +598,11 @@ class SMSConfigDialog(BaseSettingsDialog):
             else:
                 self._show_error("SMS Test Failed", msg)
         except Exception as e:
-            self._show_error("Error", str(e))
+            err_msg = str(e)
+            if "11001" in err_msg or "getaddrinfo failed" in err_msg:
+                self._show_error("Connection Failed", "Invalid Gateway IP address. Please enter a simple IP like '192.168.1.100' without any 'http://' or slashes.")
+            else:
+                self._show_error("Error", err_msg)
         finally:
             self.sms_test_btn.setEnabled(True)
             self.sms_test_btn.setText("🧪 Test SMS Connection")
@@ -587,7 +617,8 @@ class SMSConfigDialog(BaseSettingsDialog):
                 gateway_password=self.sms_password.text().strip(),
                 use_https=self.sms_https.isChecked(),
                 api_key=self.sms_api_key.text().strip(),
-                invoice_template=self.template_text.toPlainText().strip()
+                invoice_template=self.template_text.toPlainText().strip(),
+                booking_template=self.booking_template_text.toPlainText().strip()
             )
             self._show_success("Saved", "Configuration updated.")
             self.accept()

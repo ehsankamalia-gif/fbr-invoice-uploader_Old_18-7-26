@@ -623,7 +623,8 @@ class SettingsService:
                     "api_key": "",
                     "api_url": "",
                     "use_https": False,
-                    "invoice_template": "Hello {customer}, your invoice {invoice_no} for Rs. {amount} has been generated. FBR ID: {fbr_id}"
+                    "invoice_template": "Hello {customer}, your invoice {invoice_no} for Rs. {amount} has been generated. FBR ID: {fbr_id}",
+                    "booking_template": "Dear {customer}, your booking for {model} ({color}) is confirmed. Booking #: {booking_no}. Paid: Rs. {paid}. Balance: Rs. {balance}."
                 }
             
             return {
@@ -638,7 +639,8 @@ class SettingsService:
                 "cloud_username": getattr(config, 'cloud_username', ""),
                 "cloud_password": getattr(config, 'cloud_password', ""),
                 "api_key": config.api_key,
-                "invoice_template": config.invoice_template
+                "invoice_template": config.invoice_template,
+                "booking_template": getattr(config, 'booking_template', "")
             }
         except Exception as e:
             logger.error(f"Error getting SMS config: {e}")

@@ -63,7 +63,7 @@ from PyQt6.QtWidgets import (
     QProgressDialog,
 )
 
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, Session
 
 from app.core import config
 from app.core.config import settings
@@ -101,6 +101,7 @@ from app.qt_ui.settings_modals import (
     AppUpdatesDialog,
     SMSConfigDialog
 )
+from app.core.signals import booking_signals
 from app.core.logger import logger
 from app.core.version_manager import VersionManager
 from app.updater.updater_manager import UpdaterManager
@@ -449,6 +450,77 @@ class CapturedDataTableModel(QAbstractTableModel):
             ) for r in rows
         ]
         self.endResetModel()
+
+class BookingCard(QFrame):
+    """Dynamic card displaying real-time booking quantity for a specific model."""
+    def __init__(self, model_name: str, count: int = 0, color: str = "#3498db", parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.model_name = model_name
+        self.count = max(0, int(count)) # Prevent negative quantities
+        self.color = color
+        
+        self.setObjectName("bookingCard")
+        self.setMinimumHeight(110)
+        self.setMinimumWidth(180)
+        self.setStyleSheet(f"""
+            QFrame#bookingCard {{
+                border-top: 4px solid {color};
+                background-color: white;
+                border-radius: 8px;
+            }}
+            QLabel#modelTitle {{
+                color: #7f8c8d;
+                font-size: 11px;
+                font-weight: bold;
+                letter-spacing: 0.5px;
+            }}
+            QLabel#countValue {{
+                color: {color};
+                font-size: 28px;
+                font-weight: bold;
+            }}
+            QLabel#countLabel {{
+                color: #95a5a6;
+                font-size: 12px;
+                margin-top: -5px;
+            }}
+        """)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(15, 12, 15, 12)
+        layout.setSpacing(2)
+
+        self.title_lbl = QLabel(model_name.upper())
+        self.title_lbl.setObjectName("modelTitle")
+        self.title_lbl.setWordWrap(True)
+        
+        self.val_lbl = QLabel(str(self.count))
+        self.val_lbl.setObjectName("countValue")
+        
+        self.footer_lbl = QLabel("UNITS BOOKED")
+        self.footer_lbl.setObjectName("countLabel")
+        
+        layout.addWidget(self.title_lbl)
+        layout.addWidget(self.val_lbl)
+        layout.addWidget(self.footer_lbl)
+        layout.addStretch(1)
+        
+        # Connect to booking signals for real-time updates
+        booking_signals.booking_updated.connect(self._on_booking_updated)
+
+    def update_quantity(self, count: int) -> None:
+        """Manually update the displayed quantity."""
+        self.count = max(0, int(count))
+        self.val_lbl.setText(str(self.count))
+        
+        # Highlight update with a quick flash effect (optional, but good for UX)
+        self.val_lbl.setStyleSheet(f"color: {self.color}; font-size: 32px; font-weight: bold;")
+        QTimer.singleShot(500, lambda: self.val_lbl.setStyleSheet(f"color: {self.color}; font-size: 28px; font-weight: bold;"))
+
+    def _on_booking_updated(self, model_name: str, count: int) -> None:
+        """Handle real-time update if this card belongs to the updated model."""
+        if model_name.upper() == self.model_name.upper():
+            self.update_quantity(count)
 
 class NavigationButton(QPushButton):
     def __init__(self, icon_text: str, title: str, page_key: str, parent: QWidget | None = None) -> None:
@@ -1348,6 +1420,19 @@ class MainWindow(QMainWindow):
         stats_layout.addWidget(self.dash_failed_card)
         layout.addLayout(stats_layout)
 
+        # Real-time Bike Booking Cards
+        booking_label = QLabel("BIKE BOOKING STATUS (BY MODEL)")
+        booking_label.setObjectName("groupTitle")
+        layout.addWidget(booking_label)
+        
+        self.dash_booking_host = QWidget()
+        self.dash_booking_grid = QGridLayout(self.dash_booking_host)
+        self.dash_booking_grid.setContentsMargins(0, 0, 0, 0)
+        self.dash_booking_grid.setHorizontalSpacing(20)
+        self.dash_booking_grid.setVerticalSpacing(20)
+        self._dash_booking_card_widgets: Dict[str, BookingCard] = {}
+        layout.addWidget(self.dash_booking_host)
+
         # Recent Invoices Section
         recent_label = QLabel("RECENT SUBMISSIONS")
         recent_label.setObjectName("groupTitle")
@@ -1467,6 +1552,31 @@ class MainWindow(QMainWindow):
             # Also update the FBR counter in header if we're here
             if hasattr(self, "invoice_fbr_stat_value"):
                 self.invoice_fbr_stat_value.setText(str(synced))
+
+            # Update Dynamic Booking Cards on Dashboard
+            if hasattr(self, "dash_booking_grid"):
+                booking_counts = advance_booking_service.get_active_counts_by_model(db, limit=8)
+                
+                # Check for model changes to rebuild layout if needed
+                current_dash_models = set(self._dash_booking_card_widgets.keys())
+                new_dash_models = set(m for m, c in booking_counts)
+                
+                if current_dash_models != new_dash_models:
+                    while self.dash_booking_grid.count():
+                        item = self.dash_booking_grid.takeAt(0)
+                        w = item.widget()
+                        if w: w.setParent(None)
+                    self._dash_booking_card_widgets.clear()
+                    
+                    cols = 4
+                    for i, (model_name, count) in enumerate(booking_counts):
+                        card = BookingCard(model_name or "-", count, "#3498db")
+                        self.dash_booking_grid.addWidget(card, i // cols, i % cols)
+                        self._dash_booking_card_widgets[model_name] = card
+                else:
+                    for model_name, count in booking_counts:
+                        if model_name in self._dash_booking_card_widgets:
+                            self._dash_booking_card_widgets[model_name].update_quantity(count)
 
         except Exception as e:
             logger.error(f"Dashboard refresh error: {e}", exc_info=True)
@@ -3270,6 +3380,29 @@ class MainWindow(QMainWindow):
         template_hint.setStyleSheet("color: #7f8c8d; font-size: 11px; font-style: italic;")
         template_layout.addWidget(template_hint)
 
+        # Booking SMS Template
+        template_layout.addSpacing(10)
+        template_layout.addWidget(QLabel("Booking SMS Template:"))
+        self.sms_booking_template = QTextEdit()
+        self.sms_booking_template.setMaximumHeight(80)
+        self.sms_booking_template.setPlaceholderText("Enter message template... (Placeholders: {customer}, {model}, {color}, {booking_no})")
+        self.sms_booking_template.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self.sms_booking_template.setStyleSheet("""
+            QTextEdit {
+                font-family: 'Jameel Noori Nastaleeq', 'Urdu Typesetting', 'Tahoma', 'Arial';
+                font-size: 18px;
+                line-height: 1.6;
+                padding: 10px;
+                border: 1px solid #ced4da;
+                border-radius: 4px;
+            }
+        """)
+        template_layout.addWidget(self.sms_booking_template)
+        
+        booking_template_hint = QLabel("Placeholders: {customer}, {model}, {color}, {booking_no}, {paid}, {balance}")
+        booking_template_hint.setStyleSheet("color: #7f8c8d; font-size: 11px; font-style: italic;")
+        template_layout.addWidget(booking_template_hint)
+
         container_layout.addWidget(template_group)
 
         # 3. Test SMS
@@ -3817,6 +3950,7 @@ class MainWindow(QMainWindow):
             self.sms_api_key.setText(config.api_key or "")
             self.sms_bulk_delay.setValue(config.delay_seconds or 5)
             self.sms_invoice_template.setPlainText(config.invoice_template)
+            self.sms_booking_template.setPlainText(getattr(config, 'booking_template', '') or "")
                     
         except Exception as e:
             logger.error(f"Error loading SMS config: {e}")
@@ -3842,7 +3976,8 @@ class MainWindow(QMainWindow):
             config.gateway_password = self.sms_gateway_password.text().strip()
             config.api_key = self.sms_api_key.text().strip()
             config.delay_seconds = self.sms_bulk_delay.value()
-            config.invoice_template = self.sms_invoice_template.toPlainText()
+            config.invoice_template = self.sms_invoice_template.toPlainText().strip()
+            config.booking_template = self.sms_booking_template.toPlainText().strip()
             db.commit()
             self._show_success("SMS Saved", "SMS Gateway configuration updated successfully.")
         except Exception as e:
@@ -6233,18 +6368,20 @@ class MainWindow(QMainWindow):
         return page
 
     def _create_advance_booking_page(self) -> QWidget:
-        page = QWidget(self)
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(25)
+        page = QScrollArea(self)
+        page.setWidgetResizable(True)
+        page.setFrameShape(QFrame.Shape.NoFrame)
+        page.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        page.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
 
-        page.setStyleSheet("""
+        host = QWidget()
+        host.setStyleSheet("""
             QWidget { background-color: #f8f9fa; }
             QLabel#pageHeader { font-size: 26px; font-weight: bold; color: #2c3e50; }
             QFrame#card { background-color: white; border: 1px solid #e0e0e0; border-radius: 12px; }
             QLabel.fieldLabel { color: #7f8c8d; font-weight: bold; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
             QLineEdit, QComboBox, QDoubleSpinBox { padding: 10px 15px; border: 1px solid #dee2e6; border-radius: 8px; background-color: #ffffff; font-size: 13px; }
-            QLineEdit:focus, QDoubleSpinBox:focus { border: 2px solid #3498db; background-color: #f7fbfe; }
+            QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus { border: 2px solid #3498db; background-color: #f7fbfe; }
             QPushButton#primaryButton { background-color: #3498db; color: white; border: none; border-radius: 8px; font-weight: bold; padding: 10px 20px; }
             QPushButton#primaryButton:hover { background-color: #2980b9; }
             QPushButton#resetButton { background-color: #f8f9fa; color: #2c3e50; border: 1px solid #dee2e6; border-radius: 8px; font-weight: bold; padding: 10px 20px; }
@@ -6270,6 +6407,18 @@ class MainWindow(QMainWindow):
                 border-bottom: 2px solid #e9ecef;
             }
         """)
+        page.setWidget(host)
+
+        host_layout = QVBoxLayout(host)
+        host_layout.setContentsMargins(0, 0, 0, 0)
+        host_layout.setSpacing(0)
+
+        container = QWidget()
+        container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(24, 24, 24, 24)
+        container_layout.setSpacing(18)
+        host_layout.addWidget(container, 0, Qt.AlignmentFlag.AlignTop)
 
         header_widget = QWidget()
         header_layout = QHBoxLayout(header_widget)
@@ -6286,7 +6435,40 @@ class MainWindow(QMainWindow):
 
         header_layout.addLayout(header_v)
         header_layout.addStretch(1)
-        layout.addWidget(header_widget)
+        container_layout.addWidget(header_widget)
+
+        stats_layout = QHBoxLayout()
+        stats_layout.setSpacing(15)
+        self.ab_outstanding_advance_card = self._create_stat_card("OUTSTANDING BALANCE", "Rs. 0", "#2ecc71")
+        self.ab_total_advance_card = self._create_stat_card("TOTAL ADVANCE COLLECTED", "Rs. 0", "#27ae60")
+        self.ab_delivered_count_card = self._create_stat_card("BIKES DELIVERED", "0", "#3498db")
+        self.ab_active_count_card = self._create_stat_card("ACTIVE BOOKINGS", "0", "#e67e22")
+        stats_layout.addWidget(self.ab_outstanding_advance_card, 1)
+        stats_layout.addWidget(self.ab_total_advance_card, 1)
+        stats_layout.addWidget(self.ab_delivered_count_card, 1)
+        stats_layout.addWidget(self.ab_active_count_card, 1)
+        stats_widget = QWidget()
+        stats_widget.setLayout(stats_layout)
+        container_layout.addWidget(stats_widget)
+
+        model_cards_frame = QFrame()
+        model_cards_frame.setObjectName("card")
+        model_cards_frame.setMinimumHeight(160)
+        model_cards_layout = QVBoxLayout(model_cards_frame)
+        model_cards_layout.setContentsMargins(15, 12, 15, 12)
+        model_cards_layout.setSpacing(10)
+        model_title = QLabel("Bookings Counter by Model")
+        model_title.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        model_cards_layout.addWidget(model_title)
+
+        self.ab_model_cards_host = QWidget()
+        self.ab_model_cards_grid = QGridLayout(self.ab_model_cards_host)
+        self.ab_model_cards_grid.setContentsMargins(0, 0, 0, 0)
+        self.ab_model_cards_grid.setHorizontalSpacing(12)
+        self.ab_model_cards_grid.setVerticalSpacing(12)
+        self._ab_model_card_widgets: Dict[str, BookingCard] = {} # Store cards by model name
+        model_cards_layout.addWidget(self.ab_model_cards_host)
+        container_layout.addWidget(model_cards_frame)
 
         form_card = QFrame()
         form_card.setObjectName("card")
@@ -6298,7 +6480,13 @@ class MainWindow(QMainWindow):
         def make_label(text: str) -> QLabel:
             lbl = QLabel(text)
             lbl.setProperty("class", "fieldLabel")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             return lbl
+
+        form_layout.setColumnStretch(0, 0)
+        form_layout.setColumnStretch(1, 1)
+        form_layout.setColumnStretch(2, 0)
+        form_layout.setColumnStretch(3, 1)
 
         self.ab_customer_name = QLineEdit()
         self.ab_customer_name.setPlaceholderText("Customer Name")
@@ -6352,18 +6540,23 @@ class MainWindow(QMainWindow):
 
         form_layout.addWidget(make_label("Customer Name"), 0, 0)
         form_layout.addWidget(self.ab_customer_name, 0, 1)
-        form_layout.addWidget(make_label("Motorcycle Model"), 0, 2)
-        form_layout.addWidget(self.ab_model_combo, 0, 3)
+        form_layout.addWidget(make_label("Customer Phone"), 0, 2)
+        self.ab_customer_phone = QLineEdit()
+        self.ab_customer_phone.setPlaceholderText("03xxxxxxxxx")
+        form_layout.addWidget(self.ab_customer_phone, 0, 3)
 
-        form_layout.addWidget(make_label("Color"), 1, 0)
-        form_layout.addWidget(self.ab_color_combo, 1, 1)
-        form_layout.addWidget(make_label("Total Price"), 1, 2)
-        form_layout.addWidget(self.ab_total_price, 1, 3)
+        form_layout.addWidget(make_label("Motorcycle Model"), 1, 0)
+        form_layout.addWidget(self.ab_model_combo, 1, 1)
+        form_layout.addWidget(make_label("Color"), 1, 2)
+        form_layout.addWidget(self.ab_color_combo, 1, 3)
 
-        form_layout.addWidget(make_label("Advance Paid"), 2, 0)
-        form_layout.addWidget(self.ab_advance_paid, 2, 1)
-        form_layout.addWidget(make_label("Balance Amount"), 2, 2)
-        form_layout.addWidget(self.ab_balance, 2, 3)
+        form_layout.addWidget(make_label("Total Price"), 2, 0)
+        form_layout.addWidget(self.ab_total_price, 2, 1)
+        form_layout.addWidget(make_label("Advance Paid"), 2, 2)
+        form_layout.addWidget(self.ab_advance_paid, 2, 3)
+
+        form_layout.addWidget(make_label("Balance Amount"), 3, 0)
+        form_layout.addWidget(self.ab_balance, 3, 1)
 
         btn_bar = QHBoxLayout()
         btn_bar.addStretch(1)
@@ -6372,6 +6565,16 @@ class MainWindow(QMainWindow):
         save_btn.setObjectName("primaryButton")
         save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         save_btn.clicked.connect(self._save_advance_booking)
+
+        delivered_btn = QPushButton("✅ Mark Delivered")
+        delivered_btn.setObjectName("resetButton")
+        delivered_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        delivered_btn.clicked.connect(self._mark_selected_booking_delivered)
+
+        active_btn = QPushButton("↩ Mark Active")
+        active_btn.setObjectName("resetButton")
+        active_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        active_btn.clicked.connect(self._mark_selected_booking_active)
 
         refresh_btn = QPushButton("↻ Refresh")
         refresh_btn.setObjectName("resetButton")
@@ -6384,11 +6587,33 @@ class MainWindow(QMainWindow):
         print_btn.clicked.connect(self._print_selected_advance_booking)
 
         btn_bar.addWidget(print_btn)
+        btn_bar.addWidget(delivered_btn)
+        btn_bar.addWidget(active_btn)
         btn_bar.addWidget(refresh_btn)
         btn_bar.addWidget(save_btn)
 
-        form_layout.addLayout(btn_bar, 3, 0, 1, 4)
-        layout.addWidget(form_card)
+        form_layout.addLayout(btn_bar, 4, 0, 1, 4)
+        container_layout.addWidget(form_card)
+
+        filter_card = QFrame()
+        filter_card.setObjectName("card")
+        filter_layout = QHBoxLayout(filter_card)
+        filter_layout.setContentsMargins(15, 12, 15, 12)
+        filter_layout.setSpacing(12)
+
+        self.ab_search_input = QLineEdit()
+        self.ab_search_input.setPlaceholderText("Search booking # / customer / model / color")
+        self.ab_search_input.textChanged.connect(self._reload_advance_bookings)
+
+        self.ab_status_filter = QComboBox()
+        self.ab_status_filter.addItems(["ALL", "ACTIVE", "DELIVERED"])
+        self.ab_status_filter.currentTextChanged.connect(self._reload_advance_bookings)  # type: ignore[arg-type]
+
+        filter_layout.addWidget(QLabel("Filter:"))
+        filter_layout.addWidget(self.ab_search_input, 1)
+        filter_layout.addWidget(QLabel("Status:"))
+        filter_layout.addWidget(self.ab_status_filter)
+        container_layout.addWidget(filter_card)
 
         class EnterToNextFilter(QObject):
             def __init__(self, next_widget, on_last, parent_widget):
@@ -6406,12 +6631,14 @@ class MainWindow(QMainWindow):
                     return True
                 return super().eventFilter(obj, event)
 
-        self.ab_customer_name.installEventFilter(EnterToNextFilter(self.ab_model_combo, self._save_advance_booking, page))
+        self.ab_customer_name.installEventFilter(EnterToNextFilter(self.ab_customer_phone, self._save_advance_booking, page))
+        self.ab_customer_phone.installEventFilter(EnterToNextFilter(self.ab_model_combo, self._save_advance_booking, page))
         self.ab_model_combo.installEventFilter(EnterToNextFilter(self.ab_color_combo, self._save_advance_booking, page))
         self.ab_color_combo.installEventFilter(EnterToNextFilter(self.ab_advance_paid, self._save_advance_booking, page))
         self.ab_advance_paid.installEventFilter(EnterToNextFilter(None, self._save_advance_booking, page))
 
-        QWidget.setTabOrder(self.ab_customer_name, self.ab_model_combo)
+        QWidget.setTabOrder(self.ab_customer_name, self.ab_customer_phone)
+        QWidget.setTabOrder(self.ab_customer_phone, self.ab_model_combo)
         QWidget.setTabOrder(self.ab_model_combo, self.ab_color_combo)
         QWidget.setTabOrder(self.ab_color_combo, self.ab_advance_paid)
 
@@ -6427,13 +6654,14 @@ class MainWindow(QMainWindow):
         self.ab_table_view.setSelectionMode(QTableView.SelectionMode.SingleSelection)
         self.ab_table_view.setAlternatingRowColors(True)
         self.ab_table_view.setShowGrid(False)
-        self.ab_table_view.doubleClicked.connect(lambda _i: self._print_selected_advance_booking())
+        self.ab_table_view.doubleClicked.connect(self._on_advance_booking_double_clicked)
         self.ab_table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.ab_table_view.horizontalHeader().setStretchLastSection(True)
         self.ab_table_view.verticalHeader().setVisible(False)
+        self.ab_table_view.setMinimumHeight(320)
 
         table_layout.addWidget(self.ab_table_view)
-        layout.addWidget(table_container, 1)
+        container_layout.addWidget(table_container)
 
         self._load_ab_models()
         self._reload_advance_bookings()
@@ -6446,7 +6674,14 @@ class MainWindow(QMainWindow):
             return
         db = SessionLocal()
         try:
-            bookings = advance_booking_service.list_bookings(db, limit=300)
+            status = None
+            if hasattr(self, "ab_status_filter"):
+                selected = (self.ab_status_filter.currentText() or "").strip().upper()
+                if selected and selected != "ALL":
+                    status = selected
+            search = (self.ab_search_input.text() or "").strip() if hasattr(self, "ab_search_input") else ""
+
+            bookings = advance_booking_service.list_bookings(db, limit=300, status=status, search=search)
             rows: List[AdvanceBookingRow] = []
             for b in bookings:
                 rows.append(
@@ -6459,15 +6694,58 @@ class MainWindow(QMainWindow):
                         total_price=float(b.total_price or 0.0),
                         advance_paid=float(b.advance_paid or 0.0),
                         balance_amount=float(b.balance_amount or 0.0),
+                        delivery_paid=float(b.delivery_paid or 0.0),
                         status=b.status or "",
                     )
                 )
             self.ab_table_model.update_rows(rows)
+            self._update_advance_booking_stats(db)
         except Exception as e:
             logger.error(f"Advance booking reload failed: {e}", exc_info=True)
             self._show_error("Error", f"Failed to load bookings: {e}")
         finally:
             db.close()
+
+    def _update_advance_booking_stats(self, db: Session) -> None:
+        try:
+            summary = advance_booking_service.get_summary(db)
+            if hasattr(self, "ab_outstanding_advance_card"):
+                self.ab_outstanding_advance_card.value_label.setText(f"Rs. {summary['outstanding_balance']:,.0f}")
+            if hasattr(self, "ab_total_advance_card"):
+                self.ab_total_advance_card.value_label.setText(f"Rs. {summary['total_advance']:,.0f}")
+            if hasattr(self, "ab_delivered_count_card"):
+                self.ab_delivered_count_card.value_label.setText(str(summary["delivered_count"]))
+            if hasattr(self, "ab_active_count_card"):
+                self.ab_active_count_card.value_label.setText(str(summary["active_count"]))
+
+            if hasattr(self, "ab_model_cards_grid"):
+                counts = advance_booking_service.get_active_counts_by_model(db, limit=12)
+                
+                # Check if we need to completely rebuild or just update
+                current_models = set(self._ab_model_card_widgets.keys())
+                new_models = set(m for m, c in counts)
+                
+                if current_models != new_models:
+                    # Clear and rebuild if models changed
+                    while self.ab_model_cards_grid.count():
+                        item = self.ab_model_cards_grid.takeAt(0)
+                        w = item.widget()
+                        if w:
+                            w.setParent(None)
+                    self._ab_model_card_widgets.clear()
+                    
+                    cols = 4
+                    for i, (model_name, count) in enumerate(counts):
+                        card = BookingCard(model_name or "-", count, "#3498db")
+                        self.ab_model_cards_grid.addWidget(card, i // cols, i % cols)
+                        self._ab_model_card_widgets[model_name] = card
+                else:
+                    # Just update existing cards
+                    for model_name, count in counts:
+                        if model_name in self._ab_model_card_widgets:
+                            self._ab_model_card_widgets[model_name].update_quantity(count)
+        except Exception as e:
+            logger.error(f"Advance booking stats update failed: {e}", exc_info=True)
 
     def _refresh_advance_booking_page(self) -> None:
         self._load_ab_models()
@@ -6554,6 +6832,7 @@ class MainWindow(QMainWindow):
 
     def _save_advance_booking(self) -> None:
         name = (self.ab_customer_name.text() or "").strip()
+        phone = (self.ab_customer_phone.text() or "").strip()
         model = (self.ab_model_combo.currentText() or "").strip()
         color = (self.ab_color_combo.currentText() or "").strip()
         total = float(self.ab_total_price.value())
@@ -6563,6 +6842,13 @@ class MainWindow(QMainWindow):
             self._show_error("Validation Error", "Customer Name is required.")
             self.ab_customer_name.setFocus()
             return
+        
+        # Phone validation (optional but recommended for SMS)
+        if phone and not (phone.isdigit() and len(phone) >= 10):
+            self._show_error("Validation Error", "Please enter a valid phone number (e.g., 03001234567).")
+            self.ab_customer_phone.setFocus()
+            return
+
         if not model:
             self._show_error("Validation Error", "Motorcycle Model is required.")
             self.ab_model_combo.setFocus()
@@ -6585,6 +6871,7 @@ class MainWindow(QMainWindow):
             booking = advance_booking_service.create_booking(
                 db=db,
                 customer_name=name,
+                customer_phone=phone,
                 motorcycle_model=model,
                 color=color,
                 total_price=total,
@@ -6603,8 +6890,18 @@ class MainWindow(QMainWindow):
                 }
             )
             print_service_v2.print_html(html, f"Advance Booking Receipt - {booking.booking_number}")
+            
+            # Real-time state management: Notify all listeners about the booking update
+            # We fetch the new active count for this specific model to ensure accuracy
+            active_count = db.query(AdvanceBooking).filter(
+                AdvanceBooking.motorcycle_model == model,
+                AdvanceBooking.status == "ACTIVE"
+            ).count()
+            booking_signals.booking_updated.emit(model, active_count)
+            
             self._reload_advance_bookings()
             self.ab_customer_name.clear()
+            self.ab_customer_phone.clear()
             self.ab_model_combo.setCurrentIndex(0)
             self.ab_color_combo.setCurrentIndex(0)
             self.ab_total_price.blockSignals(True)
@@ -6650,6 +6947,311 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Advance booking print failed: {e}", exc_info=True)
             self._show_error("Print Error", f"Failed to print receipt: {e}")
+        finally:
+            db.close()
+
+    def _get_selected_advance_booking_number(self) -> str | None:
+        if not hasattr(self, "ab_table_view"):
+            return None
+        selection = self.ab_table_view.selectionModel().selectedRows()
+        if not selection:
+            return None
+        row = selection[0].row()
+        row_data = self.ab_table_model._rows[row]
+        return row_data.booking_number
+
+    def _on_advance_booking_double_clicked(self, index: QModelIndex) -> None:
+        """Opens a modal dialog to modify or reprint the selected booking."""
+        if not index.isValid():
+            return
+            
+        row_data = self.ab_table_model._rows[index.row()]
+        db = SessionLocal()
+        try:
+            booking = advance_booking_service.get_by_booking_number(db, row_data.booking_number)
+            if not booking:
+                self._show_error("Error", "Booking not found in database.")
+                return
+
+            # Check if current user is showroom staff (for simplicity, we allow modification if status is ACTIVE)
+            # You can add more strict role checks here if needed.
+            
+            dialog = QDialog(self)
+            dialog.setWindowTitle(f"Modify Booking - {booking.booking_number}")
+            dialog.setFixedWidth(500)
+            layout = QVBoxLayout(dialog)
+            layout.setContentsMargins(25, 25, 25, 25)
+            layout.setSpacing(15)
+
+            # Header
+            header = QLabel(f"Modify Booking: {booking.booking_number}")
+            header.setStyleSheet("font-size: 18px; font-weight: bold; color: #2c3e50;")
+            layout.addWidget(header)
+
+            form_grid = QGridLayout()
+            form_grid.setSpacing(10)
+
+            def add_field(row, label_text, widget):
+                lbl = QLabel(label_text)
+                lbl.setStyleSheet("font-weight: bold; color: #7f8c8d; font-size: 11px;")
+                form_grid.addWidget(lbl, row, 0)
+                form_grid.addWidget(widget, row, 1)
+                return widget
+
+            edit_name = QLineEdit(booking.customer_name)
+            edit_phone = QLineEdit(booking.customer_phone or "")
+            edit_phone.setPlaceholderText("03xxxxxxxxx")
+            
+            # Use current models from the system
+            edit_model = QComboBox()
+            prices = price_service.get_all_active_prices()
+            models = sorted(list(set(p.product_model.model_name for p in prices if p.product_model)))
+            edit_model.addItems(models)
+            edit_model.setCurrentText(booking.motorcycle_model)
+
+            edit_color = QComboBox()
+            # Initial colors for selected model
+            current_prices = price_service.get_active_prices_for_model(booking.motorcycle_model)
+            colors = []
+            for p in current_prices:
+                opt = p.optional_features or {}
+                c_str = opt.get("colors") or opt.get("color") or ""
+                for c in str(c_str).split(","):
+                    val = c.strip()
+                    if val and val not in colors: colors.append(val)
+            edit_color.addItems(colors)
+            edit_color.setCurrentText(booking.color)
+
+            edit_total = QDoubleSpinBox()
+            edit_total.setRange(0, 10000000)
+            edit_total.setValue(booking.total_price)
+            edit_total.setPrefix("Rs. ")
+            edit_total.setDecimals(0)
+            edit_total.setEnabled(False) # Price linked to model/color
+
+            edit_advance = QDoubleSpinBox()
+            edit_advance.setRange(0, 10000000)
+            edit_advance.setValue(booking.advance_paid)
+            edit_advance.setPrefix("Rs. ")
+            edit_advance.setDecimals(0)
+
+            add_field(0, "Customer Name:", edit_name)
+            add_field(1, "Phone Number:", edit_phone)
+            add_field(2, "Motorcycle Model:", edit_model)
+            add_field(3, "Color:", edit_color)
+            add_field(4, "Total Price:", edit_total)
+            add_field(5, "Advance Paid:", edit_advance)
+
+            layout.addLayout(form_grid)
+
+            # Logic for updating price when model/color changes
+            def update_price():
+                p = price_service.get_price_by_model_and_color(edit_model.currentText(), edit_color.currentText())
+                if p:
+                    edit_total.setValue(float(p.total_price or 0))
+                else:
+                    edit_total.setValue(0)
+
+            def update_colors(model_name):
+                edit_color.blockSignals(True)
+                edit_color.clear()
+                prices = price_service.get_active_prices_for_model(model_name)
+                colors = []
+                for p in prices:
+                    opt = p.optional_features or {}
+                    c_str = opt.get("colors") or opt.get("color") or ""
+                    for c in str(c_str).split(","):
+                        val = c.strip()
+                        if val and val not in colors: colors.append(val)
+                edit_color.addItems(colors)
+                edit_color.blockSignals(False)
+                update_price()
+
+            edit_model.currentTextChanged.connect(update_colors)
+            edit_color.currentTextChanged.connect(update_price)
+
+            # Footer buttons
+            btn_layout = QHBoxLayout()
+            
+            reprint_btn = QPushButton("🖨️ Reprint Receipt")
+            reprint_btn.setStyleSheet("background-color: #95a5a6; color: white; padding: 10px; border-radius: 5px;")
+            
+            save_btn = QPushButton("💾 Save Changes")
+            save_btn.setStyleSheet("background-color: #3498db; color: white; padding: 10px; border-radius: 5px;")
+            
+            cancel_btn = QPushButton("Cancel")
+            cancel_btn.setStyleSheet("background-color: #e74c3c; color: white; padding: 10px; border-radius: 5px;")
+            
+            btn_layout.addWidget(reprint_btn)
+            btn_layout.addStretch(1)
+            btn_layout.addWidget(cancel_btn)
+            btn_layout.addWidget(save_btn)
+            layout.addLayout(btn_layout)
+
+            # Disable modification if not ACTIVE
+            is_active = (booking.status == "ACTIVE")
+            if not is_active:
+                edit_name.setEnabled(False)
+                edit_phone.setEnabled(False)
+                edit_model.setEnabled(False)
+                edit_color.setEnabled(False)
+                edit_advance.setEnabled(False)
+                save_btn.setEnabled(False)
+                save_btn.setText("Locked (Delivered)")
+                save_btn.setStyleSheet("background-color: #bdc3c7; color: white; padding: 10px; border-radius: 5px;")
+
+            def on_reprint():
+                html = print_service_v2.render_advance_booking_receipt({
+                    "booking_number": booking.booking_number,
+                    "created_at": booking.created_at,
+                    "customer_name": booking.customer_name,
+                    "motorcycle_model": booking.motorcycle_model,
+                    "color": booking.color,
+                    "total_price": booking.total_price,
+                    "advance_paid": booking.advance_paid,
+                    "balance_amount": booking.balance_amount,
+                })
+                print_service_v2.print_html(html, f"Booking Receipt - {booking.booking_number}")
+                dialog.accept()
+
+            def on_save():
+                try:
+                    advance_booking_service.update_booking(
+                        db=db,
+                        booking_number=booking.booking_number,
+                        customer_name=edit_name.text(),
+                        customer_phone=edit_phone.text(),
+                        motorcycle_model=edit_model.currentText(),
+                        color=edit_color.currentText(),
+                        total_price=edit_total.value(),
+                        advance_paid=edit_advance.value()
+                    )
+                    self._reload_advance_bookings()
+                    QMessageBox.information(self, "Success", "Booking updated successfully.")
+                    dialog.accept()
+                except Exception as e:
+                    self._show_error("Update Failed", str(e))
+
+            reprint_btn.clicked.connect(on_reprint)
+            save_btn.clicked.connect(on_save)
+            cancel_btn.clicked.connect(dialog.reject)
+
+            dialog.exec()
+
+        except Exception as e:
+            logger.error(f"Error opening booking edit dialog: {e}", exc_info=True)
+            self._show_error("Error", f"Could not load booking details: {e}")
+        finally:
+            db.close()
+
+    def _mark_selected_booking_delivered(self) -> None:
+        booking_number = self._get_selected_advance_booking_number()
+        if not booking_number:
+            self._show_error("Selection Required", "Please select a booking to mark as delivered.")
+            return
+
+        db = SessionLocal()
+        try:
+            booking = advance_booking_service.get_by_booking_number(db, booking_number)
+            if not booking:
+                self._show_error("Error", "Booking not found.")
+                return
+            required = float(getattr(booking, "balance_amount", 0.0) or 0.0)
+
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Confirm Delivery Payment")
+            dialog.setFixedWidth(420)
+            dlg_layout = QVBoxLayout(dialog)
+            dlg_layout.setContentsMargins(20, 20, 20, 20)
+            dlg_layout.setSpacing(12)
+
+            info = QLabel(
+                f"<b>Booking:</b> {booking_number}<br/>"
+                f"<b>Customer:</b> {booking.customer_name}<br/>"
+                f"<b>Model:</b> {booking.motorcycle_model} ({booking.color})<br/>"
+                f"<b>Remaining Balance:</b> Rs. {required:,.0f}"
+            )
+            info.setStyleSheet("color:#2c3e50;")
+            dlg_layout.addWidget(info)
+
+            pay_spin = QDoubleSpinBox()
+            pay_spin.setDecimals(0)
+            pay_spin.setMaximum(1000000000)
+            pay_spin.setPrefix("Rs. ")
+            pay_spin.setValue(required)
+            dlg_layout.addWidget(pay_spin)
+
+            btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+            dlg_layout.addWidget(btns)
+            btns.accepted.connect(dialog.accept)
+            btns.rejected.connect(dialog.reject)
+
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+
+            paid = float(pay_spin.value())
+            reply = QMessageBox.question(
+                self,
+                "Confirm",
+                f"Confirm delivery for {booking_number} and record payment Rs. {paid:,.0f}?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+            advance_booking_service.mark_delivered(db, booking_number, delivery_paid=paid)
+            
+            # Real-time state management: Notify all listeners about the delivery update
+            # We decrement the count for this specific model
+            model = booking.motorcycle_model
+            active_count = db.query(AdvanceBooking).filter(
+                AdvanceBooking.motorcycle_model == model,
+                AdvanceBooking.status == "ACTIVE"
+            ).count()
+            booking_signals.booking_updated.emit(model, active_count)
+            
+            self._reload_advance_bookings()
+        except Exception as e:
+            logger.error(f"Advance booking mark delivered failed: {e}", exc_info=True)
+            self._show_error("Error", f"Failed to mark delivered: {e}")
+        finally:
+            db.close()
+
+    def _mark_selected_booking_active(self) -> None:
+        booking_number = self._get_selected_advance_booking_number()
+        if not booking_number:
+            self._show_error("Selection Required", "Please select a booking to mark as active.")
+            return
+        reply = QMessageBox.question(
+            self,
+            "Confirm",
+            f"Mark booking {booking_number} as ACTIVE?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        db = SessionLocal()
+        try:
+            booking = advance_booking_service.get_by_booking_number(db, booking_number)
+            if not booking:
+                self._show_error("Error", "Booking not found.")
+                return
+            model = booking.motorcycle_model
+            
+            advance_booking_service.mark_active(db, booking_number)
+            
+            # Real-time state management: Notify all listeners about the restoration update
+            # Increment the count for this specific model
+            active_count = db.query(AdvanceBooking).filter(
+                AdvanceBooking.motorcycle_model == model,
+                AdvanceBooking.status == "ACTIVE"
+            ).count()
+            booking_signals.booking_updated.emit(model, active_count)
+            
+            self._reload_advance_bookings()
+        except Exception as e:
+            logger.error(f"Advance booking mark active failed: {e}", exc_info=True)
+            self._show_error("Error", f"Failed to mark active: {e}")
         finally:
             db.close()
 
@@ -8856,6 +9458,7 @@ class AdvanceBookingRow:
         total_price: float,
         advance_paid: float,
         balance_amount: float,
+        delivery_paid: float,
         status: str,
     ) -> None:
         self.booking_number = booking_number
@@ -8866,6 +9469,7 @@ class AdvanceBookingRow:
         self.total_price = total_price
         self.advance_paid = advance_paid
         self.balance_amount = balance_amount
+        self.delivery_paid = delivery_paid
         self.status = status
 
 
@@ -9155,7 +9759,7 @@ class DealersTableModel(QAbstractTableModel):
 
 
 class AdvanceBookingsTableModel(QAbstractTableModel):
-    headers = ["Booking #", "Date", "Customer", "Model", "Color", "Total", "Advance", "Balance", "Status"]
+    headers = ["Booking #", "Date", "Customer", "Model", "Color", "Total", "Advance", "Delivery Paid", "Balance", "Status"]
 
     def __init__(self) -> None:
         super().__init__()
@@ -9189,16 +9793,18 @@ class AdvanceBookingsTableModel(QAbstractTableModel):
             if col == 6:
                 return f"{row.advance_paid:,.0f}"
             if col == 7:
-                return f"{row.balance_amount:,.0f}"
+                return f"{row.delivery_paid:,.0f}"
             if col == 8:
+                return f"{row.balance_amount:,.0f}"
+            if col == 9:
                 return row.status
 
         if role == Qt.ItemDataRole.TextAlignmentRole:
-            if col in (5, 6, 7):
+            if col in (5, 6, 7, 8):
                 return Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
             return Qt.AlignmentFlag.AlignCenter
 
-        if role == Qt.ItemDataRole.ForegroundRole and col == 8:
+        if role == Qt.ItemDataRole.ForegroundRole and col == 9:
             if (row.status or "").upper() == "ACTIVE":
                 return Qt.GlobalColor.darkGreen
             return Qt.GlobalColor.darkYellow
