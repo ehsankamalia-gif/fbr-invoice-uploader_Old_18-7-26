@@ -26,6 +26,8 @@ try:
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
     from cryptography.hazmat.primitives import hashes, hmac
     from cryptography.hazmat.backends import default_backend
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 except ImportError:
     Cipher = None
     algorithms = None
@@ -33,6 +35,8 @@ except ImportError:
     hashes = None
     hmac = None
     default_backend = None
+    InvalidSignature = None
+    PBKDF2HMAC = None
 
 try:
     import platformdirs
@@ -285,6 +289,145 @@ class BackupService:
             "key_count": len(keys),
         }
 
+    def _derive_key_from_passphrase(self, passphrase: str, salt: bytes, iterations: int) -> bytes:
+        if PBKDF2HMAC is None or hashes is None or default_backend is None:
+            raise ValueError("cryptography module missing.")
+        if not passphrase:
+            raise ValueError("Passphrase is required.")
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=int(iterations),
+            backend=default_backend(),
+        )
+        return kdf.derive(passphrase.encode("utf-8"))
+
+    def export_encryption_keys(self, export_path: str, passphrase: str) -> Dict:
+        if Cipher is None or hmac is None or hashes is None or default_backend is None:
+            return {"success": False, "message": "cryptography module missing."}
+
+        self._ensure_key()
+        keys = list(getattr(self.config, "encryption_keys", None) or [])
+        active = str(getattr(self.config, "active_key_id", "") or "")
+        if not keys or not active:
+            return {"success": False, "message": "No encryption keys are configured to export."}
+
+        payload = {
+            "schema": "fbr_backup_keybundle_v1",
+            "exported_at": datetime.utcnow().isoformat(),
+            "active_key_id": active,
+            "encryption_keys": keys,
+        }
+        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+        salt = secrets.token_bytes(16)
+        iv = secrets.token_bytes(16)
+        iterations = 200_000
+        key = self._derive_key_from_passphrase(passphrase, salt=salt, iterations=iterations)
+
+        cipher = Cipher(algorithms.AES(key), modes.CTR(iv), backend=default_backend())
+        encryptor = cipher.encryptor()
+        ct = encryptor.update(raw) + encryptor.finalize()
+
+        mac = hmac.HMAC(key, hashes.SHA256(), backend=default_backend())
+        header = b"FBRKEY01" + bytes([1]) + salt + iv + int(iterations).to_bytes(4, "big")
+        mac.update(header)
+        mac.update(ct)
+        tag = mac.finalize()
+
+        out_path = Path(export_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "wb") as f:
+            f.write(header)
+            f.write(ct)
+            f.write(tag)
+
+        return {"success": True, "message": "Key bundle exported successfully.", "path": str(out_path)}
+
+    def import_encryption_keys(self, import_path: str, passphrase: str) -> Dict:
+        if Cipher is None or hmac is None or hashes is None or default_backend is None:
+            return {"success": False, "message": "cryptography module missing."}
+
+        p = Path(import_path)
+        if not p.exists():
+            return {"success": False, "message": "Key bundle file not found."}
+
+        data = p.read_bytes()
+        if len(data) < 8 + 1 + 16 + 16 + 4 + 32:
+            return {"success": False, "message": "Invalid key bundle file."}
+
+        magic = data[:8]
+        if magic != b"FBRKEY01":
+            return {"success": False, "message": "Invalid key bundle format."}
+        ver = data[8]
+        if ver != 1:
+            return {"success": False, "message": "Unsupported key bundle version."}
+
+        salt = data[9:25]
+        iv = data[25:41]
+        iterations = int.from_bytes(data[41:45], "big")
+        tag = data[-32:]
+        ct = data[45:-32]
+
+        key = self._derive_key_from_passphrase(passphrase, salt=salt, iterations=iterations)
+
+        mac = hmac.HMAC(key, hashes.SHA256(), backend=default_backend())
+        header = b"FBRKEY01" + bytes([1]) + salt + iv + int(iterations).to_bytes(4, "big")
+        mac.update(header)
+        mac.update(ct)
+        try:
+            mac.verify(tag)
+        except Exception:
+            return {"success": False, "message": "Invalid passphrase or key bundle file is corrupted."}
+
+        cipher = Cipher(algorithms.AES(key), modes.CTR(iv), backend=default_backend())
+        decryptor = cipher.decryptor()
+        raw = decryptor.update(ct) + decryptor.finalize()
+
+        try:
+            payload = json.loads(raw.decode("utf-8")) or {}
+        except Exception:
+            return {"success": False, "message": "Key bundle payload is invalid."}
+
+        if payload.get("schema") != "fbr_backup_keybundle_v1":
+            return {"success": False, "message": "Unsupported key bundle schema."}
+
+        imported_keys = payload.get("encryption_keys") or []
+        imported_active = str(payload.get("active_key_id") or "")
+        if not isinstance(imported_keys, list) or not imported_keys:
+            return {"success": False, "message": "No keys found in the bundle."}
+
+        existing = list(getattr(self.config, "encryption_keys", None) or [])
+        existing_ids = {str(k.get("id") or "") for k in existing if isinstance(k, dict)}
+
+        added = 0
+        for k in imported_keys:
+            if not isinstance(k, dict):
+                continue
+            kid = str(k.get("id") or "")
+            kval = str(k.get("key") or "")
+            if not kid or not kval:
+                continue
+            if kid in existing_ids:
+                continue
+            existing.append(k)
+            existing_ids.add(kid)
+            added += 1
+
+        self.config.encryption_keys = existing
+        if not str(getattr(self.config, "active_key_id", "") or "") and imported_active:
+            self.config.active_key_id = imported_active
+        if imported_active:
+            self.config.active_key_id = str(self.config.active_key_id or imported_active)
+        if self.config.active_key_id:
+            active_obj = next((x for x in existing if str(x.get("id") or "") == str(self.config.active_key_id)), None)
+            if active_obj and active_obj.get("key"):
+                self.config.encryption_key = str(active_obj.get("key"))
+
+        self.save_config()
+        return {"success": True, "message": f"Keys imported successfully. Added {added} key(s).", "added": added}
+
     def get_db_path(self) -> Optional[Path]:
         """Extracts DB path from settings, handling both absolute and relative SQLite paths."""
         db_url = settings.DB_URL
@@ -489,7 +632,7 @@ class BackupService:
             st = os.statvfs(path)
             return st.f_bavail * st.f_frsize
 
-    def create_backup(self, is_manual: bool = False) -> Dict:
+    def create_backup(self, is_manual: bool = False, output_format: Optional[str] = None) -> Dict:
         """Creates a professional backup of the database with integrity verification and encryption."""
         # Use a timeout for the operation lock to avoid indefinite hangs
         if not self._operation_lock.acquire(timeout=30):
@@ -500,9 +643,18 @@ class BackupService:
         temp_files = []
         
         try:
-            effective_encrypt = bool(self.config.encrypt) and (Cipher is not None)
-            if bool(self.config.encrypt) and (Cipher is None):
+            fmt = (output_format or "").strip().lower()
+            if fmt in ("zip", ".zip"):
+                effective_encrypt = False
+            elif fmt in ("enc", ".enc"):
+                effective_encrypt = True
+            else:
+                effective_encrypt = bool(self.config.encrypt) and (Cipher is not None)
+
+            if bool(self.config.encrypt) and (Cipher is None) and fmt not in ("enc", ".enc"):
                 logger.warning("Backup encryption is enabled but cryptography is missing. Proceeding with unencrypted backup.")
+            if fmt in ("enc", ".enc") and Cipher is None:
+                return {"success": False, "message": "Encrypted backup (.enc) requires cryptography. Please install cryptography or choose .zip."}
 
             # 0. Professional Integrity Check
             logger.info("Starting database integrity check before backup...")
@@ -515,6 +667,8 @@ class BackupService:
                 self._ensure_key()
                 if not self.config.encryption_keys or not self.config.active_key_id:
                     logger.error("Encryption enabled but no active key available.")
+                    if fmt in ("enc", ".enc"):
+                        return {"success": False, "message": "Encrypted backup (.enc) cannot be created because encryption keys are not initialized."}
                     logger.warning("Proceeding with unencrypted backup because encryption keys could not be initialized.")
                     effective_encrypt = False
 
@@ -865,7 +1019,10 @@ class BackupService:
 
             except Exception as e:
                 logger.error(f"CRITICAL: Restore process failed: {e}", exc_info=True)
-                return {"success": False, "message": str(e)}
+                msg = str(e).strip()
+                if not msg:
+                    msg = e.__class__.__name__
+                return {"success": False, "message": msg}
         finally:
             self._operation_lock.release()
 
@@ -1344,7 +1501,12 @@ class BackupService:
             if str(k.get("id") or "") == str(key_id or ""):
                 raw = str(k.get("key") or "").encode()
                 return base64.urlsafe_b64decode(raw)
-        raise ValueError("Encryption key not found for the requested key id.")
+        raise ValueError(
+            f"Encryption key not found for the requested key id '{key_id}'. "
+            "This backup was likely created on another computer. "
+            "Import the encryption keys from the source computer (Backup Settings -> Export Keys/Import Keys) "
+            "or restore from an unencrypted .zip backup."
+        )
 
     def _get_active_key(self) -> tuple[str, bytes]:
         self._ensure_key()
@@ -1462,7 +1624,14 @@ class BackupService:
                 if final_pt:
                     f_out.write(final_pt)
 
-            mac.verify(expected_mac)
+            try:
+                mac.verify(expected_mac)
+            except Exception as e:
+                if InvalidSignature is not None and isinstance(e, InvalidSignature):
+                    raise ValueError(
+                        f"Decryption failed: wrong encryption key for key id '{key_id}' or backup file is corrupted."
+                    )
+                raise
 
     def _read_encrypted_public_meta(self, src_path: Path) -> Dict:
         try:

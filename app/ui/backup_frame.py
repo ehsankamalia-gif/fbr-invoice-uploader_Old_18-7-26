@@ -154,6 +154,10 @@ class BackupFrame(ctk.CTkFrame):
                                       font=ctk.CTkFont(size=14, weight="bold"))
         self.verify_btn.pack(side="left", padx=10)
 
+        self.manual_format_combo = ctk.CTkOptionMenu(self.action_frame, values=["Encrypted (.enc)", "Unencrypted (.zip)"])
+        self.manual_format_combo.set("Encrypted (.enc)" if backup_service.config.encrypt else "Unencrypted (.zip)")
+        self.manual_format_combo.pack(side="left", padx=10)
+
         self.integrity_btn = ctk.CTkButton(self.action_frame, text="DB Integrity Check", width=170, height=35,
                                       command=self.run_integrity_check, fg_color="#9b59b6", hover_color="#8e44ad",
                                       font=ctk.CTkFont(size=14, weight="bold"))
@@ -382,7 +386,8 @@ class BackupFrame(ctk.CTkFrame):
         self.status_label.configure(text="Backing up...", text_color="gray")
         
         def run():
-            res = backup_service.create_backup(is_manual=True)
+            fmt = "enc" if "enc" in (self.manual_format_combo.get() or "").lower() else "zip"
+            res = backup_service.create_backup(is_manual=True, output_format=fmt)
             self.after(0, lambda: self.finish_backup(res))
             
         threading.Thread(target=run, daemon=True).start()

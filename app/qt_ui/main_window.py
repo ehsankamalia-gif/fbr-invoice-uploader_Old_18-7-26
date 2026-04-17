@@ -126,10 +126,14 @@ class BackupWorker(QObject):
     finished = pyqtSignal(dict)
     error = pyqtSignal(str)
 
+    def __init__(self, output_format: str | None = None):
+        super().__init__()
+        self.output_format = output_format
+
     def run(self):
         try:
             logger.info("BackupWorker started manual backup process.")
-            result = backup_service.create_backup(is_manual=True)
+            result = backup_service.create_backup(is_manual=True, output_format=self.output_format)
             self.finished.emit(result)
         except Exception as e:
             logger.error(f"BackupWorker encountered a critical error: {e}", exc_info=True)

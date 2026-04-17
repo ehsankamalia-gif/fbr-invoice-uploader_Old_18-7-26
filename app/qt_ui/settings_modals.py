@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
     QPushButton, QComboBox, QDoubleSpinBox, QSpinBox, 
     QFrame, QGridLayout, QCheckBox, QScrollArea, 
-    QMessageBox, QApplication, QTableWidget, QTableWidgetItem, QHeaderView,
+    QMessageBox, QApplication, QTableWidget, QTableWidgetItem, QHeaderView, QInputDialog,
     QProgressDialog, QWidget, QTextEdit, QTabWidget
 )
 import logging
@@ -27,9 +27,12 @@ from app.qt_ui.whatsapp_campaign_widget import WhatsAppCampaignWidget
 
 class BackupWorker(QThread):
     finished = pyqtSignal(dict)
+    def __init__(self, output_format: str | None = None):
+        super().__init__()
+        self.output_format = output_format
     def run(self):
         try:
-            result = backup_service.create_backup(is_manual=True)
+            result = backup_service.create_backup(is_manual=True, output_format=self.output_format)
             self.finished.emit(result)
         except Exception as e:
             self.finished.emit({"success": False, "error": str(e)})
@@ -652,6 +655,11 @@ class BackupSettingsDialog(BaseSettingsDialog):
         self.manual_backup_btn.setStyleSheet("background-color: #27ae60;")
         self.manual_backup_btn.clicked.connect(self._on_manual_backup)
         header_actions.addWidget(self.manual_backup_btn)
+
+        self.manual_format = QComboBox()
+        self.manual_format.addItems(["Encrypted (.enc)", "Unencrypted (.zip)"])
+        self.manual_format.setFixedWidth(170)
+        header_actions.addWidget(self.manual_format)
         
         self.restore_btn = QPushButton("📂 Restore from File...")
         self.restore_btn.setObjectName("primaryButton")
@@ -680,7 +688,7 @@ class BackupSettingsDialog(BaseSettingsDialog):
         
         grid.addWidget(QLabel("Interval:"), 2, 0)
         self.interval = QComboBox()
-        self.interval.addItems(["daily", "weekly", "monthly"])
+        self.interval.addItems(["hourly", "daily", "weekly", "monthly"])
         grid.addWidget(self.interval, 2, 1)
         
         grid.addWidget(QLabel("Time (HH:MM):"), 3, 0)
@@ -692,6 +700,20 @@ class BackupSettingsDialog(BaseSettingsDialog):
         self.retention = QSpinBox()
         self.retention.setRange(1, 365)
         grid.addWidget(self.retention, 4, 1)
+
+        grid.addWidget(QLabel("Encryption Keys:"), 5, 0)
+        keys_row = QHBoxLayout()
+        self.keys_status = QLabel("")
+        self.keys_status.setStyleSheet("color: #7f8c8d; font-weight: normal;")
+        keys_row.addWidget(self.keys_status)
+        keys_row.addStretch(1)
+        self.export_keys_btn = QPushButton("Export Keys")
+        self.export_keys_btn.clicked.connect(self._on_export_keys)
+        keys_row.addWidget(self.export_keys_btn)
+        self.import_keys_btn = QPushButton("Import Keys")
+        self.import_keys_btn.clicked.connect(self._on_import_keys)
+        keys_row.addWidget(self.import_keys_btn)
+        grid.addLayout(keys_row, 5, 1)
         
         layout.addWidget(settings_frame)
         
@@ -726,6 +748,12 @@ class BackupSettingsDialog(BaseSettingsDialog):
             except (ValueError, TypeError):
                 self.retention.setValue(30)
                 
+            if bool(config.get("encrypt", True)) is True:
+                self.manual_format.setCurrentText("Encrypted (.enc)")
+            else:
+                self.manual_format.setCurrentText("Unencrypted (.zip)")
+
+            self._refresh_keys_status()
             self._refresh_table()
         except Exception as e:
             logger.error(f"Failed to load backup data: {e}")
@@ -764,6 +792,77 @@ class BackupSettingsDialog(BaseSettingsDialog):
         except Exception as e:
             logger.error(f"Failed to refresh backup table: {e}")
 
+    def _refresh_keys_status(self) -> None:
+        try:
+            st = backup_service.get_encryption_status()
+            if not st.get("encrypt"):
+                self.keys_status.setText("Encryption disabled")
+                return
+            key_id = st.get("active_key_id") or "-"
+            key_count = st.get("key_count") or 0
+            self.keys_status.setText(f"Active Key ID: {key_id} | Keys: {key_count}")
+        except Exception:
+            self.keys_status.setText("")
+
+    def _prompt_passphrase(self, title: str, prompt: str) -> Optional[str]:
+        text, ok = QInputDialog.getText(self, title, prompt, QLineEdit.EchoMode.Password)
+        if not ok:
+            return None
+        val = (text or "").strip()
+        if not val:
+            return None
+        return val
+
+    def _on_export_keys(self) -> None:
+        from PyQt6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Encryption Keys",
+            "fbr_backup_keys.fbrkeys",
+            "Key Bundle (*.fbrkeys);;All Files (*)",
+        )
+        if not path:
+            return
+
+        p1 = self._prompt_passphrase("Export Keys", "Set a passphrase to encrypt this key bundle:")
+        if not p1:
+            return
+        p2 = self._prompt_passphrase("Export Keys", "Confirm passphrase:")
+        if not p2:
+            return
+        if p1 != p2:
+            self._show_error("Failed", "Passphrases do not match.")
+            return
+
+        res = backup_service.export_encryption_keys(path, p1)
+        if res.get("success"):
+            self._show_success("Success", "Keys exported. Store this file securely.")
+        else:
+            self._show_error("Failed", res.get("message") or "Export failed.")
+        self._refresh_keys_status()
+
+    def _on_import_keys(self) -> None:
+        from PyQt6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Encryption Keys",
+            "",
+            "Key Bundle (*.fbrkeys);;All Files (*)",
+        )
+        if not path:
+            return
+
+        p1 = self._prompt_passphrase("Import Keys", "Enter the passphrase for this key bundle:")
+        if not p1:
+            return
+
+        res = backup_service.import_encryption_keys(path, p1)
+        if res.get("success"):
+            self._show_success("Success", res.get("message") or "Keys imported.")
+        else:
+            self._show_error("Failed", res.get("message") or "Import failed.")
+        self._refresh_keys_status()
+
     def _on_browse(self):
         from PyQt6.QtWidgets import QFileDialog
         path = QFileDialog.getExistingDirectory(self, "Select Backup Directory", self.backup_path.text())
@@ -773,7 +872,8 @@ class BackupSettingsDialog(BaseSettingsDialog):
     def _on_manual_backup(self):
         self.manual_backup_btn.setEnabled(False)
         self.manual_backup_btn.setText("⏳ Backing up...")
-        self.worker = BackupWorker()
+        fmt = "enc" if "enc" in (self.manual_format.currentText() or "").lower() else "zip"
+        self.worker = BackupWorker(output_format=fmt)
         self.worker.finished.connect(self._handle_backup_result)
         self.worker.start()
 
@@ -790,7 +890,12 @@ class BackupSettingsDialog(BaseSettingsDialog):
 
     def _on_restore_file(self):
         from PyQt6.QtWidgets import QFileDialog
-        path, _ = QFileDialog.getOpenFileName(self, "Select Backup File", "", "SQL Files (*.sql);;All Files (*)")
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Backup File",
+            "",
+            "Backup Files (*.enc *.zip *.sql);;Encrypted Backup (*.enc);;ZIP Backup (*.zip);;SQL Files (*.sql);;All Files (*)",
+        )
         if path:
             self._on_restore_path(path)
 
@@ -816,7 +921,8 @@ class BackupSettingsDialog(BaseSettingsDialog):
             QMessageBox.information(self, "Success", "Database restored. Restarting application...")
             os.execl(sys.executable, sys.executable, *sys.argv)
         else:
-            self._show_error("Failed", result.get("error", "Unknown error"))
+            error_msg = result.get("message") or result.get("error") or "Unknown error"
+            self._show_error("Failed", error_msg)
 
     def _on_delete_path(self, path):
         if QMessageBox.question(self, "Confirm", "Delete this backup?") == QMessageBox.StandardButton.Yes:
