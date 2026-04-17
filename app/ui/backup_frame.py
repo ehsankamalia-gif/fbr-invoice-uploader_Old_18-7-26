@@ -420,15 +420,12 @@ class BackupFrame(ctk.CTkFrame):
             
             # Details
             info = f"{backup['date']} | {backup['size_mb']} MB"
-            manifest = Path(backup["path"] + ".manifest.json")
             btype = ""
-            if manifest.exists():
-                try:
-                    with open(manifest, "r", encoding="utf-8") as f:
-                        mf = json.load(f) or {}
-                    btype = str(mf.get("backup_type") or "").upper()
-                except Exception:
-                    btype = ""
+            try:
+                meta = backup_service.get_backup_public_info(backup["path"])
+                btype = str(meta.get("backup_type") or "").upper()
+            except Exception:
+                btype = ""
             extra = f" | {btype}" if btype else ""
             ctk.CTkLabel(row, text=info + extra, text_color="gray").pack(side="left", padx=10)
             
@@ -474,16 +471,15 @@ class BackupFrame(ctk.CTkFrame):
 
     def show_backup_details(self, path: str):
         p = Path(path)
-        mf_path = Path(str(p) + ".manifest.json")
-        info = {"backup_path": str(p), "manifest_path": str(mf_path)}
-        if mf_path.exists():
-            try:
-                with open(mf_path, "r", encoding="utf-8") as f:
-                    info["manifest"] = json.load(f) or {}
-            except Exception as e:
-                info["manifest_error"] = str(e)
-        else:
-            info["manifest_error"] = "Manifest not found."
+        info = {
+            "backup_path": str(p),
+            "exists": p.exists(),
+            "size_bytes": int(p.stat().st_size) if p.exists() else 0,
+        }
+        try:
+            info["metadata"] = backup_service.get_backup_public_info(str(p)) or {}
+        except Exception as e:
+            info["metadata_error"] = str(e)
 
         win = ctk.CTkToplevel(self)
         win.title("Backup Details")
@@ -500,92 +496,57 @@ class BackupFrame(ctk.CTkFrame):
 
     def _precheck_restore_chain(self, path: str) -> dict:
         p = Path(path)
-        mf_path = Path(str(p) + ".manifest.json")
-        if not mf_path.exists():
-            return {
-                "ok": True,
-                "warning": "Manifest file is not found for this backup. Dependency pre-check cannot be performed.\n\nRestore may still work for FULL backups.",
-                "backup_type": "",
-                "missing": [],
-                "chain": [],
-            }
-
-        try:
-            with open(mf_path, "r", encoding="utf-8") as f:
-                mf = json.load(f) or {}
-        except Exception as e:
-            return {
-                "ok": False,
-                "warning": "",
-                "backup_type": "",
-                "missing": [f"Invalid manifest format: {e}"],
-                "chain": [],
-            }
-
-        btype = str(mf.get("backup_type") or "full").strip().lower()
-        if btype == "full":
-            return {"ok": True, "warning": "", "backup_type": "full", "missing": [], "chain": [p.name]}
-
-        if btype not in ("incremental", "differential"):
-            return {
-                "ok": False,
-                "warning": "",
-                "backup_type": btype,
-                "missing": [f"Unsupported backup type in manifest: {btype}"],
-                "chain": [],
-            }
-
         missing = []
         chain = []
-        cur = mf
         seen = set()
         backup_dir = p.parent
 
-        while True:
-            cur_name = str(cur.get("backup_filename") or "")
-            if cur_name:
-                chain.append(cur_name)
-            if not cur_name:
-                missing.append("Manifest missing 'backup_filename'.")
-                break
-            if cur_name in seen:
-                missing.append(f"Cycle detected in backup chain at: {cur_name}")
-                break
-            seen.add(cur_name)
+        def read_meta(file_path: Path) -> dict:
+            return backup_service.get_backup_public_info(str(file_path)) or {}
 
-            cur_type = str(cur.get("backup_type") or "").lower()
+        cur_path = p
+        while True:
+            if cur_path.name in seen:
+                missing.append(f"Cycle detected in backup chain at: {cur_path.name}")
+                break
+            seen.add(cur_path.name)
+            chain.append(cur_path.name)
+
+            meta = read_meta(cur_path)
+            cur_type = str(meta.get("backup_type") or "full").strip().lower()
             if cur_type == "full":
                 break
 
-            dep_name = ""
             if cur_type == "incremental":
-                dep_name = str(cur.get("parent_backup_filename") or "")
+                dep_name = str(meta.get("parent_backup_filename") or "")
             elif cur_type == "differential":
-                dep_name = str(cur.get("base_backup_filename") or "")
+                dep_name = str(meta.get("base_backup_filename") or "")
+            else:
+                missing.append(f"Unsupported backup type: {cur_type}")
+                break
 
             if not dep_name:
-                missing.append(f"Missing dependency reference in {cur_name}.")
+                missing.append(f"Missing dependency reference in {cur_path.name}.")
                 break
 
-            dep_backup = backup_dir / dep_name
-            dep_manifest = Path(str(dep_backup) + ".manifest.json")
-
-            if not dep_backup.exists():
-                missing.append(f"Missing dependency backup file: {dep_backup.name}")
-            if not dep_manifest.exists():
-                missing.append(f"Missing dependency manifest: {dep_manifest.name}")
-
-            if missing:
+            dep_path = backup_dir / dep_name
+            if not dep_path.exists():
+                missing.append(f"Missing dependency backup file: {dep_path.name}")
                 break
 
-            try:
-                with open(dep_manifest, "r", encoding="utf-8") as f:
-                    cur = json.load(f) or {}
-            except Exception as e:
-                missing.append(f"Invalid dependency manifest ({dep_manifest.name}): {e}")
-                break
+            cur_path = dep_path
 
-        return {"ok": len(missing) == 0, "warning": "", "backup_type": btype, "missing": missing, "chain": chain}
+        top_type = ""
+        try:
+            top_type = str(read_meta(p).get("backup_type") or "").strip().lower()
+        except Exception:
+            top_type = ""
+
+        warning = ""
+        if not top_type:
+            warning = "Backup type could not be determined from the file. Restore may still work for FULL backups."
+
+        return {"ok": len(missing) == 0, "warning": warning, "backup_type": top_type, "missing": missing, "chain": chain}
 
     def confirm_restore(self, path):
         pre = self._precheck_restore_chain(path)
@@ -627,9 +588,6 @@ class BackupFrame(ctk.CTkFrame):
             try:
                 if os.path.exists(path):
                     os.remove(path)
-                mf = path + ".manifest.json"
-                if os.path.exists(mf):
-                    os.remove(mf)
                 self.refresh_history()
             except Exception as e:
                 messagebox.showerror("Error", str(e))

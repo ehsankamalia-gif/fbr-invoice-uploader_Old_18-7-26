@@ -500,6 +500,10 @@ class BackupService:
         temp_files = []
         
         try:
+            effective_encrypt = bool(self.config.encrypt) and (Cipher is not None)
+            if bool(self.config.encrypt) and (Cipher is None):
+                logger.warning("Backup encryption is enabled but cryptography is missing. Proceeding with unencrypted backup.")
+
             # 0. Professional Integrity Check
             logger.info("Starting database integrity check before backup...")
             if not self.verify_db_integrity():
@@ -507,11 +511,12 @@ class BackupService:
                  return {"success": False, "message": "Database integrity check failed. Backup aborted to prevent corruption propagation."}
 
             # 0.1 Ensure Encryption Key exists if encryption is enabled
-            if self.config.encrypt:
+            if effective_encrypt:
                 self._ensure_key()
                 if not self.config.encryption_keys or not self.config.active_key_id:
                     logger.error("Encryption enabled but no active key available.")
-                    return {"success": False, "message": "Encryption key generation failed. Check cryptography installation."}
+                    logger.warning("Proceeding with unencrypted backup because encryption keys could not be initialized.")
+                    effective_encrypt = False
 
             # Determine DB Type
             is_mysql = "mysql" in settings.DB_URL
@@ -558,6 +563,8 @@ class BackupService:
                 source_file = db_path
                 original_filename = db_path.name
 
+            protected_source = source_file if not is_mysql else None
+
             chunk_size = 4 * 1024 * 1024
             requested_type = str(getattr(self.config, "backup_mode", "full") or "full").strip().lower()
             if requested_type not in ("full", "incremental", "differential"):
@@ -570,9 +577,9 @@ class BackupService:
             parent_manifest = None
 
             if requested_type in ("incremental", "differential"):
-                base_manifest = self._find_latest_full_manifest(backup_dir)
+                base_manifest = self._find_latest_full_backup_metadata_in_dir(backup_dir)
                 if requested_type == "incremental":
-                    parent_manifest = self._find_latest_manifest(backup_dir)
+                    parent_manifest = self._find_latest_backup_metadata_in_dir(backup_dir)
                 if not base_manifest:
                     requested_type = "full"
                     parent_manifest = None
@@ -606,42 +613,25 @@ class BackupService:
             final_path = zip_path
             
             # 3. Encrypt if enabled (Professional Standard - Optimized with Chunked Streaming)
-            if self.config.encrypt:
+            if effective_encrypt:
                 logger.info("Encrypting backup file...")
                 if Cipher is None:
                     return {"success": False, "message": "Encryption failed: cryptography module missing."}
                 try:
-                    self._encrypt_file_aes256(zip_path, enc_path)
+                    public_meta = {
+                        "backup_type": metadata.get("backup_type"),
+                        "db_type": metadata.get("db_type"),
+                        "created_at": metadata.get("timestamp"),
+                        "original_filename": metadata.get("original_filename"),
+                        "base_backup_filename": metadata.get("base_backup_filename"),
+                        "parent_backup_filename": metadata.get("parent_backup_filename"),
+                        "is_manual": metadata.get("is_manual"),
+                    }
+                    self._encrypt_file_aes256(zip_path, enc_path, public_meta=public_meta)
                     final_path = enc_path
                 except Exception as e:
                     logger.error(f"Encryption failed: {e}", exc_info=True)
                     return {"success": False, "message": f"Encryption failed: {e}"}
-
-            backup_file_sha256 = self._calculate_file_hash(final_path)
-            manifest = {
-                "success": True,
-                "created_at": metadata.get("timestamp"),
-                "timestamp": metadata.get("timestamp"),
-                "version": metadata.get("version"),
-                "backup_type": metadata.get("backup_type"),
-                "db_type": metadata.get("db_type"),
-                "original_filename": metadata.get("original_filename"),
-                "is_manual": metadata.get("is_manual"),
-                "chunk_size": metadata.get("chunk_size"),
-                "chunk_hashes": metadata.get("chunk_hashes"),
-                "file_sha256": metadata.get("file_sha256"),
-                "file_size": metadata.get("file_size"),
-                "changed_chunks": metadata.get("changed_chunks"),
-                "base_backup_filename": metadata.get("base_backup_filename"),
-                "parent_backup_filename": metadata.get("parent_backup_filename"),
-                "backup_filename": final_path.name,
-                "backup_file_sha256": backup_file_sha256,
-                "backup_file_bytes": int(final_path.stat().st_size),
-                "destinations": {"local": {"path": str(final_path), "sha256": backup_file_sha256, "success": True}},
-            }
-
-            manifest_path = self._manifest_path_for_backup(final_path)
-            self._write_json(manifest_path, manifest)
 
             destinations = self._get_filesystem_destinations()
             for dest_root in destinations:
@@ -651,34 +641,33 @@ class BackupService:
                     if dest_root.resolve() == backup_dir.resolve():
                         continue
                     if self._get_free_space(dest_root) <= final_path.stat().st_size:
-                        manifest["destinations"][str(dest_root)] = {"path": str(dest_root), "success": False, "error": "Insufficient space"}
                         continue
                     dst_backup = dest_root / final_path.name
-                    dst_manifest = dest_root / manifest_path.name
-                    copy_res = self._heal_destination_copy(final_path, dst_backup, attempts=2)
-                    if copy_res.get("success") is True:
-                        shutil.copy2(manifest_path, dst_manifest)
-                    manifest["destinations"][str(dest_root)] = copy_res
+                    self._heal_destination_copy(final_path, dst_backup, attempts=2)
                 except Exception as e:
-                    manifest["destinations"][str(dest_root)] = {"path": str(dest_root), "success": False, "error": str(e)}
-
-            self._write_json(manifest_path, manifest)
+                    logger.warning(f"Destination copy failed for {dest_root}: {e}")
 
             if bool(getattr(self.config, "retention_policy_enabled", False)) is True:
-                self._apply_tiered_retention(backup_dir)
+                self._apply_tiered_retention(backup_dir, protected_names={final_path.name})
             else:
                 self._cleanup_old_backups()
 
             # Remove temporary files if successful (like the unencrypted zip if encrypted, or mysql dump)
             for temp_f in temp_files:
-                if temp_f != final_path and temp_f.exists() and temp_f != source_file: # Don't delete original DB!
+                if temp_f != final_path and temp_f.exists() and temp_f != protected_source:
                     try:
                         os.remove(temp_f)
                     except Exception as e:
                         logger.warning(f"Failed to cleanup temp file {temp_f}: {e}")
 
             logger.info(f"Backup completed successfully: {final_path.name}")
-            return {"success": True, "message": f"Backup created: {final_path.name}", "path": str(final_path), "manifest": str(manifest_path)}
+            if not final_path.exists():
+                return {"success": False, "message": "Backup creation failed: output file was not created."}
+
+            msg = f"Backup created: {final_path.name}"
+            if bool(self.config.encrypt) and not effective_encrypt:
+                msg += " (unencrypted fallback)"
+            return {"success": True, "message": msg, "path": str(final_path)}
 
         except Exception as e:
             logger.error(f"CRITICAL: Backup process failed: {e}", exc_info=True)
@@ -687,6 +676,14 @@ class BackupService:
             if 'enc_path' in locals() and enc_path.exists(): os.remove(enc_path)
             return {"success": False, "message": f"Backup failed: {str(e)}"}
         finally:
+            for temp_f in temp_files:
+                try:
+                    if isinstance(temp_f, Path) and temp_f.exists() and temp_f.name.endswith(".temp"):
+                        os.remove(temp_f)
+                    elif isinstance(temp_f, Path) and temp_f.exists() and temp_f.name.startswith("restore_work_"):
+                        os.remove(temp_f)
+                except Exception:
+                    pass
             self._operation_lock.release()
 
     def restore_backup(self, backup_path_str: str) -> Dict:
@@ -716,82 +713,50 @@ class BackupService:
 
             try:
                 backup_dir = backup_path.parent
-                manifest = self._load_manifest_for_backup_path(backup_path)
-                if manifest and manifest.get("backup_file_sha256"):
-                    actual = self._calculate_file_hash(backup_path)
-                    if str(manifest.get("backup_file_sha256")) != actual:
-                        return {"success": False, "message": "Backup file checksum mismatch. File may be corrupted."}
+                selected_meta = self._read_backup_metadata(backup_path, temp_files=temp_files)
+                backup_type = str(selected_meta.get("backup_type") or "full").lower()
+                db_type = str(selected_meta.get("db_type") or "sqlite").lower()
 
-                if manifest and str(manifest.get("version") or "").startswith("2"):
-                    backup_type = str(manifest.get("backup_type") or "full").lower()
-                    db_type = str(manifest.get("db_type") or "sqlite").lower()
-                    if is_mysql and db_type != "mysql":
-                        return {"success": False, "message": "Backup type mismatch."}
-                    if (not is_mysql) and db_type != "sqlite":
-                        return {"success": False, "message": "Backup type mismatch."}
+                if is_mysql and db_type != "mysql":
+                    return {"success": False, "message": "Backup type mismatch."}
+                if (not is_mysql) and db_type != "sqlite":
+                    return {"success": False, "message": "Backup type mismatch."}
 
-                    chain_names: List[str] = []
-                    cur = manifest
+                if is_mysql and backup_type != "full":
+                    return {"success": False, "message": "Incremental/differential restore is not supported for MySQL backups."}
+
+                if (not is_mysql) and backup_type in ("incremental", "differential") and str(selected_meta.get("version") or "").startswith("2"):
+                    chain_files: List[Path] = []
+                    cur_path = backup_path
                     seen: set[str] = set()
+
                     while True:
-                        cur_name = str(cur.get("backup_filename") or "")
-                        if not cur_name:
-                            return {"success": False, "message": "Invalid backup manifest: missing backup filename."}
-                        if cur_name in seen:
+                        if cur_path.name in seen:
                             return {"success": False, "message": "Invalid backup chain: cycle detected."}
-                        seen.add(cur_name)
-                        chain_names.append(cur_name)
+                        seen.add(cur_path.name)
+                        chain_files.append(cur_path)
 
-                        bt = str(cur.get("backup_type") or "").lower()
-                        if bt == "full":
+                        cur_meta = self._read_backup_metadata(cur_path, temp_files=temp_files)
+                        cur_type = str(cur_meta.get("backup_type") or "").lower()
+                        if cur_type == "full":
                             break
-                        if bt == "incremental":
-                            next_name = str(cur.get("parent_backup_filename") or "")
-                        elif bt == "differential":
-                            next_name = str(cur.get("base_backup_filename") or "")
+                        if cur_type == "incremental":
+                            dep_name = str(cur_meta.get("parent_backup_filename") or "")
+                        elif cur_type == "differential":
+                            dep_name = str(cur_meta.get("base_backup_filename") or "")
                         else:
-                            return {"success": False, "message": f"Unsupported backup type: {bt}"}
+                            return {"success": False, "message": f"Unsupported backup type: {cur_type}"}
 
-                        if not next_name:
+                        if not dep_name:
                             return {"success": False, "message": "Invalid backup chain: missing dependency reference."}
 
-                        next_path = backup_dir / next_name
-                        next_manifest = self._load_manifest_for_backup_path(next_path)
-                        if not next_manifest:
-                            return {"success": False, "message": f"Missing dependency manifest for {next_name}."}
-                        cur = next_manifest
+                        dep_path = backup_dir / dep_name
+                        if not dep_path.exists():
+                            return {"success": False, "message": f"Missing dependency backup file: {dep_name}"}
+                        cur_path = dep_path
 
-                    chain_names = list(reversed(chain_names))
-                    chunk_size = int(manifest.get("chunk_size") or 4 * 1024 * 1024)
-
-                    if is_mysql:
-                        if chain_names and len(chain_names) > 1:
-                            return {"success": False, "message": "Incremental/differential restore is not supported for MySQL backups."}
-
-                        one_path = backup_dir / chain_names[0]
-                        source_zip = one_path
-                        if one_path.suffix == ".enc":
-                            temp_zip = one_path.with_suffix(".zip.temp")
-                            temp_files.append(temp_zip)
-                            if Cipher is None:
-                                return {"success": False, "message": "Decryption failed: cryptography module missing."}
-                            self._decrypt_file_aes256(one_path, temp_zip)
-                            source_zip = temp_zip
-                        with zipfile.ZipFile(source_zip, "r") as zipf:
-                            metadata = json.loads(zipf.read("metadata.json").decode())
-                            original_filename = metadata.get("original_filename", "dump.sql")
-                            temp_dir = backup_dir / f"restore_temp_{secrets.token_hex(6)}"
-                            temp_dir.mkdir(exist_ok=True)
-                            try:
-                                zipf.extract(original_filename, path=temp_dir)
-                                sql_file = temp_dir / original_filename
-                                self._restore_mysql(sql_file)
-                            finally:
-                                try:
-                                    shutil.rmtree(temp_dir, ignore_errors=True)
-                                except Exception:
-                                    pass
-                        return {"success": True, "message": "Restore successful."}
+                    chain_files = list(reversed(chain_files))
+                    chunk_size = int(selected_meta.get("chunk_size") or 4 * 1024 * 1024)
 
                     if db_path.exists():
                         safety_backup = db_path.with_suffix(".bak.safety")
@@ -803,23 +768,22 @@ class BackupService:
                     temp_restore_file = backup_dir / f"restore_work_{secrets.token_hex(6)}.db"
                     temp_files.append(temp_restore_file)
 
-                    for idx, name in enumerate(chain_names):
-                        step_path = backup_dir / name
-                        step_zip = step_path
-                        if step_path.suffix == ".enc":
-                            temp_zip = step_path.with_suffix(f".{secrets.token_hex(4)}.zip.temp")
+                    for idx, fp in enumerate(chain_files):
+                        step_zip = fp
+                        if fp.suffix.lower() == ".enc":
+                            temp_zip = fp.with_suffix(f".{secrets.token_hex(4)}.zip.temp")
                             temp_files.append(temp_zip)
                             if Cipher is None:
                                 return {"success": False, "message": "Decryption failed: cryptography module missing."}
-                            self._decrypt_file_aes256(step_path, temp_zip)
+                            self._decrypt_file_aes256(fp, temp_zip)
                             step_zip = temp_zip
 
                         if idx == 0:
-                            md = self._extract_full_to_path(step_zip, temp_restore_file)
+                            self._extract_full_to_path(step_zip, temp_restore_file)
                         else:
-                            md = self._apply_delta_zip_to_file(step_zip, temp_restore_file, chunk_size=chunk_size)
+                            self._apply_delta_zip_to_file(step_zip, temp_restore_file, chunk_size=chunk_size)
 
-                    expected = str(manifest.get("file_sha256") or "")
+                    expected = str(selected_meta.get("file_sha256") or "")
                     if expected:
                         actual = self._calculate_file_hash(temp_restore_file)
                         if actual != expected:
@@ -1116,7 +1080,7 @@ class BackupService:
             return ts.strftime("%Y")
         return ts.strftime("%Y-%m-%d")
 
-    def _apply_tiered_retention(self, backup_dir: Path) -> None:
+    def _apply_tiered_retention(self, backup_dir: Path, protected_names: Optional[set[str]] = None) -> None:
         policy = getattr(self.config, "retention_policy", None) or {}
         keep_map: Dict[str, int] = {}
         for k in ["hourly", "daily", "weekly", "monthly", "yearly"]:
@@ -1124,65 +1088,102 @@ class BackupService:
                 keep_map[k] = int(((policy.get(k) or {}).get("keep") or 0))
             except Exception:
                 keep_map[k] = 0
-
-        manifest_paths = self._list_local_manifests(backup_dir)
-        manifests: List[Dict] = []
-        for mp in manifest_paths:
-            mf = self._load_manifest_path(mp)
-            if mf and mf.get("success") is True:
-                mf["_manifest_path"] = str(mp)
-                manifests.append(mf)
-
-        if not manifests:
+        if max(keep_map.values() or [0]) <= 0:
+            logger.warning("Tiered retention is enabled but all keep values are 0. Skipping tiered retention to avoid deleting backups.")
             return
 
-        parsed: List[Dict] = []
-        for mf in manifests:
+        backup_files: List[Path] = []
+        for ext in ["*.zip", "*.enc"]:
+            backup_files.extend(list(backup_dir.glob(f"backup_{ext}")))
+        if not backup_files:
+            return
+
+        infos: List[Dict] = []
+        info_by_name: Dict[str, Dict] = {}
+        for fp in backup_files:
             try:
-                created_at = datetime.fromisoformat(str(mf.get("created_at") or mf.get("timestamp") or ""))
+                created_at = None
+                btype = "full"
+                base_name = ""
+                parent_name = ""
+                db_type = ""
+                meta = {}
+                if fp.suffix.lower() == ".enc":
+                    meta = self._read_encrypted_public_meta(fp)
+                if fp.suffix.lower() == ".zip":
+                    try:
+                        with zipfile.ZipFile(fp, "r") as zf:
+                            if "metadata.json" in zf.namelist():
+                                meta = json.loads(zf.read("metadata.json").decode()) or {}
+                    except Exception:
+                        meta = {}
+
+                btype = str(meta.get("backup_type") or "full").lower()
+                base_name = str(meta.get("base_backup_filename") or "")
+                parent_name = str(meta.get("parent_backup_filename") or "")
+                db_type = str(meta.get("db_type") or "")
+                try:
+                    created_at = datetime.fromisoformat(str(meta.get("timestamp") or meta.get("created_at") or ""))
+                except Exception:
+                    created_at = datetime.fromtimestamp(fp.stat().st_mtime)
+
+                info = {
+                    "name": fp.name,
+                    "path": fp,
+                    "created_at": created_at,
+                    "backup_type": btype,
+                    "base_backup_filename": base_name,
+                    "parent_backup_filename": parent_name,
+                    "db_type": db_type,
+                }
+                infos.append(info)
+                info_by_name[fp.name] = info
             except Exception:
-                created_at = datetime.fromtimestamp(Path(mf["_manifest_path"]).stat().st_mtime)
-            mf["_created_at_dt"] = created_at
-            parsed.append(mf)
+                continue
+
+        if not infos:
+            return
 
         keep_filenames: set[str] = set()
         for tier, keep_n in keep_map.items():
             if keep_n <= 0:
                 continue
             buckets: Dict[str, Dict] = {}
-            for mf in sorted(parsed, key=lambda x: x["_created_at_dt"], reverse=True):
-                b = self._compute_bucket_key(mf["_created_at_dt"], tier)
+            for info in sorted(infos, key=lambda x: x["created_at"], reverse=True):
+                b = self._compute_bucket_key(info["created_at"], tier)
                 if b not in buckets:
-                    buckets[b] = mf
-            for mf in list(buckets.values())[:keep_n]:
-                name = str(mf.get("backup_filename") or "")
-                if name:
-                    keep_filenames.add(name)
+                    buckets[b] = info
+            for info in list(buckets.values())[:keep_n]:
+                keep_filenames.add(str(info["name"]))
+        if not keep_filenames:
+            logger.warning("Tiered retention produced an empty keep set. Skipping deletion to avoid deleting all backups.")
+            return
+
+        if protected_names:
+            for n in protected_names:
+                if n:
+                    keep_filenames.add(str(n))
 
         changed = True
-        by_name = {str(m.get("backup_filename") or ""): m for m in parsed if m.get("backup_filename")}
         while changed:
             changed = False
             for name in list(keep_filenames):
-                mf = by_name.get(name)
-                if not mf:
+                info = info_by_name.get(name)
+                if not info:
                     continue
-                for dep in self._collect_dependency_filenames(mf):
+                for dep in [str(info.get("base_backup_filename") or ""), str(info.get("parent_backup_filename") or "")]:
                     if dep and dep not in keep_filenames:
                         keep_filenames.add(dep)
                         changed = True
 
-        for mf in parsed:
-            name = str(mf.get("backup_filename") or "")
+        for info in infos:
+            name = str(info.get("name") or "")
             if not name or name in keep_filenames:
                 continue
-            backup_path = backup_dir / name
-            manifest_path = Path(str(mf.get("_manifest_path") or ""))
+            fp = info.get("path")
             try:
-                if backup_path.exists():
-                    os.remove(backup_path)
-                if manifest_path.exists():
-                    os.remove(manifest_path)
+                if isinstance(fp, Path) and fp.exists():
+                    os.remove(fp)
             except Exception as e:
                 logger.warning(f"Retention deletion failed for {name}: {e}")
 
@@ -1252,57 +1253,56 @@ class BackupService:
                 return {"success": False, "message": "Backup file not found."}
 
             backup_dir = backup_path.parent
-            manifest_path = self._manifest_path_for_backup(backup_path)
-            mf = self._load_manifest_path(manifest_path)
-            if not mf:
-                return {"success": False, "message": "Manifest not found for backup. Self-healing requires the manifest file."}
-
-            expected_sha = str(mf.get("backup_file_sha256") or "").strip()
-            if not expected_sha:
-                expected_sha = self._calculate_file_hash(backup_path)
-                mf["backup_file_sha256"] = expected_sha
-
-            def is_good(p: Path) -> bool:
+            def is_healthy(p: Path) -> bool:
+                if not p.exists():
+                    return False
                 try:
-                    return p.exists() and self._calculate_file_hash(p) == expected_sha
+                    if p.suffix.lower() == ".enc":
+                        return self._verify_encrypted_integrity(p)
+                    if p.suffix.lower() == ".zip":
+                        with zipfile.ZipFile(p, "r") as zf:
+                            if "metadata.json" not in zf.namelist():
+                                return False
+                            bad = zf.testzip()
+                            return bad is None
+                    return False
                 except Exception:
                     return False
 
-            good_sources: List[Path] = []
-            if is_good(backup_path):
-                good_sources.append(backup_path)
-
-            dest_map = mf.get("destinations") or {}
-            if not isinstance(dest_map, dict):
-                dest_map = {}
-
-            for _k, v in dest_map.items():
+            configured_dests = self._get_filesystem_destinations()
+            candidates: List[Path] = [backup_path]
+            for dest_root in configured_dests:
                 try:
-                    if not isinstance(v, dict):
+                    if not dest_root.exists():
                         continue
-                    p = Path(str(v.get("path") or ""))
-                    if p and is_good(p) and p not in good_sources:
-                        good_sources.append(p)
+                    if dest_root.resolve() == backup_dir.resolve():
+                        continue
+                    candidates.append(dest_root / backup_path.name)
                 except Exception:
                     continue
 
-            if not good_sources:
-                mf["last_verified_at"] = datetime.utcnow().isoformat()
-                self._write_json(manifest_path, mf)
-                return {"success": False, "message": "No healthy copy found. Backup set appears corrupted across all destinations.", "manifest": str(manifest_path)}
+            source: Optional[Path] = None
+            if is_healthy(backup_path):
+                source = backup_path
+            else:
+                for c in candidates[1:]:
+                    if is_healthy(c):
+                        source = c
+                        break
 
-            source = good_sources[0]
-            mf["self_heal"] = mf.get("self_heal") or {}
-            mf["self_heal"]["source"] = str(source)
+            if not source:
+                return {"success": False, "message": "No healthy copy found across all configured destinations."}
 
+            results: Dict[str, Dict] = {}
             if source != backup_path:
                 try:
-                    if not is_good(backup_path):
-                        self._heal_destination_copy(source, backup_path, attempts=2)
-                except Exception:
-                    pass
+                    self._heal_destination_copy(source, backup_path, attempts=2)
+                    results["local"] = {"path": str(backup_path), "success": True, "source": str(source)}
+                except Exception as e:
+                    results["local"] = {"path": str(backup_path), "success": False, "error": str(e)}
+            else:
+                results["local"] = {"path": str(backup_path), "success": True}
 
-            configured_dests = self._get_filesystem_destinations()
             for dest_root in configured_dests:
                 try:
                     if not dest_root.exists():
@@ -1310,49 +1310,28 @@ class BackupService:
                     if dest_root.resolve() == backup_dir.resolve():
                         continue
                     dst_backup = dest_root / backup_path.name
-                    dst_manifest = dest_root / manifest_path.name
-
-                    needs_copy = True
-                    if dst_backup.exists():
-                        try:
-                            needs_copy = self._calculate_file_hash(dst_backup) != expected_sha
-                        except Exception:
-                            needs_copy = True
-
-                    if needs_copy:
-                        copy_res = self._heal_destination_copy(source, dst_backup, attempts=2)
-                        dest_map[str(dest_root)] = copy_res
-                    else:
-                        dest_map[str(dest_root)] = {"path": str(dst_backup), "success": True, "sha256": expected_sha, "bytes": int(dst_backup.stat().st_size)}
-
-                    try:
-                        shutil.copy2(manifest_path, dst_manifest)
-                    except Exception:
-                        pass
+                    if is_healthy(dst_backup):
+                        results[str(dest_root)] = {"path": str(dst_backup), "success": True}
+                        continue
+                    copy_res = self._heal_destination_copy(backup_path, dst_backup, attempts=2)
+                    results[str(dest_root)] = copy_res
                 except Exception as e:
-                    dest_map[str(dest_root)] = {"path": str(dest_root), "success": False, "error": str(e)}
+                    results[str(dest_root)] = {"path": str(dest_root), "success": False, "error": str(e)}
 
-            mf["destinations"] = dest_map
-            mf["last_verified_at"] = datetime.utcnow().isoformat()
-            self._write_json(manifest_path, mf)
-            return {"success": True, "message": "Verification completed.", "manifest": str(manifest_path)}
+            return {"success": True, "message": "Verification completed.", "results": results}
         finally:
             self._operation_lock.release()
 
     def verify_and_heal_recent(self, limit: int = 25) -> Dict:
-        backup_dir = Path(self.config.local_path)
-        manifests = self._list_local_manifests(backup_dir)[: int(limit or 25)]
+        backups = self.list_backups()[: int(limit or 25)]
         ok = 0
         failed = 0
         results: List[Dict] = []
-        for mp in manifests:
-            mf = self._load_manifest_path(mp)
-            if not mf or mf.get("success") is not True:
+        for b in backups:
+            p = str(b.get("path") or "")
+            if not p:
                 continue
-            bp = backup_dir / str(mf.get("backup_filename") or "")
-            if not bp.exists():
-                continue
-            res = self.verify_and_heal_backup(str(bp))
+            res = self.verify_and_heal_backup(p)
             results.append(res)
             if res.get("success") is True:
                 ok += 1
@@ -1373,7 +1352,7 @@ class BackupService:
             raise ValueError("No active encryption key configured.")
         return str(self.config.active_key_id), self._get_key_material(str(self.config.active_key_id))
 
-    def _encrypt_file_aes256(self, src_path: Path, dst_path: Path) -> None:
+    def _encrypt_file_aes256(self, src_path: Path, dst_path: Path, public_meta: Optional[Dict] = None) -> None:
         key_id, key = self._get_active_key()
         if len(key) != 32:
             raise ValueError("Invalid key size for AES-256.")
@@ -1388,10 +1367,22 @@ class BackupService:
         if len(key_id_bytes) > 255:
             raise ValueError("Key id too long.")
 
-        header = b"FBRBK01" + bytes([1]) + bytes([len(key_id_bytes)]) + key_id_bytes + iv
+        meta_payload = json.dumps(public_meta or {}, ensure_ascii=False).encode("utf-8")
+        if len(meta_payload) > 1024 * 1024:
+            raise ValueError("Public metadata too large.")
+        header = (
+            b"FBRBK01"
+            + bytes([2])
+            + bytes([len(key_id_bytes)])
+            + key_id_bytes
+            + iv
+            + len(meta_payload).to_bytes(4, "big")
+            + meta_payload
+        )
 
         with open(src_path, "rb") as f_in, open(dst_path, "wb") as f_out:
             f_out.write(header)
+            mac.update(header)
             while True:
                 chunk = f_in.read(1024 * 1024)
                 if not chunk:
@@ -1414,12 +1405,19 @@ class BackupService:
             magic = f_in.read(7)
             if magic != b"FBRBK01":
                 raise ValueError("Invalid encrypted backup magic header.")
-            ver = f_in.read(1)
-            if ver != bytes([1]):
+            ver = int.from_bytes(f_in.read(1), "big")
+            if ver not in (1, 2):
                 raise ValueError("Unsupported encrypted backup version.")
             key_id_len = int.from_bytes(f_in.read(1), "big")
             key_id = f_in.read(key_id_len).decode("utf-8")
             iv = f_in.read(16)
+            meta_len = 0
+            meta_payload = b""
+            if ver == 2:
+                meta_len = int.from_bytes(f_in.read(4), "big")
+                if meta_len < 0 or meta_len > 1024 * 1024:
+                    raise ValueError("Invalid encrypted backup metadata length.")
+                meta_payload = f_in.read(meta_len)
 
             key = self._get_key_material(key_id)
             if len(key) != 32:
@@ -1429,7 +1427,7 @@ class BackupService:
             decryptor = cipher.decryptor()
             mac = hmac.HMAC(key, hashes.SHA256(), backend=default_backend())
 
-            header_len = 7 + 1 + 1 + key_id_len + 16
+            header_len = 7 + 1 + 1 + key_id_len + 16 + (4 + meta_len if ver == 2 else 0)
             expected_mac_len = 32
             remaining = file_size - header_len
             if remaining <= expected_mac_len:
@@ -1441,6 +1439,17 @@ class BackupService:
 
             to_read = file_size - header_len - expected_mac_len
             with open(dst_path, "wb") as f_out:
+                if ver == 2:
+                    header = (
+                        b"FBRBK01"
+                        + bytes([2])
+                        + bytes([key_id_len])
+                        + key_id.encode("utf-8")
+                        + iv
+                        + meta_len.to_bytes(4, "big")
+                        + meta_payload
+                    )
+                    mac.update(header)
                 while to_read > 0:
                     chunk = f_in.read(min(1024 * 1024, to_read))
                     if not chunk:
@@ -1454,6 +1463,209 @@ class BackupService:
                     f_out.write(final_pt)
 
             mac.verify(expected_mac)
+
+    def _read_encrypted_public_meta(self, src_path: Path) -> Dict:
+        try:
+            with open(src_path, "rb") as f:
+                magic = f.read(7)
+                if magic != b"FBRBK01":
+                    return {}
+                ver = int.from_bytes(f.read(1), "big")
+                if ver != 2:
+                    return {}
+                key_id_len = int.from_bytes(f.read(1), "big")
+                _key_id = f.read(key_id_len)
+                _iv = f.read(16)
+                meta_len = int.from_bytes(f.read(4), "big")
+                if meta_len < 0 or meta_len > 1024 * 1024:
+                    return {}
+                meta_payload = f.read(meta_len)
+            return json.loads(meta_payload.decode("utf-8")) or {}
+        except Exception:
+            return {}
+
+    def _verify_encrypted_integrity(self, src_path: Path) -> bool:
+        try:
+            file_size = src_path.stat().st_size
+            if file_size < 7 + 1 + 1 + 16 + 32:
+                return False
+
+            with open(src_path, "rb") as f:
+                magic = f.read(7)
+                if magic != b"FBRBK01":
+                    return False
+                ver = int.from_bytes(f.read(1), "big")
+                if ver not in (1, 2):
+                    return False
+                key_id_len = int.from_bytes(f.read(1), "big")
+                key_id = f.read(key_id_len).decode("utf-8")
+                iv = f.read(16)
+                meta_len = 0
+                meta_payload = b""
+                if ver == 2:
+                    meta_len = int.from_bytes(f.read(4), "big")
+                    if meta_len < 0 or meta_len > 1024 * 1024:
+                        return False
+                    meta_payload = f.read(meta_len)
+
+                key = self._get_key_material(key_id)
+                mac = hmac.HMAC(key, hashes.SHA256(), backend=default_backend())
+
+                header_len = 7 + 1 + 1 + key_id_len + 16 + (4 + meta_len if ver == 2 else 0)
+                expected_mac_len = 32
+                if file_size <= header_len + expected_mac_len:
+                    return False
+
+                f.seek(file_size - expected_mac_len)
+                expected_mac = f.read(expected_mac_len)
+
+                f.seek(0)
+                if ver == 2:
+                    header = (
+                        b"FBRBK01"
+                        + bytes([2])
+                        + bytes([key_id_len])
+                        + key_id.encode("utf-8")
+                        + iv
+                        + meta_len.to_bytes(4, "big")
+                        + meta_payload
+                    )
+                    f.seek(len(header))
+                    mac.update(header)
+                else:
+                    f.seek(header_len)
+
+                to_read = file_size - header_len - expected_mac_len
+                while to_read > 0:
+                    chunk = f.read(min(1024 * 1024, to_read))
+                    if not chunk:
+                        break
+                    to_read -= len(chunk)
+                    mac.update(chunk)
+
+                mac.verify(expected_mac)
+            return True
+        except Exception:
+            return False
+
+    def _read_backup_metadata(self, backup_path: Path, temp_files: Optional[List[Path]] = None) -> Dict:
+        meta: Dict = {}
+        if backup_path.suffix.lower() == ".zip":
+            with zipfile.ZipFile(backup_path, "r") as zf:
+                if "metadata.json" not in zf.namelist():
+                    raise ValueError("Invalid backup: Missing metadata.json.")
+                meta = json.loads(zf.read("metadata.json").decode()) or {}
+            meta["backup_filename"] = backup_path.name
+            return meta
+
+        if backup_path.suffix.lower() == ".enc":
+            temp_zip = backup_path.with_suffix(f".{secrets.token_hex(4)}.zip.temp")
+            if temp_files is not None:
+                temp_files.append(temp_zip)
+            self._decrypt_file_aes256(backup_path, temp_zip)
+            with zipfile.ZipFile(temp_zip, "r") as zf:
+                if "metadata.json" not in zf.namelist():
+                    raise ValueError("Invalid backup: Missing metadata.json.")
+                meta = json.loads(zf.read("metadata.json").decode()) or {}
+            meta["backup_filename"] = backup_path.name
+            return meta
+
+        raise ValueError("Unsupported backup file type.")
+
+    def get_backup_public_info(self, backup_path_str: str) -> Dict:
+        p = Path(str(backup_path_str))
+        if not p.exists():
+            return {}
+
+        if p.suffix.lower() == ".enc":
+            meta = self._read_encrypted_public_meta(p)
+            if meta:
+                return {
+                    "backup_filename": p.name,
+                    "backup_type": str(meta.get("backup_type") or ""),
+                    "db_type": str(meta.get("db_type") or ""),
+                    "created_at": str(meta.get("created_at") or ""),
+                    "base_backup_filename": str(meta.get("base_backup_filename") or ""),
+                    "parent_backup_filename": str(meta.get("parent_backup_filename") or ""),
+                }
+            try:
+                temp_files: List[Path] = []
+                full = self._read_backup_metadata(p, temp_files=temp_files)
+                out = {
+                    "backup_filename": p.name,
+                    "backup_type": str(full.get("backup_type") or ""),
+                    "db_type": str(full.get("db_type") or ""),
+                    "created_at": str(full.get("timestamp") or ""),
+                    "base_backup_filename": str(full.get("base_backup_filename") or ""),
+                    "parent_backup_filename": str(full.get("parent_backup_filename") or ""),
+                }
+                for t in temp_files:
+                    try:
+                        if t.exists():
+                            os.remove(t)
+                    except Exception:
+                        pass
+                return out
+            except Exception:
+                return {}
+
+        if p.suffix.lower() == ".zip":
+            try:
+                full = self._read_backup_metadata(p)
+                return {
+                    "backup_filename": p.name,
+                    "backup_type": str(full.get("backup_type") or ""),
+                    "db_type": str(full.get("db_type") or ""),
+                    "created_at": str(full.get("timestamp") or ""),
+                    "base_backup_filename": str(full.get("base_backup_filename") or ""),
+                    "parent_backup_filename": str(full.get("parent_backup_filename") or ""),
+                }
+            except Exception:
+                return {}
+
+        return {}
+
+    def _list_backup_files(self, backup_dir: Path) -> List[Path]:
+        files: List[Path] = []
+        for ext in ["*.zip", "*.enc"]:
+            files.extend(list(backup_dir.glob(f"backup_{ext}")))
+        files = [p for p in files if p.is_file() and not p.name.endswith(".temp")]
+        return sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)
+
+    def _find_latest_backup_metadata_in_dir(self, backup_dir: Path) -> Optional[Dict]:
+        for fp in self._list_backup_files(backup_dir):
+            temp: List[Path] = []
+            try:
+                meta = self._read_backup_metadata(fp, temp_files=temp)
+                return meta
+            except Exception:
+                continue
+            finally:
+                for t in temp:
+                    try:
+                        if t.exists():
+                            os.remove(t)
+                    except Exception:
+                        pass
+        return None
+
+    def _find_latest_full_backup_metadata_in_dir(self, backup_dir: Path) -> Optional[Dict]:
+        for fp in self._list_backup_files(backup_dir):
+            temp: List[Path] = []
+            try:
+                meta = self._read_backup_metadata(fp, temp_files=temp)
+                if str(meta.get("backup_type") or "").lower() == "full":
+                    return meta
+            except Exception:
+                continue
+            finally:
+                for t in temp:
+                    try:
+                        if t.exists():
+                            os.remove(t)
+                    except Exception:
+                        pass
+        return None
 
     def verify_db_integrity(self) -> bool:
         """Runs a PRAGMA integrity_check for SQLite or basic check for MySQL."""

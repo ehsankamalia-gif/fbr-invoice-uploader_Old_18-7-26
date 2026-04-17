@@ -180,12 +180,9 @@ class TestBackupService(unittest.TestCase):
         res = self.service.create_backup(is_manual=True)
         self.assertTrue(res["success"])
         backup_path = Path(res["path"])
-        manifest_path = Path(res["manifest"])
 
         dst_backup = dest_dir / backup_path.name
-        dst_manifest = dest_dir / manifest_path.name
         self.assertTrue(dst_backup.exists())
-        self.assertTrue(dst_manifest.exists())
 
         with open(dst_backup, "wb") as f:
             f.write(b"tamper")
