@@ -48,16 +48,18 @@ class TestBackupService(unittest.TestCase):
                 enabled=True,
                 local_path=str(TEST_BACKUP_DIR),
                 encrypt=True,
-                encryption_key="test_key_must_be_32_bytes_long_12345" # Not used directly by Fernet here
+                encryption_key="invalid_key_for_test"
             )):
                 self.service = BackupService()
                 # Overwrite some paths for testing
                 self.service.app_data_dir = TEST_DIR
                 self.service.config_file = TEST_DIR / "backup_config.json"
                 self.service.config.local_path = str(TEST_BACKUP_DIR)
-                # Ensure a real Fernet key
+                # Ensure a real base64-encoded 32-byte key (Fernet key format is compatible)
                 from cryptography.fernet import Fernet
                 self.service.config.encryption_key = Fernet.generate_key().decode()
+                self.service.config.encryption_keys = []
+                self.service.config.active_key_id = ""
                 self.service.save_config()
 
     def tearDown(self):
@@ -135,6 +137,62 @@ class TestBackupService(unittest.TestCase):
         # 3. Attempt restore
         restore_result = self.service.restore_backup(str(backup_path))
         self.assertFalse(restore_result["success"])
+
+    def test_incremental_backup_and_restore(self):
+        """Test incremental backup creates smaller delta and can restore via chain."""
+        full = self.service.create_backup(is_manual=True)
+        self.assertTrue(full["success"])
+        full_path = full["path"]
+
+        import sqlite3
+        conn = sqlite3.connect(TEST_DB_FILE)
+        conn.execute("UPDATE test SET name = 'After Full'")
+        conn.commit()
+        conn.close()
+
+        self.service.config.backup_mode = "incremental"
+        inc = self.service.create_backup(is_manual=True)
+        self.assertTrue(inc["success"])
+        inc_path = inc["path"]
+
+        conn = sqlite3.connect(TEST_DB_FILE)
+        conn.execute("UPDATE test SET name = 'Corrupted Local'")
+        conn.commit()
+        conn.close()
+
+        restore_result = self.service.restore_backup(inc_path)
+        self.assertTrue(restore_result["success"])
+
+        conn = sqlite3.connect(TEST_DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM test")
+        name = cursor.fetchone()[0]
+        conn.close()
+        self.assertEqual(name, "After Full")
+
+    def test_multi_destination_self_heal(self):
+        """Test copy to a secondary filesystem destination and self-heal corrupted copy."""
+        dest_dir = TEST_DIR / "dest1"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        self.service.config.destinations = [{"type": "network_share", "path": str(dest_dir), "enabled": True}]
+        self.service.save_config()
+
+        res = self.service.create_backup(is_manual=True)
+        self.assertTrue(res["success"])
+        backup_path = Path(res["path"])
+        manifest_path = Path(res["manifest"])
+
+        dst_backup = dest_dir / backup_path.name
+        dst_manifest = dest_dir / manifest_path.name
+        self.assertTrue(dst_backup.exists())
+        self.assertTrue(dst_manifest.exists())
+
+        with open(dst_backup, "wb") as f:
+            f.write(b"tamper")
+
+        heal = self.service.verify_and_heal_backup(str(backup_path))
+        self.assertTrue(heal["success"])
+        self.assertTrue(dst_backup.exists())
 
 if __name__ == "__main__":
     unittest.main()
