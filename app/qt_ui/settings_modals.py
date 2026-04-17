@@ -872,7 +872,8 @@ class BackupSettingsDialog(BaseSettingsDialog):
     def _on_manual_backup(self):
         self.manual_backup_btn.setEnabled(False)
         self.manual_backup_btn.setText("⏳ Backing up...")
-        fmt = "enc" if "enc" in (self.manual_format.currentText() or "").lower() else "zip"
+        fmt_text = (self.manual_format.currentText() or "").lower()
+        fmt = "enc" if ".enc" in fmt_text else "zip"
         self.worker = BackupWorker(output_format=fmt)
         self.worker.finished.connect(self._handle_backup_result)
         self.worker.start()

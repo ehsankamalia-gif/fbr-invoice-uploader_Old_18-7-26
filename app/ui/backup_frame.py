@@ -386,7 +386,8 @@ class BackupFrame(ctk.CTkFrame):
         self.status_label.configure(text="Backing up...", text_color="gray")
         
         def run():
-            fmt = "enc" if "enc" in (self.manual_format_combo.get() or "").lower() else "zip"
+            fmt_text = (self.manual_format_combo.get() or "").lower()
+            fmt = "enc" if ".enc" in fmt_text else "zip"
             res = backup_service.create_backup(is_manual=True, output_format=fmt)
             self.after(0, lambda: self.finish_backup(res))
             
