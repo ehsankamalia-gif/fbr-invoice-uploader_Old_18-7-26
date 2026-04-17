@@ -6479,18 +6479,9 @@ class MainWindow(QMainWindow):
 
         prices = price_service.get_all_active_prices()
         models: List[str] = []
-        colors: List[str] = []
         for p in prices:
             if p.product_model and p.product_model.model_name and p.product_model.model_name not in models:
                 models.append(p.product_model.model_name)
-            opt = getattr(p, "optional_features", None)
-            if opt and isinstance(opt, dict):
-                colors_str = opt.get("colors") or opt.get("color") or ""
-                if colors_str:
-                    for part in str(colors_str).split(","):
-                        value = part.strip()
-                        if value and value not in colors:
-                            colors.append(value)
 
         self.ab_model_combo.blockSignals(True)
         self.ab_model_combo.clear()
@@ -6502,9 +6493,8 @@ class MainWindow(QMainWindow):
         self.ab_color_combo.blockSignals(True)
         self.ab_color_combo.clear()
         self.ab_color_combo.addItem("")
-        for c in colors:
-            self.ab_color_combo.addItem(c)
         self.ab_color_combo.blockSignals(False)
+        self._load_ab_colors_for_model("")
 
         self._ab_current_price = None
         self.ab_total_price.blockSignals(True)
@@ -6514,10 +6504,36 @@ class MainWindow(QMainWindow):
     def _on_ab_model_changed(self, model_name: str) -> None:
         if not hasattr(self, "ab_color_combo"):
             return
+        self._load_ab_colors_for_model(model_name)
         self._update_ab_price()
 
     def _on_ab_color_changed(self, color: str) -> None:
         self._update_ab_price()
+
+    def _load_ab_colors_for_model(self, model_name: str) -> None:
+        if not hasattr(self, "ab_color_combo"):
+            return
+
+        self.ab_color_combo.blockSignals(True)
+        self.ab_color_combo.clear()
+        self.ab_color_combo.addItem("")
+
+        if model_name:
+            prices = price_service.get_active_prices_for_model(model_name)
+            colors: List[str] = []
+            for price in prices:
+                opt = getattr(price, "optional_features", None)
+                if opt and isinstance(opt, dict):
+                    colors_str = opt.get("colors") or opt.get("color") or ""
+                    if colors_str:
+                        for part in str(colors_str).split(","):
+                            value = part.strip()
+                            if value and value not in colors:
+                                colors.append(value)
+            for c in colors:
+                self.ab_color_combo.addItem(c)
+
+        self.ab_color_combo.blockSignals(False)
 
     def _update_ab_price(self) -> None:
         model_name = self.ab_model_combo.currentText() if hasattr(self, "ab_model_combo") else ""
