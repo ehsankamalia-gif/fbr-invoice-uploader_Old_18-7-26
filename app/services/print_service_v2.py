@@ -103,27 +103,17 @@ class PrintServiceV2:
 
         def render_copy(label: str) -> str:
             return f"""
-              <div class="copy">
+              <div class="copy-box">
                 <div class="copy-title">{esc(label)}</div>
-                <div class="biz">
-                  <div class="biz-name">{business_name}</div>
-                  <div class="biz-meta">{business_address}</div>
-                  <div class="biz-meta">{business_phone}</div>
-                </div>
+                <div class="biz-line">{business_name}</div>
+                <div class="biz-line">{business_phone}</div>
                 <div class="row"><span class="k">Booking #</span><span class="v mono">{booking_number}</span></div>
                 <div class="row"><span class="k">Date</span><span class="v">{esc(created_at_str)}</span></div>
-                <div class="hr"></div>
                 <div class="row"><span class="k">Customer</span><span class="v">{customer_name}</span></div>
-                <div class="row"><span class="k">Model</span><span class="v">{motorcycle_model}</span></div>
-                <div class="row"><span class="k">Color</span><span class="v">{color}</span></div>
-                <div class="hr"></div>
-                <div class="row"><span class="k">Total Price</span><span class="v text-end">Rs. {total_price}</span></div>
-                <div class="row"><span class="k">Advance Paid</span><span class="v text-end">Rs. {advance_paid}</span></div>
+                <div class="row"><span class="k">Model / Color</span><span class="v">{motorcycle_model} / {color}</span></div>
+                <div class="row"><span class="k">Total</span><span class="v text-end">Rs. {total_price}</span></div>
+                <div class="row"><span class="k">Advance</span><span class="v text-end">Rs. {advance_paid}</span></div>
                 <div class="row total"><span class="k">Balance</span><span class="v text-end">Rs. {balance_amount}</span></div>
-                <div class="sign">
-                  <div class="sig-line"></div>
-                  <div class="sig-label">Signature / Stamp</div>
-                </div>
               </div>
             """
 
@@ -135,42 +125,116 @@ class PrintServiceV2:
             <meta name="viewport" content="width=device-width, initial-scale=1"/>
             <title>Advance Booking Receipt</title>
             <style>
-              @page {{ size: A4 landscape; margin: 10mm; }}
-              body {{ font-family: Arial, sans-serif; font-size: 12px; color: #111; }}
-              .wrap {{ display: flex; gap: 10mm; }}
-              .copy {{
-                flex: 1;
+              @page {{
+                size: Letter portrait;
+                margin: 0.5in;
+              }}
+              * {{ box-sizing: border-box; }}
+              body {{
+                margin: 0;
+                padding: 0;
+                font-family: Arial, sans-serif;
+                color: #111;
+                font-size: 10px;
+              }}
+              .sheet {{
+                width: 7.5in;
+                min-height: 10in;
+                margin: 0 auto;
+                display: flex;
+                flex-direction: column;
+              }}
+              .top-copies {{
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 0;
+                width: 7.5in;
+              }}
+              .copy-box {{
                 border: 1px solid #111;
-                padding: 8mm;
-                min-height: 160mm;
-                box-sizing: border-box;
+                height: 3in;
+                padding: 0.1in;
+                overflow: hidden;
               }}
               .copy-title {{
                 text-align: center;
                 font-weight: 700;
-                font-size: 14px;
-                margin-bottom: 6mm;
+                font-size: 10px;
+                margin-bottom: 0.04in;
                 text-transform: uppercase;
               }}
-              .biz {{ text-align: center; margin-bottom: 6mm; }}
-              .biz-name {{ font-weight: 700; font-size: 16px; }}
-              .biz-meta {{ font-size: 11px; }}
-              .row {{ display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; }}
-              .k {{ color: #333; }}
-              .v {{ font-weight: 600; }}
-              .mono {{ font-family: monospace; }}
-              .hr {{ border-top: 1px dashed #999; margin: 5mm 0; }}
+              .biz-line {{
+                text-align: center;
+                font-size: 9px;
+                font-weight: 700;
+                line-height: 1.1;
+              }}
+              .row {{
+                display: flex;
+                justify-content: space-between;
+                align-items: baseline;
+                gap: 6px;
+                padding: 1px 0;
+              }}
+              .k {{ color: #222; }}
+              .v {{ font-weight: 600; text-align: right; }}
+              .mono {{ font-family: Consolas, "Courier New", monospace; }}
               .text-end {{ text-align: right; }}
-              .total .k, .total .v {{ font-size: 13px; font-weight: 800; }}
-              .sign {{ margin-top: 12mm; }}
-              .sig-line {{ border-top: 1px solid #111; width: 65%; margin-left: auto; }}
-              .sig-label {{ text-align: right; font-size: 10px; margin-top: 2mm; color: #333; }}
+              .total .k, .total .v {{ font-weight: 800; }}
+              .bottom-box {{
+                margin-top: auto;
+                width: 7.5in;
+                border: 1px solid #111;
+                min-height: 1.4in;
+                padding: 0.12in;
+              }}
+              .bottom-title {{
+                font-size: 10px;
+                font-weight: 700;
+                margin-bottom: 0.06in;
+              }}
+              .note-row {{
+                display: flex;
+                justify-content: space-between;
+                gap: 0.2in;
+                margin-top: 0.22in;
+              }}
+              .line-block {{
+                flex: 1;
+              }}
+              .line {{
+                border-top: 1px solid #111;
+                margin-bottom: 2px;
+              }}
+              .line-label {{
+                font-size: 9px;
+                color: #333;
+                text-align: center;
+              }}
             </style>
           </head>
           <body>
-            <div class="wrap">
-              {render_copy("Showroom Copy")}
-              {render_copy("Customer Copy")}
+            <div class="sheet">
+              <div class="top-copies">
+                {render_copy("Customer Copy")}
+                {render_copy("Showroom Copy")}
+                </div>
+
+              <div class="bottom-box">
+                <div class="bottom-title">Terms / Delivery Notes</div>
+                <div>{business_address}</div>
+                <div>For queries: {business_phone}</div>
+                <div class="note-row">
+                  <div class="line-block">
+                    <div class="line"></div>
+                    <div class="line-label">Customer Signature</div>
+                  </div>
+                  <div class="line-block">
+                    <div class="line"></div>
+                    <div class="line-label">Authorized Signature / Stamp</div>
+                  </div>
+                </div>
+              </div>
             </div>
           </body>
         </html>
