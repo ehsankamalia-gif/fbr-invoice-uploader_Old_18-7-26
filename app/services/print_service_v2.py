@@ -91,7 +91,6 @@ class PrintServiceV2:
 
         booking_number = esc(data.get("booking_number", ""))
         customer_name = esc(data.get("customer_name", ""))
-        customer_phone = esc(data.get("customer_phone", ""))
         motorcycle_model = esc(data.get("motorcycle_model", ""))
         color = esc(data.get("color", ""))
         total_price = esc(f"{float(data.get('total_price', 0.0)):,.0f}")
@@ -102,6 +101,26 @@ class PrintServiceV2:
         business_address = esc(data.get("business_address", ""))
         business_phone = esc(data.get("business_phone", ""))
 
+        def render_copy(label: str) -> str:
+            return f"""
+              <div class="copy-box">
+                <div class="copy-title">{esc(label)}</div>
+                <div class="biz-line">{business_name}</div>
+                <div class="biz-line">{business_address}</div>
+                <div class="biz-line">{business_phone}</div>
+                <div class="copy-body">
+                  <div class="row"><span class="k">Booking #</span><span class="v mono">{booking_number}</span></div>
+                  <div class="row"><span class="k">Date</span><span class="v">{esc(created_at_str)}</span></div>
+                  <div class="row"><span class="k">Customer</span><span class="v">{customer_name}</span></div>
+                  <div class="row"><span class="k">Model / Color</span><span class="v">{motorcycle_model} / {color}</span></div>
+                  <div class="row"><span class="k">Total</span><span class="v text-end">Rs. {total_price}</span></div>
+                  <div class="row"><span class="k">Advance</span><span class="v text-end">Rs. {advance_paid}</span></div>
+                  <div class="row total"><span class="k">Balance</span><span class="v text-end">Rs. {balance_amount}</span></div>
+                </div>
+                <div class="stamp-box">STAMP</div>
+              </div>
+            """
+
         html = f"""
         <!doctype html>
         <html>
@@ -111,167 +130,86 @@ class PrintServiceV2:
             <title>Advance Booking Receipt</title>
             <style>
               @page {{
-                size: 8.5in 3.5in;
-                margin: 0;
+                size: Letter portrait;
+                margin: 0.5in;
               }}
               * {{ box-sizing: border-box; }}
-              html, body {{ height: 100%; }}
               body {{
                 margin: 0;
                 padding: 0;
                 font-family: Arial, sans-serif;
                 color: #111;
-                font-size: 9px;
-                line-height: 1.12;
+                font-size: 10px;
               }}
               .sheet {{
-                width: 7.9in;
-                height: 3.5in;
+                width: 7.5in;
+                min-height: 10in;
                 margin: 0 auto;
-                padding: 0.12in 0.16in;
-                border: 1px solid #111;
-                overflow: hidden;
                 display: flex;
                 flex-direction: column;
-                gap: 0.06in;
               }}
-              .header {{
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                gap: 2px;
-              }}
-              .biz-name {{
-                font-weight: 800;
-                font-size: 11px;
-                letter-spacing: 0.3px;
-              }}
-              .title {{
-                font-weight: 800;
-                font-size: 9.5px;
-                letter-spacing: 0.6px;
-              }}
-              .biz-meta {{
-                font-size: 8px;
-                font-weight: 600;
-              }}
-              .meta {{
-                display: flex;
-                justify-content: space-between;
-                gap: 0.2in;
-                font-size: 8.5px;
-              }}
-              .divider {{
-                border-top: 1px solid #111;
-                margin-top: 1px;
-              }}
-              .k {{ color: #222; font-weight: 700; }}
-              .v {{ font-weight: 700; }}
-              .mono {{ font-family: Consolas, "Courier New", monospace; }}
-              .customer {{
-                display: flex;
-                justify-content: space-between;
-                align-items: baseline;
-                gap: 0.2in;
-              }}
-              .customer-name {{
-                font-weight: 900;
-                font-size: 14px;
-                line-height: 1.05;
-                flex: 1;
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
-              }}
-              .customer-phone {{
-                font-weight: 800;
-                font-size: 10px;
-                white-space: nowrap;
-              }}
-              .details {{
+              .top-copies {{
                 display: grid;
                 grid-template-columns: 1fr 1fr;
-                gap: 0.12in;
+                gap: 0;
+                width: 7.5in;
+              }}
+              .copy-box {{
+                border: 1px solid #111;
+                height: 3in;
+                padding: 0.1in;
+                overflow: hidden;
+                display: flex;
+                flex-direction: column;
+              }}
+              .copy-title {{
+                text-align: center;
+                font-weight: 700;
+                font-size: 10px;
+                margin-bottom: 0.04in;
+                text-transform: uppercase;
+              }}
+              .biz-line {{
+                text-align: center;
+                font-size: 9px;
+                font-weight: 700;
+                line-height: 1.1;
+              }}
+              .copy-body {{
+                margin-top: 0.06in;
               }}
               .row {{
                 display: flex;
                 justify-content: space-between;
-                gap: 10px;
+                align-items: baseline;
+                gap: 6px;
                 padding: 1px 0;
               }}
-              .amounts .row {{ padding: 0; }}
-              .amounts .k {{ font-weight: 800; }}
-              .balance .k, .balance .v {{
-                font-weight: 900;
-                font-size: 10px;
-              }}
-              .footer {{
-                margin-top: auto;
-                display: grid;
-                grid-template-columns: 1fr auto;
-                gap: 0.16in;
-                align-items: end;
-              }}
-              .sig-line {{
-                border-top: 1px solid #111;
-                height: 0;
-                margin-bottom: 2px;
-              }}
-              .sig-label {{
-                font-size: 8px;
-                font-weight: 700;
-              }}
+              .k {{ color: #222; }}
+              .v {{ font-weight: 600; text-align: right; }}
+              .mono {{ font-family: Consolas, "Courier New", monospace; }}
+              .text-end {{ text-align: right; }}
+              .total .k, .total .v {{ font-weight: 800; }}
               .stamp-box {{
-                width: 1.25in;
-                height: 0.7in;
+                margin-top: auto;
+                align-self: flex-end;
+                width: 1.45in;
+                height: 0.9in;
                 border: 1px solid #111;
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                font-weight: 900;
+                font-weight: 800;
                 font-size: 10px;
-                letter-spacing: 0.6px;
+                letter-spacing: 0.5px;
               }}
             </style>
           </head>
           <body>
             <div class="sheet">
-              <div class="header">
-                <div class="biz-name">{business_name}</div>
-                <div class="title">ADVANCE BOOKING RECEIPT</div>
-                <div class="biz-meta">{business_address} | {business_phone}</div>
-              </div>
-
-              <div class="meta">
-                <div><span class="k">Booking#:</span> <span class="v mono">{booking_number}</span></div>
-                <div><span class="k">Date:</span> <span class="v">{esc(created_at_str)}</span></div>
-              </div>
-
-              <div class="divider"></div>
-
-              <div class="customer">
-                <div class="customer-name">{customer_name}</div>
-                <div class="customer-phone">Phone: <span class="mono">{customer_phone}</span></div>
-              </div>
-
-              <div class="details">
-                <div>
-                  <div class="row"><span class="k">Model</span><span class="v">{motorcycle_model}</span></div>
-                  <div class="row"><span class="k">Color</span><span class="v">{color}</span></div>
-                </div>
-                <div class="amounts">
-                  <div class="row"><span class="k">Total</span><span class="v">Rs. {total_price}</span></div>
-                  <div class="row"><span class="k">Advance</span><span class="v">Rs. {advance_paid}</span></div>
-                  <div class="row balance"><span class="k">Balance</span><span class="v">Rs. {balance_amount}</span></div>
-                </div>
-              </div>
-
-              <div class="footer">
-                <div>
-                  <div class="sig-line"></div>
-                  <div class="sig-label">Customer Signature</div>
-                </div>
-                <div class="stamp-box">STAMP</div>
+              <div class="top-copies">
+                {render_copy("Customer Copy")}
+                {render_copy("Showroom Copy")}
               </div>
             </div>
           </body>
