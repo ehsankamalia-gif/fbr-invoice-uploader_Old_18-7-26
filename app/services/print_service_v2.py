@@ -32,7 +32,7 @@ class PrintServiceV2:
         return {
             "business_name": settings.get("business_name", "Ehsan Trader"),
             "business_address": settings.get("business_address", "Kamalia, Pakistan"),
-            "business_phone": settings.get("business_phone", "0300-8691288"),
+            "business_phone": settings.get("business_phone", "0302-8691288"),
             "business_ntn": settings.get("business_ntn", "1234567-8")
         }
 
