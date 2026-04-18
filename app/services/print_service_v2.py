@@ -32,7 +32,7 @@ class PrintServiceV2:
         return {
             "business_name": settings.get("business_name", "Ehsan Trader"),
             "business_address": settings.get("business_address", "Kamalia, Pakistan"),
-            "business_phone": settings.get("business_phone", "0300-1234567"),
+            "business_phone": settings.get("business_phone", "0300-8691288"),
             "business_ntn": settings.get("business_ntn", "1234567-8")
         }
 
@@ -91,6 +91,7 @@ class PrintServiceV2:
 
         booking_number = esc(data.get("booking_number", ""))
         customer_name = esc(data.get("customer_name", ""))
+        customer_phone = esc(data.get("customer_phone", ""))
         motorcycle_model = esc(data.get("motorcycle_model", ""))
         color = esc(data.get("color", ""))
         total_price = esc(f"{float(data.get('total_price', 0.0)):,.0f}")
@@ -106,18 +107,26 @@ class PrintServiceV2:
               <div class="copy-box">
                 <div class="copy-title">{esc(label)}</div>
                 <div class="biz-line">{business_name}</div>
-                <div class="biz-line">{business_address}</div>
                 <div class="biz-line">{business_phone}</div>
+                <div class="customer-block">
+                  <div class="customer-name">{customer_name}</div>
+                  <div class="customer-phone"><span class="k">Phone:</span> <span class="mono">{customer_phone}</span></div>
+                </div>
                 <div class="copy-body">
                   <div class="row"><span class="k">Booking #</span><span class="v mono">{booking_number}</span></div>
                   <div class="row"><span class="k">Date</span><span class="v">{esc(created_at_str)}</span></div>
-                  <div class="row"><span class="k">Customer</span><span class="v">{customer_name}</span></div>
                   <div class="row"><span class="k">Model / Color</span><span class="v">{motorcycle_model} / {color}</span></div>
-                  <div class="row"><span class="k">Total</span><span class="v text-end">Rs. {total_price}</span></div>
-                  <div class="row"><span class="k">Advance</span><span class="v text-end">Rs. {advance_paid}</span></div>
-                  <div class="row total"><span class="k">Balance</span><span class="v text-end">Rs. {balance_amount}</span></div>
+                  <div class="row"><span class="k">Total</span><span class="v">Rs. {total_price}</span></div>
+                  <div class="row"><span class="k">Advance</span><span class="v">Rs. {advance_paid}</span></div>
+                  <div class="row total"><span class="k">Balance</span><span class="v">Rs. {balance_amount}</span></div>
                 </div>
-                <div class="stamp-box">STAMP</div>
+                <div class="footer">
+                  <div class="sig">
+                    <div class="sig-line"></div>
+                    <div class="sig-label">Signature</div>
+                  </div>
+                  <div class="stamp-box">STAMP</div>
+                </div>
               </div>
             """
 
@@ -130,8 +139,8 @@ class PrintServiceV2:
             <title>Advance Booking Receipt</title>
             <style>
               @page {{
-                size: Letter portrait;
-                margin: 0.5in;
+                size: 8.5in 3.5in;
+                margin: 0.25in;
               }}
               * {{ box-sizing: border-box; }}
               body {{
@@ -139,44 +148,66 @@ class PrintServiceV2:
                 padding: 0;
                 font-family: Arial, sans-serif;
                 color: #111;
-                font-size: 10px;
+                font-size: 8.5pt;
+                line-height: 1.12;
               }}
               .sheet {{
-                width: 7.5in;
-                min-height: 10in;
+                width: 8in;
+                height: 3in;
                 margin: 0 auto;
-                display: flex;
-                flex-direction: column;
+                overflow: hidden;
               }}
               .top-copies {{
                 display: grid;
                 grid-template-columns: 1fr 1fr;
-                gap: 0;
-                width: 7.5in;
+                column-gap: 0.08in;
+                width: 8in;
+                height: 3in;
               }}
               .copy-box {{
                 border: 1px solid #111;
                 height: 3in;
-                padding: 0.1in;
+                padding: 0.07in;
                 overflow: hidden;
                 display: flex;
                 flex-direction: column;
               }}
               .copy-title {{
                 text-align: center;
-                font-weight: 700;
-                font-size: 10px;
-                margin-bottom: 0.04in;
+                font-weight: 800;
+                font-size: 9pt;
+                margin-bottom: 0.03in;
                 text-transform: uppercase;
               }}
               .biz-line {{
                 text-align: center;
-                font-size: 9px;
+                font-size: 8pt;
                 font-weight: 700;
-                line-height: 1.1;
+                line-height: 1.05;
+              }}
+              .customer-block {{
+                margin-top: 0.04in;
+              }}
+              .customer-name {{
+                font-size: 12pt;
+                font-weight: 900;
+                padding: 1px 2px;
+                border-bottom: 1px solid #111;
+                background: #f0f0f0;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+              }}
+              .customer-phone {{
+                margin-top: 0.02in;
+                font-size: 10pt;
+                font-weight: 800;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
               }}
               .copy-body {{
-                margin-top: 0.06in;
+                margin-top: 0.04in;
               }}
               .row {{
                 display: flex;
@@ -185,22 +216,40 @@ class PrintServiceV2:
                 gap: 6px;
                 padding: 1px 0;
               }}
-              .k {{ color: #222; }}
-              .v {{ font-weight: 600; text-align: right; }}
+              .k {{ color: #222; font-weight: 700; }}
+              .v {{ font-weight: 700; text-align: right; }}
               .mono {{ font-family: Consolas, "Courier New", monospace; }}
               .text-end {{ text-align: right; }}
               .total .k, .total .v {{ font-weight: 800; }}
-              .stamp-box {{
+              .footer {{
                 margin-top: auto;
-                align-self: flex-end;
-                width: 1.45in;
-                height: 0.9in;
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-end;
+                gap: 0.06in;
+              }}
+              .sig {{
+                flex: 1;
+              }}
+              .sig-line {{
+                border-top: 1px solid #111;
+                width: 100%;
+                height: 0;
+                margin-bottom: 2px;
+              }}
+              .sig-label {{
+                font-size: 7.5pt;
+                font-weight: 700;
+              }}
+              .stamp-box {{
+                width: 1.05in;
+                height: 0.55in;
                 border: 1px solid #111;
                 display: flex;
                 align-items: center;
                 justify-content: center;
                 font-weight: 800;
-                font-size: 10px;
+                font-size: 9pt;
                 letter-spacing: 0.5px;
               }}
             </style>
