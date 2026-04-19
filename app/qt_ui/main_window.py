@@ -6912,7 +6912,7 @@ class MainWindow(QMainWindow):
                     "balance_amount": booking.balance_amount,
                 }
             )
-            print_service_v2.print_html(html, f"Advance Booking Receipt - {booking.booking_number}")
+            print_service_v2.print_html_direct(html)
             
             # Real-time state management: Notify all listeners about the booking update
             # We fetch the new active count for this specific model to ensure accuracy
@@ -6941,11 +6941,16 @@ class MainWindow(QMainWindow):
     def _print_selected_advance_booking(self) -> None:
         if not hasattr(self, "ab_table_view"):
             return
-        selection = self.ab_table_view.selectionModel().selectedRows()
-        if not selection:
-            self._show_error("Selection Required", "Please select a booking to print.")
-            return
-        row = selection[0].row()
+        selection_model = self.ab_table_view.selectionModel()
+        selection = selection_model.selectedRows()
+        if selection:
+            row = selection[0].row()
+        else:
+            current = self.ab_table_view.currentIndex()
+            if not current.isValid():
+                self._show_error("Selection Required", "Please select a booking to print.")
+                return
+            row = current.row()
         row_data = self.ab_table_model._rows[row]
 
         db = SessionLocal()
@@ -6967,7 +6972,7 @@ class MainWindow(QMainWindow):
                     "balance_amount": booking.balance_amount,
                 }
             )
-            print_service_v2.print_html(html, f"Advance Booking Receipt - {booking.booking_number}")
+            print_service_v2.print_html_direct(html)
         except Exception as e:
             logger.error(f"Advance booking print failed: {e}", exc_info=True)
             self._show_error("Print Error", f"Failed to print receipt: {e}")
@@ -6977,10 +6982,15 @@ class MainWindow(QMainWindow):
     def _get_selected_advance_booking_number(self) -> str | None:
         if not hasattr(self, "ab_table_view"):
             return None
-        selection = self.ab_table_view.selectionModel().selectedRows()
-        if not selection:
-            return None
-        row = selection[0].row()
+        selection_model = self.ab_table_view.selectionModel()
+        selection = selection_model.selectedRows()
+        if selection:
+            row = selection[0].row()
+        else:
+            current = self.ab_table_view.currentIndex()
+            if not current.isValid():
+                return None
+            row = current.row()
         row_data = self.ab_table_model._rows[row]
         return row_data.booking_number
 
@@ -7136,7 +7146,7 @@ class MainWindow(QMainWindow):
                     "advance_paid": booking.advance_paid,
                     "balance_amount": booking.balance_amount,
                 })
-                print_service_v2.print_html(html, f"Booking Receipt - {booking.booking_number}")
+                print_service_v2.print_html_direct(html)
                 dialog.accept()
 
             def on_save():

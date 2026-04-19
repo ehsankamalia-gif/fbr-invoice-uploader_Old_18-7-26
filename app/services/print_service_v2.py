@@ -6,10 +6,74 @@ import datetime as dt
 from typing import Dict, Any, List, Optional
 from jinja2 import Environment, FileSystemLoader
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QPushButton, QHBoxLayout, QMessageBox, QApplication, QWidget
-from PyQt6.QtCore import Qt, QUrl
+from PyQt6.QtCore import Qt, QUrl, QObject, QCoreApplication, QTimer
 
 from app.core.logger import logger
 from app.services.settings_service import settings_service
+
+QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
+try:
+    import PyQt6.QtWebEngineWidgets
+except Exception:
+    _WEBENGINE_AVAILABLE = False
+else:
+    _WEBENGINE_AVAILABLE = True
+
+class _SilentPrintJob(QObject):
+    def __init__(self, html_content: str, on_done):
+        super().__init__()
+        self._html_content = html_content or ""
+        self._on_done = on_done
+        self._view = None
+        self._pdf_path = None
+
+    def start(self) -> None:
+        from PyQt6.QtWebEngineWidgets import QWebEngineView
+
+        self._view = QWebEngineView()
+        self._view.resize(1, 1)
+        self._view.loadFinished.connect(self._on_loaded)
+        self._view.setHtml(self._html_content)
+
+    def _on_loaded(self, ok: bool) -> None:
+        if not ok or not self._view:
+            try:
+                self._on_done()
+            finally:
+                self.deleteLater()
+            return
+        self._view.page().printToPdf(self._on_pdf_ready)
+
+    def _on_pdf_ready(self, data) -> None:
+        try:
+            pdf_bytes = bytes(data) if data is not None else b""
+            if not pdf_bytes:
+                raise ValueError("PDF generation returned empty data.")
+
+            from tempfile import NamedTemporaryFile
+
+            with NamedTemporaryFile(delete=False, suffix=".pdf") as f:
+                f.write(pdf_bytes)
+                self._pdf_path = f.name
+
+            os.startfile(self._pdf_path, "print")
+
+            def cleanup():
+                try:
+                    if self._pdf_path and os.path.exists(self._pdf_path):
+                        os.remove(self._pdf_path)
+                except Exception:
+                    pass
+
+            QTimer.singleShot(30000, cleanup)
+        finally:
+            if self._view:
+                self._view.deleteLater()
+            self.deleteLater()
+            try:
+                self._on_done()
+            except Exception:
+                pass
 
 class PrintServiceV2:
     """
@@ -139,7 +203,7 @@ class PrintServiceV2:
             <title>Advance Booking Receipt</title>
             <style>
               @page {{
-                size: 8.5in 3.5in;
+                size: Letter portrait;
                 margin: 0.25in;
               }}
               * {{ box-sizing: border-box; }}
@@ -273,6 +337,18 @@ class PrintServiceV2:
             dialog.exec()
         except Exception as e:
             logger.error(f"Printing failed: {e}", exc_info=True)
+            QMessageBox.critical(None, "Print Error", f"An error occurred while trying to print: {str(e)}")
+
+    def print_html_direct(self, html_content: str) -> None:
+        try:
+            if not _WEBENGINE_AVAILABLE:
+                QMessageBox.critical(None, "Print Error", "Direct printing is unavailable (PyQt6-WebEngine is not loaded). Please restart the application.")
+                return
+            job = _SilentPrintJob(html_content, on_done=lambda: setattr(self, "active_view", None))
+            self.active_view = job
+            job.start()
+        except Exception as e:
+            logger.error(f"Direct print failed: {e}", exc_info=True)
             QMessageBox.critical(None, "Print Error", f"An error occurred while trying to print: {str(e)}")
 
 class PrintPreviewDialog(QDialog):

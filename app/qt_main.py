@@ -2,6 +2,7 @@ import sys
 import os
 from pathlib import Path
 
+from PyQt6.QtCore import QCoreApplication, Qt
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from app.db.session import check_connection, init_db
@@ -22,6 +23,8 @@ def main() -> None:
         "--log-level=3 "
         "--no-sandbox"
     )
+
+    QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
     
     base_dir = Path(__file__).resolve().parent.parent
     if str(base_dir) not in sys.path:
@@ -46,7 +49,9 @@ def main() -> None:
     # Add Chromium flags to further ensure stability
     sys_args = sys.argv
     sys_args.append("--no-sandbox")
-    
+
+    import PyQt6.QtWebEngineWidgets  # noqa: F401
+
     app = QApplication(sys_args)
 
     db_success, db_status = check_connection()
