@@ -6701,6 +6701,7 @@ class MainWindow(QMainWindow):
                     AdvanceBookingRow(
                         booking_number=b.booking_number,
                         created_at=b.created_at,
+                        delivered_at=b.delivered_at,
                         customer_name=b.customer_name,
                         motorcycle_model=b.motorcycle_model,
                         color=b.color,
@@ -9488,7 +9489,6 @@ class AdvanceBookingRow:
         self,
         booking_number: str,
         created_at: dt.datetime | None,
-        delivered_at: dt.datetime | None,
         customer_name: str,
         motorcycle_model: str,
         color: str,
@@ -9497,6 +9497,7 @@ class AdvanceBookingRow:
         balance_amount: float,
         delivery_paid: float,
         status: str,
+        delivered_at: dt.datetime | None = None,
     ) -> None:
         self.booking_number = booking_number
         self.created_at = created_at
