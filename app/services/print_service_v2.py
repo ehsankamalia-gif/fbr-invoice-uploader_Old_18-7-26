@@ -6,7 +6,7 @@ import datetime as dt
 from typing import Dict, Any, List, Optional
 from jinja2 import Environment, FileSystemLoader
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QPushButton, QHBoxLayout, QMessageBox, QApplication, QWidget
-from PyQt6.QtCore import Qt, QUrl, QObject, QCoreApplication, QTimer
+from PyQt6.QtCore import Qt, QUrl, QObject, QCoreApplication
 
 from app.core.logger import logger
 from app.services.settings_service import settings_service
@@ -25,11 +25,13 @@ class _SilentPrintJob(QObject):
         self._html_content = html_content or ""
         self._on_done = on_done
         self._view = None
-        self._pdf_path = None
+        self._printer = None
 
     def start(self) -> None:
         from PyQt6.QtWebEngineWidgets import QWebEngineView
+        from PyQt6.QtPrintSupport import QPrinter
 
+        self._printer = QPrinter(QPrinter.PrinterMode.HighResolution)
         self._view = QWebEngineView()
         self._view.resize(1, 1)
         self._view.loadFinished.connect(self._on_loaded)
@@ -37,43 +39,111 @@ class _SilentPrintJob(QObject):
 
     def _on_loaded(self, ok: bool) -> None:
         if not ok or not self._view:
-            try:
-                self._on_done()
-            finally:
-                self.deleteLater()
+            self._fail("Unable to load print content.")
             return
-        self._view.page().printToPdf(self._on_pdf_ready)
+        if not self._printer:
+            self._fail("Printer is not available.")
+            return
 
-    def _on_pdf_ready(self, data) -> None:
+        view_print = getattr(self._view, "print", None)
+        if not callable(view_print):
+            self._fail("Silent printing is not supported by this QtWebEngine build. Please update PyQt6-WebEngine.")
+            return
         try:
-            pdf_bytes = bytes(data) if data is not None else b""
-            if not pdf_bytes:
-                raise ValueError("PDF generation returned empty data.")
-
-            from tempfile import NamedTemporaryFile
-
-            with NamedTemporaryFile(delete=False, suffix=".pdf") as f:
-                f.write(pdf_bytes)
-                self._pdf_path = f.name
-
-            os.startfile(self._pdf_path, "print")
-
-            def cleanup():
-                try:
-                    if self._pdf_path and os.path.exists(self._pdf_path):
-                        os.remove(self._pdf_path)
-                except Exception:
-                    pass
-
-            QTimer.singleShot(30000, cleanup)
-        finally:
-            if self._view:
-                self._view.deleteLater()
-            self.deleteLater()
+            view_print(self._printer, self._on_printed)
+        except TypeError:
             try:
-                self._on_done()
-            except Exception:
-                pass
+                view_print(self._printer)
+                self._on_printed(True)
+            except Exception as e:
+                self._fail(f"Silent printing failed: {e}")
+        except Exception as e:
+            self._fail(f"Silent printing failed: {e}")
+
+    def _on_printed(self, success: bool) -> None:
+        logger.info(f"Silent print success: {success}")
+        self._cleanup()
+
+    def _fail(self, msg: str) -> None:
+        logger.error(msg)
+        QMessageBox.critical(None, "Print Error", msg)
+        self._cleanup()
+
+    def _cleanup(self) -> None:
+        if self._view:
+            self._view.deleteLater()
+        self.deleteLater()
+        try:
+            self._on_done()
+        except Exception:
+            pass
+
+class _DialogPrintJob(QObject):
+    def __init__(self, html_content: str, parent: Optional[QWidget], on_done):
+        super().__init__()
+        self._html_content = html_content or ""
+        self._parent = parent
+        self._on_done = on_done
+        self._view = None
+        self._printer = None
+
+    def start(self) -> None:
+        from PyQt6.QtWebEngineWidgets import QWebEngineView
+        from PyQt6.QtPrintSupport import QPrinter
+
+        self._printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        self._view = QWebEngineView()
+        self._view.resize(1, 1)
+        self._view.loadFinished.connect(self._on_loaded)
+        self._view.setHtml(self._html_content)
+
+    def _on_loaded(self, ok: bool) -> None:
+        if not ok or not self._view:
+            self._fail("Unable to load print content.")
+            return
+        if not self._printer:
+            self._fail("Printer is not available.")
+            return
+
+        from PyQt6.QtPrintSupport import QPrintDialog
+
+        dlg = QPrintDialog(self._printer, self._parent)
+        if dlg.exec() != QPrintDialog.DialogCode.Accepted:
+            self._cleanup()
+            return
+
+        view_print = getattr(self._view, "print", None)
+        if not callable(view_print):
+            self._fail("Printing is not supported by this QtWebEngine build. Please update PyQt6-WebEngine.")
+            return
+        try:
+            view_print(self._printer, self._on_printed)
+        except TypeError:
+            try:
+                view_print(self._printer)
+                self._on_printed(True)
+            except Exception as e:
+                self._fail(f"Printing failed: {e}")
+        except Exception as e:
+            self._fail(f"Printing failed: {e}")
+
+    def _on_printed(self, success: bool) -> None:
+        logger.info(f"Dialog print success: {success}")
+        self._cleanup()
+
+    def _fail(self, msg: str) -> None:
+        logger.error(msg)
+        QMessageBox.critical(self._parent, "Print Error", msg)
+        self._cleanup()
+
+    def _cleanup(self) -> None:
+        if self._view:
+            self._view.deleteLater()
+        self.deleteLater()
+        try:
+            self._on_done()
+        except Exception:
+            pass
 
 class PrintServiceV2:
     """
@@ -351,6 +421,18 @@ class PrintServiceV2:
             logger.error(f"Direct print failed: {e}", exc_info=True)
             QMessageBox.critical(None, "Print Error", f"An error occurred while trying to print: {str(e)}")
 
+    def print_html_with_dialog(self, html_content: str, parent: Optional[QWidget] = None) -> None:
+        try:
+            if not _WEBENGINE_AVAILABLE:
+                QMessageBox.critical(parent, "Print Error", "Printing is unavailable (PyQt6-WebEngine is not loaded). Please restart the application.")
+                return
+            job = _DialogPrintJob(html_content, parent=parent, on_done=lambda: setattr(self, "active_view", None))
+            self.active_view = job
+            job.start()
+        except Exception as e:
+            logger.error(f"Dialog print failed: {e}", exc_info=True)
+            QMessageBox.critical(parent, "Print Error", f"An error occurred while trying to print: {str(e)}")
+
 class PrintPreviewDialog(QDialog):
     """Standalone dialog for document preview and printing."""
     
@@ -421,12 +503,18 @@ class PrintPreviewDialog(QDialog):
         if not self.web_view:
             self._open_in_browser()
             return
-        self.web_view.page().printToPdf(lambda data: self._on_pdf_ready(data))
         from PyQt6.QtPrintSupport import QPrintDialog, QPrinter
         printer = QPrinter(QPrinter.PrinterMode.HighResolution)
         print_dialog = QPrintDialog(printer, self)
         if print_dialog.exec() == QPrintDialog.DialogCode.Accepted:
-            self.web_view.page().print(printer, lambda success: logger.info(f"Print success: {success}"))
+            view_print = getattr(self.web_view, "print", None)
+            if callable(view_print):
+                try:
+                    view_print(printer, lambda success: logger.info(f"Print success: {success}"))
+                except TypeError:
+                    view_print(printer)
+            else:
+                QMessageBox.critical(self, "Print Error", "Printing is not supported by this QtWebEngine build. Please update PyQt6-WebEngine.")
 
     def _on_pdf_ready(self, data):
         # This can be used to auto-save a copy if needed

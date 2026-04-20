@@ -6973,6 +6973,7 @@ class MainWindow(QMainWindow):
                 }
             )
             print_service_v2.print_html_direct(html)
+            self.statusBar().showMessage("Print job sent to printer.", 4000)
         except Exception as e:
             logger.error(f"Advance booking print failed: {e}", exc_info=True)
             self._show_error("Print Error", f"Failed to print receipt: {e}")
@@ -7159,7 +7160,7 @@ class MainWindow(QMainWindow):
                         motorcycle_model=edit_model.currentText(),
                         color=edit_color.currentText(),
                         total_price=edit_total.value(),
-                        advance_paid=edit_advance.value()
+                        advance_paid=edit_advance.value(),
                     )
                     self._reload_advance_bookings()
                     QMessageBox.information(self, "Success", "Booking updated successfully.")
@@ -9487,6 +9488,7 @@ class AdvanceBookingRow:
         self,
         booking_number: str,
         created_at: dt.datetime | None,
+        delivered_at: dt.datetime | None,
         customer_name: str,
         motorcycle_model: str,
         color: str,
@@ -9498,6 +9500,7 @@ class AdvanceBookingRow:
     ) -> None:
         self.booking_number = booking_number
         self.created_at = created_at
+        self.delivered_at = delivered_at
         self.customer_name = customer_name
         self.motorcycle_model = motorcycle_model
         self.color = color
