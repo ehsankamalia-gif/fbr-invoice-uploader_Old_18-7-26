@@ -7,7 +7,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.logger import logger
-from app.db.models import AdvanceBooking, AdvanceBookingAudit, AdvanceBookingModelCounter, SpareLedgerTransaction
+from app.db.models import AdvanceBooking, AdvanceBookingAudit, AdvanceBookingModelCounter, SpareLedgerTransaction, pk_now
 
 
 class AdvanceBookingService:
@@ -93,10 +93,11 @@ class AdvanceBookingService:
             model_seq = None
 
         balance = float(total_price) - float(advance_paid)
-        now = dt.datetime.utcnow()
+        now = pk_now()
 
         booking = AdvanceBooking(
             booking_number=booking_number,
+            created_at=now,
             customer_name=name,
             customer_phone=phone,
             motorcycle_model=model,
@@ -325,7 +326,7 @@ class AdvanceBookingService:
                 raise ValueError("No balance is due for this booking.")
 
         booking.status = "DELIVERED"
-        booking.delivered_at = dt.datetime.utcnow()
+        booking.delivered_at = pk_now()
         if apply_amount > 0:
             booking.advance_remaining = 0.0
             booking.advance_applied = float(getattr(booking, "advance_applied", 0.0) or 0.0) + apply_amount
@@ -365,7 +366,7 @@ class AdvanceBookingService:
                         note="Balance collected at delivery.",
                     )
                 )
-                ts = booking.delivered_at or dt.datetime.utcnow()
+                ts = booking.delivered_at or pk_now()
                 mk = self._month_key_for_ts(ts)
                 db.add(
                     SpareLedgerTransaction(

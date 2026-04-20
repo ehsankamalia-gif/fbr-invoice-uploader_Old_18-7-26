@@ -9798,7 +9798,7 @@ class DealersTableModel(QAbstractTableModel):
 
 
 class AdvanceBookingsTableModel(QAbstractTableModel):
-    headers = ["Booking #", "Date", "Customer", "Model", "Color", "Total", "Advance", "Delivery Paid", "Balance", "Status"]
+    headers = ["Booking #", "Booked At", "Delivered At", "Customer", "Model", "Color", "Total", "Advance", "Delivery Paid", "Balance", "Status"]
 
     def __init__(self) -> None:
         super().__init__()
@@ -9822,28 +9822,30 @@ class AdvanceBookingsTableModel(QAbstractTableModel):
             if col == 1:
                 return row.created_at.strftime("%Y-%m-%d %H:%M") if row.created_at else ""
             if col == 2:
-                return row.customer_name
+                return row.delivered_at.strftime("%Y-%m-%d %H:%M") if row.delivered_at else ""
             if col == 3:
-                return row.motorcycle_model
+                return row.customer_name
             if col == 4:
-                return row.color
+                return row.motorcycle_model
             if col == 5:
-                return f"{row.total_price:,.0f}"
+                return row.color
             if col == 6:
-                return f"{row.advance_paid:,.0f}"
+                return f"{row.total_price:,.0f}"
             if col == 7:
-                return f"{row.delivery_paid:,.0f}"
+                return f"{row.advance_paid:,.0f}"
             if col == 8:
-                return f"{row.balance_amount:,.0f}"
+                return f"{row.delivery_paid:,.0f}"
             if col == 9:
+                return f"{row.balance_amount:,.0f}"
+            if col == 10:
                 return row.status
 
         if role == Qt.ItemDataRole.TextAlignmentRole:
-            if col in (5, 6, 7, 8):
+            if col in (6, 7, 8, 9):
                 return Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
             return Qt.AlignmentFlag.AlignCenter
 
-        if role == Qt.ItemDataRole.ForegroundRole and col == 9:
+        if role == Qt.ItemDataRole.ForegroundRole and col == 10:
             if (row.status or "").upper() == "ACTIVE":
                 return Qt.GlobalColor.darkGreen
             return Qt.GlobalColor.darkYellow

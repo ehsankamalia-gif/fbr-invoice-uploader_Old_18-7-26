@@ -2,8 +2,16 @@ from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Boo
 from sqlalchemy.orm import relationship, declarative_base
 import datetime as dt
 import enum
+from zoneinfo import ZoneInfo
 
 Base = declarative_base()
+
+_PK_TZ = ZoneInfo("Asia/Karachi")
+
+
+def pk_now() -> dt.datetime:
+    return dt.datetime.now(_PK_TZ).replace(tzinfo=None)
+
 
 class CustomerType(str, enum.Enum):
     INDIVIDUAL = "INDIVIDUAL"
@@ -106,7 +114,7 @@ class AdvanceBooking(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     booking_number = Column(String(50), unique=True, index=True, nullable=False)
-    created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=pk_now, index=True)
 
     customer_name = Column(String(100), nullable=False)
     customer_phone = Column(String(20), nullable=True)
