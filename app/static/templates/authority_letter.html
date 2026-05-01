@@ -4,89 +4,705 @@
     <meta charset="UTF-8">
     <title>Authority Letter - {{ customer_name }}</title>
     <style>
-        body { font-family: 'Times New Roman', serif; margin: 0; padding: 40px; color: #000; line-height: 1.6; }
-        .letter-container { max-width: 800px; margin: auto; padding: 40px; border: 1px solid #ddd; }
-        .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 20px; margin-bottom: 30px; }
-        .business-info h1 { margin: 0; font-size: 28px; text-transform: uppercase; }
-        .business-info p { margin: 5px 0; font-size: 14px; }
-        .letter-meta { display: flex; justify-content: space-between; margin-bottom: 40px; font-weight: bold; }
-        .letter-title { text-align: center; text-decoration: underline; font-size: 20px; font-weight: bold; margin-bottom: 40px; text-transform: uppercase; }
-        .content { margin-bottom: 50px; text-align: justify; }
-        .content p { margin-bottom: 20px; }
-        .details-table { width: 100%; border-collapse: collapse; margin: 30px 0; }
-        .details-table th, .details-table td { border: 1px solid #000; padding: 10px; text-align: left; }
-        .details-table th { background: #f2f2f2; }
-        .signatures { display: flex; justify-content: space-between; margin-top: 100px; }
-        .signature-block { width: 200px; border-top: 1px solid #000; text-align: center; padding-top: 10px; font-weight: bold; }
-        .footer { margin-top: 100px; text-align: center; font-size: 10px; color: #777; border-top: 1px solid #ddd; padding-top: 10px; }
+        @page { size: A4 portrait; margin: 0; }
+        html, body { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; color: #000; background: #ffffff; }
+        .page-wrap {
+            width: 100%;
+            height: 100vh;
+            overflow: auto;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        .page-shell { position: relative; }
+        .page {
+            position: relative;
+            width: 8.27in;
+            height: 11.69in;
+            overflow: hidden;
+            transform-origin: top left;
+            background: transparent;
+        }
+        .field {
+            position: absolute;
+            display: inline-block;
+            font-size: 11pt;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+        .field.small { font-size: 10pt; font-weight: 700; }
+        .field.mono { font-family: Consolas, "Courier New", monospace; letter-spacing: 0.2px; }
+        .draggable {
+            outline: 1px dashed rgba(220, 53, 69, 0.75);
+            outline-offset: 2px;
+            touch-action: none;
+            will-change: left, top, transform;
+            transition: transform 120ms ease, box-shadow 120ms ease, outline-color 120ms ease;
+            user-select: none;
+            -webkit-user-select: none;
+            cursor: grab;
+        }
+        .dragging {
+            outline: 2px solid rgba(220, 53, 69, 0.95);
+            transform: scale(1.02);
+            box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
+            cursor: grabbing;
+        }
+        .pos-hud {
+            position: fixed;
+            left: 12px;
+            bottom: 12px;
+            background: rgba(0, 0, 0, 0.75);
+            color: #fff;
+            font: 12px/1.2 Arial, sans-serif;
+            padding: 8px 10px;
+            border-radius: 6px;
+            z-index: 99999;
+            display: none;
+            white-space: nowrap;
+        }
+        .hidden-field {
+            color: transparent !important;
+        }
+        img.hidden-field {
+            opacity: 0.05 !important;
+        }
+        .wrap-field {
+            white-space: normal !important;
+            display: inline-block !important;
+            max-width: 280px;
+        }
+        .edit-mode {
+            user-select: text !important;
+            -webkit-user-select: text !important;
+            cursor: text !important;
+            touch-action: auto !important;
+        }
+        .sub-hidden {
+            opacity: 0.15;
+            text-decoration: line-through;
+        }
         @media print {
-            body { padding: 0; }
-            .letter-container { border: none; width: 100%; max-width: none; }
-            .no-print { display: none; }
+            .draggable { outline: none !important; box-shadow: none !important; }
+            .pos-hud { display: none !important; }
+            .hidden-field { display: none !important; }
+            .sub-hidden { display: none !important; }
+            body { background: #fff !important; }
+            .page-wrap { height: auto !important; overflow: visible !important; padding: 0 !important; }
+            .page-shell { width: auto !important; height: auto !important; }
+            .page { transform: none !important; }
         }
     </style>
 </head>
 <body>
-    <div class="letter-container">
-        <div class="header">
-            <div class="business-info">
-                <h1>{{ business_name }}</h1>
-                <p>{{ business_address }}</p>
-                <p>Phone: {{ business_phone }} | NTN: {{ business_ntn }}</p>
+    <div class="page-wrap">
+        <div id="pageShell" class="page-shell">
+            <div id="letterPage" class="page">
+                <div class="field mono draggable" data-pos-key="al_serial_number" data-default-left="6.85in" data-default-top="0.55in" style="left: 6.85in; top: 0.55in;">{{ serial_number }}</div>
+                <div class="field mono draggable" data-pos-key="al_date" data-default-left="6.85in" data-default-top="0.95in" style="left: 6.85in; top: 0.95in;">{{ date }}</div>
+
+                <div class="field draggable" data-pos-key="al_product_model" data-default-left="1.15in" data-default-top="1.95in" style="left: 1.15in; top: 1.95in;">{{ product_model }}</div>
+
+                <div class="field draggable" data-pos-key="al_customer_name" data-default-left="1.15in" data-default-top="3.25in" style="left: 1.15in; top: 3.25in;">{{ customer_name }} {% if father_name %}{{ relation_prefix }} {{ father_name }}{% endif %}</div>
+                <div class="field draggable" data-pos-key="al_customer_address" data-default-left="1.15in" data-default-top="3.70in" style="left: 1.15in; top: 3.70in;">{{ customer_address }}</div>
+
+                {% set _slip_addr = customer_address or '' %}
+                {% set _slip_addr_parts = _slip_addr.split(',') if _slip_addr else [] %}
+                {% set _slip_addr_1 = (_slip_addr_parts[0] | trim) if _slip_addr_parts else '' %}
+                {% set _slip_addr_2 = (_slip_addr_parts[1:] | join(',') | trim) if (_slip_addr_parts|length > 1) else '' %}
+                <div class="field small draggable" data-pos-key="al_slip_model" data-default-left="1.15in" data-default-top="9.40in" style="left: 1.15in; top: 9.40in;">{{ product_model }}</div>
+                <div class="field small mono draggable" data-pos-key="al_slip_date" data-default-left="6.30in" data-default-top="9.40in" style="left: 6.30in; top: 9.40in;">{{ date }}</div>
+                <div class="field small draggable" data-pos-key="al_slip_customer" data-default-left="1.15in" data-default-top="10.10in" style="left: 1.15in; top: 10.10in;">{{ customer_name }} {% if father_name %}{{ relation_prefix }} {{ father_name }}{% endif %}</div>
+                <div class="field small draggable" data-pos-key="al_slip_address" data-default-left="1.15in" data-default-top="10.35in" style="left: 1.15in; top: 10.35in;">{{ _slip_addr_1 if _slip_addr_2 else customer_address }}</div>
+                <div class="field small draggable" data-pos-key="al_slip_address_2" data-default-left="1.15in" data-default-top="10.55in" style="left: 1.15in; top: 10.55in;">{{ _slip_addr_2 }}</div>
             </div>
         </div>
-
-        <div class="letter-meta">
-            <span>Ref: AL/{{ year }}/{{ serial_number }}</span>
-            <span>Date: {{ date }}</span>
-        </div>
-
-        <div class="letter-title">TO WHOM IT MAY CONCERN</div>
-
-        <div class="content">
-            <p>This is to certify that we have sold the following vehicle to <strong>Mr./Ms. {{ customer_name }}</strong>, 
-               S/O D/O W/O <strong>{{ father_name }}</strong>, resident of <strong>{{ customer_address }}</strong>, 
-               holding CNIC # <strong>{{ customer_cnic }}</strong>.</p>
-            
-            <p>The details of the vehicle are as follows:</p>
-
-            <table class="details-table">
-                <tr>
-                    <th>Model / Type</th>
-                    <td>{{ product_model }}</td>
-                </tr>
-                <tr>
-                    <th>Color</th>
-                    <td>{{ product_color }}</td>
-                </tr>
-                <tr>
-                    <th>Chassis Number</th>
-                    <td><strong>{{ chassis_number }}</strong></td>
-                </tr>
-                <tr>
-                    <th>Engine Number</th>
-                    <td><strong>{{ engine_number }}</strong></td>
-                </tr>
-                <tr>
-                    <th>Invoice Number</th>
-                    <td>{{ invoice_number }}</td>
-                </tr>
-            </table>
-
-            <p>We have no objection if the above-mentioned vehicle is registered in the name of the purchaser 
-               with the Excise & Taxation Department.</p>
-            
-            <p>This authority letter is valid for registration purposes only.</p>
-        </div>
-
-        <div class="signatures">
-            <div class="signature-block">For {{ business_name }}<br>(Proprietor/Manager)</div>
-            <div class="signature-block">Purchaser Signature<br>({{ customer_name }})</div>
-        </div>
-
-        <div class="footer">
-            <p>This document is issued based on our sales records and remains subject to full payment realization.</p>
-        </div>
     </div>
+
+    <div id="posHud" class="pos-hud"></div>
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+    <script>
+        (function () {
+            const STORAGE_KEY = 'fbr_authority_letter_positions_v2';
+            const page = document.getElementById('letterPage');
+            const shell = document.getElementById('pageShell');
+            const hud = document.getElementById('posHud');
+            if (!page || !hud) return;
+
+            let qtBridge = null;
+            function safeParseJson(text) { try { return JSON.parse(String(text || '')); } catch (_) { return null; } }
+            function nowMs() { return Date.now(); }
+            function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
+            function isImg(el) { return !!(el && el.tagName === 'IMG'); }
+            function getFontPx(el) {
+                try {
+                    const fs = getComputedStyle(el).fontSize;
+                    const v = parseFloat(fs || '');
+                    return Number.isFinite(v) ? v : null;
+                } catch (_) {
+                    return null;
+                }
+            }
+            function applyEntryVisuals(el, entry) {
+                if (!el || !entry || typeof entry !== 'object') return;
+                if (entry.hidden === true) el.classList.add('hidden-field');
+                else el.classList.remove('hidden-field');
+                if (entry.wrap === true) {
+                    el.classList.add('wrap-field');
+                    if (typeof entry.wrap_max_px === 'number' && Number.isFinite(entry.wrap_max_px)) {
+                        el.style.maxWidth = `${entry.wrap_max_px}px`;
+                    }
+                } else {
+                    el.classList.remove('wrap-field');
+                    el.style.maxWidth = '';
+                }
+                if (typeof entry.font_px === 'number' && Number.isFinite(entry.font_px) && !isImg(el)) {
+                    el.style.fontSize = `${entry.font_px}px`;
+                }
+                if (typeof entry.font_family === 'string' && entry.font_family.trim() && !isImg(el)) {
+                    el.style.fontFamily = entry.font_family;
+                }
+                if (typeof entry.font_weight === 'string' && entry.font_weight.trim() && !isImg(el)) {
+                    el.style.fontWeight = entry.font_weight;
+                }
+                if (typeof entry.font_style === 'string' && entry.font_style.trim() && !isImg(el)) {
+                    el.style.fontStyle = entry.font_style;
+                }
+            }
+            function applyEntryContent(el, entry) {
+                if (!el || !entry || typeof entry !== 'object' || isImg(el)) return;
+                if (typeof entry.html === 'string' && entry.html.length) {
+                    el.innerHTML = entry.html;
+                }
+            }
+            function getActiveRangeWithin(el) {
+                try {
+                    const sel = window.getSelection();
+                    if (!sel || sel.rangeCount < 1) return null;
+                    const r = sel.getRangeAt(0);
+                    if (!r || r.collapsed) return null;
+                    const node = r.commonAncestorContainer;
+                    if (!node) return null;
+                    if (!el.contains(node)) return null;
+                    return r;
+                } catch (_) {
+                    return null;
+                }
+            }
+            function unwrapSpan(span) {
+                if (!span || !(span instanceof HTMLElement) || !span.parentNode) return false;
+                const parent = span.parentNode;
+                while (span.firstChild) parent.insertBefore(span.firstChild, span);
+                parent.removeChild(span);
+                return true;
+            }
+            function wrapRange(range, span) {
+                try {
+                    const frag = range.extractContents();
+                    span.appendChild(frag);
+                    range.insertNode(span);
+                    const sel = window.getSelection();
+                    if (sel) {
+                        sel.removeAllRanges();
+                        const r = document.createRange();
+                        r.selectNodeContents(span);
+                        sel.addRange(r);
+                    }
+                    return true;
+                } catch (_) {
+                    return false;
+                }
+            }
+            function toggleSelectionHidden(el) {
+                const r = getActiveRangeWithin(el);
+                const sel = window.getSelection();
+                const focusNode = sel ? sel.focusNode : null;
+                const focusEl = (focusNode instanceof HTMLElement) ? focusNode : (focusNode && focusNode.parentElement ? focusNode.parentElement : null);
+                const existing = focusEl ? focusEl.closest('span.sub-hidden') : null;
+                if (existing && el.contains(existing)) {
+                    return unwrapSpan(existing);
+                }
+                if (!r) return false;
+                const span = document.createElement('span');
+                span.className = 'sub-hidden';
+                return wrapRange(r, span);
+            }
+            function adjustSelectionFont(el, delta) {
+                const r = getActiveRangeWithin(el);
+                const sel = window.getSelection();
+                const focusNode = sel ? sel.focusNode : null;
+                const focusEl = (focusNode instanceof HTMLElement) ? focusNode : (focusNode && focusNode.parentElement ? focusNode.parentElement : null);
+                const existing = focusEl ? focusEl.closest('span.sub-font') : null;
+                if (existing && el.contains(existing)) {
+                    const cur = parseFloat(existing.style.fontSize || '') || getFontPx(existing) || getFontPx(el) || 14;
+                    const next = clamp(cur + delta, 6, 72);
+                    existing.style.fontSize = `${next}px`;
+                    return true;
+                }
+                if (!r) return false;
+                const base = getFontPx(focusEl || el) || getFontPx(el) || 14;
+                const next = clamp(base + delta, 6, 72);
+                const span = document.createElement('span');
+                span.className = 'sub-font';
+                span.style.fontSize = `${next}px`;
+                return wrapRange(r, span);
+            }
+
+            function initQtBridge() {
+                if (qtBridge) return Promise.resolve(qtBridge);
+                const hasChannel = typeof QWebChannel !== 'undefined' && window.qt && qt.webChannelTransport;
+                if (!hasChannel) return Promise.resolve(null);
+                return new Promise((resolve) => {
+                    try {
+                        new QWebChannel(qt.webChannelTransport, (channel) => {
+                            qtBridge = (channel && channel.objects) ? channel.objects.authorityLayoutBridge : null;
+                            resolve(qtBridge || null);
+                        });
+                    } catch (_) { resolve(null); }
+                });
+            }
+
+            function getPageRect() {
+                const r = page.getBoundingClientRect();
+                const scale = (() => {
+                    const s = shell ? Number(shell.getAttribute('data-scale') || 1) : 1;
+                    return Number.isFinite(s) && s > 0 ? s : 1;
+                })();
+                return { left: r.left, top: r.top, width: page.offsetWidth || (r.width / scale), height: page.offsetHeight || (r.height / scale), scale };
+            }
+
+            function getRelPx(el, pageRect) {
+                const r = el.getBoundingClientRect();
+                const s = pageRect && pageRect.scale ? pageRect.scale : 1;
+                return { x: (r.left - pageRect.left) / s, y: (r.top - pageRect.top) / s, w: r.width / s, h: r.height / s };
+            }
+
+            function readSaved() {
+                try {
+                    const raw = localStorage.getItem(STORAGE_KEY);
+                    const parsed = safeParseJson(raw || '{}');
+                    if (!parsed || typeof parsed !== 'object' || parsed.version !== 2 || typeof parsed.elements !== 'object') {
+                        return { version: 2, updated_at: 0, elements: {} };
+                    }
+                    return parsed;
+                } catch (_) {
+                    return { version: 2, updated_at: 0, elements: {} };
+                }
+            }
+
+            function writeSaved(doc) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(doc)); } catch (_) {} }
+
+            function applyDefaultsIfMissing(el, pageRect) {
+                const left = (el.getAttribute('data-default-left') || '').trim();
+                const top = (el.getAttribute('data-default-top') || '').trim();
+                if (!left || !top) return;
+                const tmp = document.createElement('div');
+                tmp.style.position = 'absolute';
+                tmp.style.left = left;
+                tmp.style.top = top;
+                tmp.style.width = '0px';
+                tmp.style.height = '0px';
+                page.appendChild(tmp);
+                const r = tmp.getBoundingClientRect();
+                tmp.remove();
+                const s = pageRect && pageRect.scale ? pageRect.scale : 1;
+                el.style.left = `${(r.left - pageRect.left) / s}px`;
+                el.style.top = `${(r.top - pageRect.top) / s}px`;
+            }
+
+            function applyAllPositions() {
+                const doc = readSaved();
+                const pageRect = getPageRect();
+                const els = Array.from(document.querySelectorAll('[data-pos-key]'));
+                els.forEach((el) => applyDefaultsIfMissing(el, pageRect));
+                const refresh = getPageRect();
+                els.forEach((el) => {
+                    const key = (el.getAttribute('data-pos-key') || '').trim();
+                    if (!key) return;
+                    const entry = doc.elements[key];
+                    if (!entry) return;
+                    applyEntryContent(el, entry);
+                    const elRect = el.getBoundingClientRect();
+                    const s = refresh.scale || 1;
+                    const w = elRect.width / s;
+                    const h = elRect.height / s;
+                    let x = typeof entry.x === 'number' ? entry.x : null;
+                    let y = typeof entry.y === 'number' ? entry.y : null;
+                    if (x === null || y === null) return;
+                    x = clamp(x, 0, Math.max(0, refresh.width - w));
+                    y = clamp(y, 0, Math.max(0, refresh.height - h));
+                    el.style.left = `${x}px`;
+                    el.style.top = `${y}px`;
+                    applyEntryVisuals(el, entry);
+                });
+            }
+
+            function updateFitScale() {
+                if (!shell) return;
+                const baseW = page.offsetWidth || 1;
+                const baseH = page.offsetHeight || 1;
+                const availW = Math.max(1, window.innerWidth - 24);
+                const scale = Math.min(availW / baseW, 1);
+                shell.setAttribute('data-scale', String(scale));
+                shell.style.width = `${Math.floor(baseW * scale)}px`;
+                shell.style.height = `${Math.floor(baseH * scale)}px`;
+                page.style.transform = `scale(${scale})`;
+            }
+
+            async function loadFromFile() {
+                await initQtBridge();
+                if (!qtBridge || typeof qtBridge.load_positions !== 'function') return null;
+                return await new Promise((resolve) => {
+                    try {
+                        qtBridge.load_positions((txt) => {
+                            const obj = safeParseJson(txt || '');
+                            if (!obj || typeof obj !== 'object' || obj.version !== 2 || typeof obj.elements !== 'object') return resolve(null);
+                            resolve(obj);
+                        });
+                    } catch (_) { resolve(null); }
+                });
+            }
+
+            async function saveToFile(doc) {
+                await initQtBridge();
+                if (!qtBridge || typeof qtBridge.save_positions !== 'function') return false;
+                return await new Promise((resolve) => {
+                    try { qtBridge.save_positions(JSON.stringify(doc || {}), (ok) => resolve(!!ok)); }
+                    catch (_) { resolve(false); }
+                });
+            }
+
+            let userTouched = false;
+            (function initFast() {
+                try {
+                    const seed = Array.from(document.querySelectorAll('[data-pos-key]'));
+                    for (const el of seed) {
+                        if (!(el instanceof HTMLElement)) continue;
+                        if (isImg(el)) continue;
+                        if (!el.dataset.originalHtml) el.dataset.originalHtml = el.innerHTML || '';
+                    }
+                } catch (_) {}
+                applyAllPositions();
+                updateFitScale();
+                requestAnimationFrame(() => {
+                    try {
+                        const wrap = document.querySelector('.page-wrap');
+                        const pageRect = getPageRect();
+                        const els = Array.from(document.querySelectorAll('.draggable[data-pos-key]'));
+                        let minY = null;
+                        for (const el of els) {
+                            const rel = getRelPx(el, pageRect);
+                            if (!Number.isFinite(rel.y)) continue;
+                            if (minY === null || rel.y < minY) minY = rel.y;
+                        }
+                        const target = Math.max(0, Math.floor((minY || 0) - 24));
+                        if (wrap && 'scrollTop' in wrap) wrap.scrollTop = target;
+                    } catch (_) {}
+                });
+
+                (async function syncFromFile() {
+                    const localDoc = readSaved();
+                    const fromFile = await loadFromFile();
+                    if (!fromFile || userTouched) return;
+                    const localCount = localDoc && localDoc.elements ? Object.keys(localDoc.elements).length : 0;
+                    const fileCount = fromFile && fromFile.elements ? Object.keys(fromFile.elements).length : 0;
+                    const localUpdated = Number(localDoc.updated_at || 0);
+                    const fileUpdated = Number(fromFile.updated_at || 0);
+                    if (fileCount > 0 && (localCount === 0 || fileUpdated >= localUpdated)) {
+                        writeSaved(fromFile);
+                        applyAllPositions();
+                        updateFitScale();
+                    }
+                })();
+            })();
+
+            let raf = 0;
+            let drag = null;
+            let selected = null;
+
+            function showHud(el) {
+                const pageRect = getPageRect();
+                const rel = getRelPx(el, pageRect);
+                const key = el.getAttribute('data-pos-key') || '';
+                const fontPx = getFontPx(el);
+                const hidden = el.classList.contains('hidden-field');
+                const fontPart = (fontPx !== null && !isImg(el)) ? `, font ${Math.round(fontPx)}px` : '';
+                const hiddenPart = hidden ? ' (hidden)' : '';
+                hud.textContent = `${key}: x ${Math.round(rel.x)}px, y ${Math.round(rel.y)}px${fontPart}${hiddenPart} [F2 edit, W wrap, +/- font, H hide/show, double-click reset]`;
+                hud.style.display = 'block';
+            }
+            function hideHud() { hud.style.display = 'none'; }
+
+            function persistEntry(el, extras) {
+                userTouched = true;
+                const key = (el.getAttribute('data-pos-key') || '').trim();
+                if (!key) return;
+                const pageRect = getPageRect();
+                const rel = getRelPx(el, pageRect);
+                const doc = readSaved();
+                doc.version = 2;
+                doc.updated_at = nowMs();
+                doc.elements = doc.elements && typeof doc.elements === 'object' ? doc.elements : {};
+                const prev = (doc.elements[key] && typeof doc.elements[key] === 'object') ? doc.elements[key] : {};
+                let html = null;
+                let font_family = null;
+                let font_weight = null;
+                let font_style = null;
+                if (!isImg(el)) {
+                    try {
+                        const cur = el.innerHTML || '';
+                        const orig = el.dataset.originalHtml || '';
+                        const hasRich = cur.indexOf('sub-hidden') >= 0 || cur.indexOf('sub-font') >= 0 || cur.indexOf('sub-bold') >= 0 || cur.indexOf('sub-italic') >= 0;
+                        if (hasRich || cur !== orig) html = cur;
+                    } catch (_) {}
+                    try {
+                        const cs = getComputedStyle(el);
+                        font_family = cs && cs.fontFamily ? String(cs.fontFamily) : null;
+                        font_weight = cs && cs.fontWeight ? String(cs.fontWeight) : null;
+                        font_style = cs && cs.fontStyle ? String(cs.fontStyle) : null;
+                    } catch (_) {}
+                }
+                doc.elements[key] = {
+                    ...prev,
+                    x: rel.x,
+                    y: rel.y,
+                    base_w: pageRect.width,
+                    base_h: pageRect.height,
+                    updated_at: nowMs(),
+                    ...(html !== null ? { html: html } : {}),
+                    ...(font_family ? { font_family: font_family } : {}),
+                    ...(font_weight ? { font_weight: font_weight } : {}),
+                    ...(font_style ? { font_style: font_style } : {}),
+                    ...(extras || {})
+                };
+                writeSaved(doc);
+                saveToFile(doc).catch(() => {});
+            }
+
+            function startDragPointer(ev, el) {
+                if (!ev.isPrimary) return;
+                selected = el;
+                const pageRect = getPageRect();
+                const rel = getRelPx(el, pageRect);
+                drag = { el, pointerId: ev.pointerId, startClientX: ev.clientX, startClientY: ev.clientY, startX: rel.x, startY: rel.y, pageW: pageRect.width, pageH: pageRect.height, elW: rel.w, elH: rel.h, scale: pageRect.scale || 1 };
+                el.classList.add('dragging');
+                showHud(el);
+                try { el.setPointerCapture(ev.pointerId); } catch (_) {}
+            }
+
+            function moveDragPointer(ev) {
+                if (!drag || ev.pointerId !== drag.pointerId) return;
+                const s = drag.scale || 1;
+                const dx = (ev.clientX - drag.startClientX) / s;
+                const dy = (ev.clientY - drag.startClientY) / s;
+                const x = clamp(drag.startX + dx, 0, Math.max(0, drag.pageW - drag.elW));
+                const y = clamp(drag.startY + dy, 0, Math.max(0, drag.pageH - drag.elH));
+                drag.nextX = x;
+                drag.nextY = y;
+                if (!raf) {
+                    raf = requestAnimationFrame(() => {
+                        raf = 0;
+                        if (!drag) return;
+                        drag.el.style.left = `${drag.nextX}px`;
+                        drag.el.style.top = `${drag.nextY}px`;
+                        showHud(drag.el);
+                    });
+                }
+            }
+
+            function persistPosition(el) { persistEntry(el, null); }
+
+            function endDragPointer(ev) {
+                if (!drag || (ev && ev.pointerId !== drag.pointerId)) return;
+                const el = drag.el;
+                el.classList.remove('dragging');
+                persistPosition(el);
+                drag = null;
+            }
+
+            page.addEventListener('pointerdown', (ev) => {
+                const target = ev.target;
+                if (!(target instanceof HTMLElement)) return;
+                const el = target.closest('.draggable[data-pos-key]');
+                if (!el) return;
+                selected = el;
+                if (el.classList.contains('edit-mode') && !isImg(el)) return;
+                startDragPointer(ev, el);
+                ev.preventDefault();
+            }, { passive: false });
+
+            page.addEventListener('pointermove', (ev) => {
+                moveDragPointer(ev);
+                if (drag) ev.preventDefault();
+            }, { passive: false });
+
+            page.addEventListener('pointerup', (ev) => { endDragPointer(ev); });
+            page.addEventListener('pointercancel', (ev) => { endDragPointer(ev); });
+
+            document.addEventListener('dblclick', (ev) => {
+                const target = ev.target;
+                if (!(target instanceof HTMLElement)) return;
+                const el = target.closest('.draggable[data-pos-key]');
+                if (!el) return;
+                selected = el;
+                const key = el.getAttribute('data-pos-key') || '';
+                const pageRect = getPageRect();
+                applyDefaultsIfMissing(el, pageRect);
+                if (key) {
+                    const doc = readSaved();
+                    if (doc.elements && typeof doc.elements === 'object') delete doc.elements[key];
+                    doc.updated_at = nowMs();
+                    writeSaved(doc);
+                    saveToFile(doc).catch(() => {});
+                }
+                showHud(el);
+                ev.preventDefault();
+            });
+
+            document.addEventListener('click', (ev) => {
+                const target = ev.target;
+                if (!(target instanceof HTMLElement)) return;
+                const hit = target.closest('.draggable[data-pos-key]');
+                if (hit) {
+                    selected = hit;
+                    showHud(hit);
+                    return;
+                }
+                hideHud();
+                selected = null;
+            });
+
+            document.addEventListener('keydown', (ev) => {
+                if (selected && (ev.key === 'b' || ev.key === 'B' || ev.key === 'i' || ev.key === 'I' || ev.key === 'f' || ev.key === 'F')) {
+                    const el = selected;
+                    const key = (el.getAttribute('data-pos-key') || '').trim();
+                    if (!key || isImg(el)) return;
+                    const doc = readSaved();
+                    const prev = (doc.elements && doc.elements[key] && typeof doc.elements[key] === 'object') ? doc.elements[key] : {};
+                    if (ev.key === 'b' || ev.key === 'B') {
+                        const cur = String(prev.font_weight || getComputedStyle(el).fontWeight || '');
+                        const next = (cur === '700' || cur === '800' || cur === '900' || cur.toLowerCase() === 'bold') ? '400' : '700';
+                        el.style.fontWeight = next;
+                        persistEntry(el, { font_weight: next });
+                        showHud(el);
+                        ev.preventDefault();
+                        return;
+                    }
+                    if (ev.key === 'i' || ev.key === 'I') {
+                        const cur = String(prev.font_style || getComputedStyle(el).fontStyle || 'normal');
+                        const next = cur.toLowerCase() === 'italic' ? 'normal' : 'italic';
+                        el.style.fontStyle = next;
+                        persistEntry(el, { font_style: next });
+                        showHud(el);
+                        ev.preventDefault();
+                        return;
+                    }
+                    if (ev.key === 'f' || ev.key === 'F') {
+                        const fonts = ['Arial, sans-serif', 'Calibri, Arial, sans-serif', 'Times New Roman, serif', 'Consolas, "Courier New", monospace'];
+                        const cur = String(prev.font_family || getComputedStyle(el).fontFamily || '');
+                        const idx = Math.max(0, fonts.findIndex((x) => cur.toLowerCase().indexOf(x.split(',')[0].toLowerCase()) >= 0));
+                        const next = fonts[(idx + 1) % fonts.length];
+                        el.style.fontFamily = next;
+                        persistEntry(el, { font_family: next });
+                        showHud(el);
+                        ev.preventDefault();
+                        return;
+                    }
+                }
+                if (selected && ev.key === 'F2' && !isImg(selected)) {
+                    const el = selected;
+                    const isEditing = el.classList.contains('edit-mode');
+                    if (isEditing) {
+                        el.classList.remove('edit-mode');
+                        el.contentEditable = 'false';
+                        persistEntry(el, null);
+                    } else {
+                        el.classList.add('edit-mode');
+                        el.contentEditable = 'true';
+                        el.setAttribute('spellcheck', 'false');
+                        try {
+                            const r = document.createRange();
+                            r.selectNodeContents(el);
+                            r.collapse(false);
+                            const sel = window.getSelection();
+                            if (sel) {
+                                sel.removeAllRanges();
+                                sel.addRange(r);
+                            }
+                        } catch (_) {}
+                    }
+                    showHud(el);
+                    ev.preventDefault();
+                    return;
+                }
+                if (selected && (ev.key === 'w' || ev.key === 'W')) {
+                    const el = selected;
+                    const key = (el.getAttribute('data-pos-key') || '').trim();
+                    if (!key) return;
+                    const doc = readSaved();
+                    const prev = (doc.elements && doc.elements[key] && typeof doc.elements[key] === 'object') ? doc.elements[key] : {};
+                    const nextWrap = !(prev.wrap === true);
+                    if (nextWrap) el.classList.add('wrap-field');
+                    else el.classList.remove('wrap-field');
+                    persistEntry(el, { wrap: nextWrap, wrap_max_px: (typeof prev.wrap_max_px === 'number' && Number.isFinite(prev.wrap_max_px)) ? prev.wrap_max_px : 280 });
+                    showHud(el);
+                    ev.preventDefault();
+                    return;
+                }
+                if (selected && (ev.key === '+' || ev.key === '=' || ev.key === '-' || ev.key === '_' || ev.key === 'h' || ev.key === 'H')) {
+                    const el = selected;
+                    const key = (el.getAttribute('data-pos-key') || '').trim();
+                    if (!key) return;
+                    const doc = readSaved();
+                    const prev = (doc.elements && doc.elements[key] && typeof doc.elements[key] === 'object') ? doc.elements[key] : {};
+                    if (ev.key === 'h' || ev.key === 'H') {
+                        if (el.classList.contains('edit-mode') && (getActiveRangeWithin(el) || ev.ctrlKey) && toggleSelectionHidden(el)) {
+                            persistEntry(el, null);
+                            showHud(el);
+                            ev.preventDefault();
+                            return;
+                        }
+                        const nextHidden = !(prev.hidden === true);
+                        if (nextHidden) el.classList.add('hidden-field');
+                        else el.classList.remove('hidden-field');
+                        persistEntry(el, { hidden: nextHidden });
+                        showHud(el);
+                        ev.preventDefault();
+                        return;
+                    }
+                    if (!isImg(el)) {
+                        const delta = (ev.key === '-' || ev.key === '_') ? -1 : 1;
+                        if (el.classList.contains('edit-mode') && adjustSelectionFont(el, delta)) {
+                            persistEntry(el, null);
+                            showHud(el);
+                            ev.preventDefault();
+                            return;
+                        }
+                        const current = (typeof prev.font_px === 'number' && Number.isFinite(prev.font_px)) ? prev.font_px : (getFontPx(el) || 14);
+                        const next = clamp(current + delta, 6, 48);
+                        el.style.fontSize = `${next}px`;
+                        persistEntry(el, { font_px: next });
+                        showHud(el);
+                        ev.preventDefault();
+                        return;
+                    }
+                }
+                if (ev.key === 'Escape') {
+                    hideHud();
+                    if (selected && selected.classList && selected.classList.contains('edit-mode') && !isImg(selected)) {
+                        selected.classList.remove('edit-mode');
+                        selected.contentEditable = 'false';
+                    }
+                    selected = null;
+                    if (drag) endDragPointer();
+                }
+            });
+
+            window.addEventListener('resize', () => { updateFitScale(); });
+        })();
+    </script>
 </body>
 </html>

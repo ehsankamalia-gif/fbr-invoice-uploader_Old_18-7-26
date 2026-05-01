@@ -3,20 +3,21 @@ import json
 import time
 import threading
 import smtplib
+import secrets
 from email.message import EmailMessage
 from datetime import datetime, timedelta
 from io import BytesIO, StringIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from sqlalchemy import asc, desc, func
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.session import SessionLocal
-from app.db.models import Customer, Invoice, InvoiceItem, Motorcycle, ProductModel, ReportTemplate, ReportSchedule, ReportRun, AuditLog
+from app.db.models import Customer, Invoice, InvoiceItem, Motorcycle, ProductModel, ReportTemplate, ReportSchedule, ReportRun, AuditLog, PrintTemplateLayout
 from app.services.invoice_service import invoice_service
 from reporting.lookup_utils import format_cnic, validate_lookup_inputs
 from reporting.invoice_detail_utils import invoice_to_detail_dict
@@ -81,10 +82,107 @@ app = FastAPI(title="FBR Reporting Portal v2")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_print_preview_lock = threading.Lock()
+_print_previews: Dict[str, Dict[str, Any]] = {}
+
+
+def _purge_expired_previews(now: float) -> None:
+    with _print_preview_lock:
+        expired = [k for k, v in _print_previews.items() if float(v.get("expires_at", 0.0) or 0.0) <= now]
+        for k in expired:
+            _print_previews.pop(k, None)
+
+
+@app.post("/api/print-preview")
+def api_create_print_preview(payload: Dict[str, Any] = Body(default={})) -> JSONResponse:
+    html = ""
+    title = ""
+    if isinstance(payload, dict):
+        html = str(payload.get("html") or "")
+        title = str(payload.get("title") or "")
+    if not html.strip():
+        raise HTTPException(status_code=400, detail="html required")
+
+    _purge_expired_previews(time.time())
+    preview_id = secrets.token_urlsafe(12)
+    expires_at = time.time() + 60 * 20
+    with _print_preview_lock:
+        _print_previews[preview_id] = {"html": html, "title": title, "expires_at": expires_at}
+    return JSONResponse({"id": preview_id})
+
+
+@app.get("/print-preview/{preview_id}", response_class=HTMLResponse)
+def print_preview_page(preview_id: str) -> str:
+    _purge_expired_previews(time.time())
+    with _print_preview_lock:
+        entry = _print_previews.get(preview_id)
+    if not entry:
+        return "<html><body><h3>Preview expired</h3></body></html>"
+    return str(entry.get("html") or "")
+
+
+@app.get("/api/print-layout/{template_name}")
+def get_print_layout(
+    template_name: str,
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    key = (template_name or "").strip().lower()
+    if not key:
+        raise HTTPException(status_code=400, detail="template_name required")
+
+    try:
+        from app.db.session import engine as _engine
+        logger.info(f"Loading print layout '{key}' using DB: {_engine.url}")
+        row = db.query(PrintTemplateLayout).filter(PrintTemplateLayout.template_name == key).first()
+        if not row:
+            return JSONResponse({"template_name": key, "positions": {"version": 2, "updated_at": int(time.time() * 1000), "elements": {}}})
+        return JSONResponse({"template_name": key, "positions": row.positions or {"version": 2, "updated_at": int(time.time() * 1000), "elements": {}}})
+    except Exception as exc:
+        logger.error(f"Failed to load print layout '{key}': {exc}", exc_info=True)
+        return JSONResponse({"template_name": key, "positions": {"version": 2, "updated_at": int(time.time() * 1000), "elements": {}}, "error": "load_failed"})
+
+
+@app.post("/api/print-layout/{template_name}")
+def save_print_layout(
+    template_name: str,
+    payload: Dict[str, Any] = Body(default={}),
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    key = (template_name or "").strip().lower()
+    if not key:
+        raise HTTPException(status_code=400, detail="template_name required")
+
+    positions = payload.get("positions") if isinstance(payload, dict) else None
+    if not isinstance(positions, dict):
+        raise HTTPException(status_code=400, detail="payload.positions must be an object")
+    if positions.get("version") != 2:
+        raise HTTPException(status_code=400, detail="positions.version must be 2")
+    elements = positions.get("elements")
+    if elements is None:
+        positions["elements"] = {}
+    if positions.get("updated_at") is None:
+        positions["updated_at"] = int(time.time() * 1000)
+
+    try:
+        from app.db.session import engine as _engine
+        logger.info(f"Saving print layout '{key}' using DB: {_engine.url}")
+        row = db.query(PrintTemplateLayout).filter(PrintTemplateLayout.template_name == key).first()
+        if not row:
+            row = PrintTemplateLayout(template_name=key, positions=positions)
+            db.add(row)
+        else:
+            row.positions = positions
+        db.commit()
+        return JSONResponse({"ok": True, "template_name": key})
+    except Exception as exc:
+        db.rollback()
+        logger.error(f"Failed to save print layout '{key}': {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail="save_failed")
 
 _retry_lock = threading.Lock()
 _last_retry_at: Dict[str, float] = {}

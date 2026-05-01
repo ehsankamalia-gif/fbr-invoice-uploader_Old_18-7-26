@@ -122,12 +122,8 @@ class FBRSettingsDialog(ctk.CTkToplevel):
 
         # --- Preview Section ---
         self.preview_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        self.preview_frame.grid(row=1, column=0, columnspan=2, padx=15, pady=30, sticky="ew")
+        self.preview_frame.grid(row=2, column=0, columnspan=2, padx=15, pady=30, sticky="ew")
         self.preview_frame.grid_columnconfigure((0, 1), weight=1)
-        
-        # Ensure preview frame has enough height by setting minsize if needed, or rely on content
-        # We'll rely on content but add padding to cards
-
 
         # Initialize
         active_env = settings_service.get_active_environment()

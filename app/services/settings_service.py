@@ -10,6 +10,7 @@ import threading
 from typing import Any, Callable, Dict, Optional
 import uuid
 from sqlalchemy.exc import SQLAlchemyError
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -579,11 +580,42 @@ class SettingsService:
             
             return {
                 "auto_push_enabled": config.auto_push_enabled,
-                "auto_push_interval": config.auto_push_interval
+                "auto_push_interval": config.auto_push_interval,
+                "address_shortcodes": config.address_shortcodes or {},
+                "urdu_font_enabled": bool(getattr(config, "urdu_font_enabled", False)),
+                "urdu_font_family": str(getattr(config, "urdu_font_family", "") or ""),
+                "urdu_font_path": str(getattr(config, "urdu_font_path", "") or ""),
+                "urdu_font_size": int(getattr(config, "urdu_font_size", 14) or 14),
+                "ui_font_enabled": bool(getattr(config, "ui_font_enabled", False)),
+                "ui_font_family": str(getattr(config, "ui_font_family", "") or ""),
+                "ui_font_size": int(getattr(config, "ui_font_size", 13) or 13),
+                "sidebar_font_size": int(getattr(config, "sidebar_font_size", 15) or 15),
+                "sidebar_group_font_size": int(getattr(config, "sidebar_group_font_size", 12) or 12),
+                "sidebar_header_font_size": int(getattr(config, "sidebar_header_font_size", 18) or 18),
+                "sidebar_footer_font_size": int(getattr(config, "sidebar_footer_font_size", 15) or 15),
+                "sidebar_exit_font_size": int(getattr(config, "sidebar_exit_font_size", 16) or 16),
+                "sidebar_collapsed_font_size": int(getattr(config, "sidebar_collapsed_font_size", 18) or 18),
             }
         except Exception as e:
             logger.error(f"Error getting app config: {e}")
-            return {"auto_push_enabled": False, "auto_push_interval": 5}
+            return {
+                "auto_push_enabled": False,
+                "auto_push_interval": 5,
+                "address_shortcodes": {},
+                "urdu_font_enabled": False,
+                "urdu_font_family": "",
+                "urdu_font_path": "",
+                "urdu_font_size": 14,
+                "ui_font_enabled": False,
+                "ui_font_family": "",
+                "ui_font_size": 13,
+                "sidebar_font_size": 15,
+                "sidebar_group_font_size": 12,
+                "sidebar_header_font_size": 18,
+                "sidebar_footer_font_size": 15,
+                "sidebar_exit_font_size": 16,
+                "sidebar_collapsed_font_size": 18,
+            }
         finally:
             db.close()
 
@@ -603,6 +635,149 @@ class SettingsService:
         except Exception as e:
             db.rollback()
             logger.error(f"Error saving app config: {e}")
+            raise
+        finally:
+            db.close()
+
+    def get_address_shortcodes(self) -> Dict[str, str]:
+        defaults = {
+            "KT": "Tehsil Kamalia District Toba Tek Singh",
+        }
+        try:
+            cfg = self.get_app_config() or {}
+            raw = cfg.get("address_shortcodes") or {}
+            if isinstance(raw, str):
+                try:
+                    raw = json.loads(raw)
+                except Exception:
+                    raw = {}
+            if not isinstance(raw, dict):
+                raw = {}
+            merged: Dict[str, str] = {}
+            for k, v in {**defaults, **raw}.items():
+                key = str(k or "").strip().upper()
+                val = str(v or "").strip()
+                if key and val:
+                    merged[key] = val
+            return merged
+        except Exception:
+            return defaults
+
+    def set_address_shortcodes(self, shortcodes: Dict[str, str]) -> None:
+        payload: Dict[str, str] = {}
+        for k, v in (shortcodes or {}).items():
+            key = str(k or "").strip().upper()
+            val = str(v or "").strip()
+            if key and val:
+                payload[key] = val
+
+        db = SessionLocal()
+        try:
+            config = db.query(AppConfiguration).first()
+            if not config:
+                config = AppConfiguration(auto_push_enabled=False, auto_push_interval=5)
+                db.add(config)
+                db.flush()
+            config.address_shortcodes = payload
+            db.commit()
+            self._invalidate_cache()
+            self._bump_revision()
+            self._notify({"type": "address_shortcodes_updated", "shortcodes": dict(payload)})
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error saving address shortcodes: {e}")
+            raise
+        finally:
+            db.close()
+
+    def set_urdu_font_config(
+        self,
+        enabled: bool,
+        family: str = "Jameel Noori Nastaleeq",
+        path: str = "",
+        size: int = 14,
+    ) -> None:
+        db = SessionLocal()
+        try:
+            config = db.query(AppConfiguration).first()
+            if not config:
+                config = AppConfiguration(auto_push_enabled=False, auto_push_interval=5)
+                db.add(config)
+                db.flush()
+
+            config.urdu_font_enabled = bool(enabled)
+            config.urdu_font_family = str(family or "").strip()
+            config.urdu_font_path = str(path or "").strip()
+            config.urdu_font_size = int(size or 14)
+            db.commit()
+            self._invalidate_cache()
+            self._bump_revision()
+            self._notify(
+                {
+                    "type": "urdu_font_updated",
+                    "enabled": config.urdu_font_enabled,
+                    "family": config.urdu_font_family,
+                    "path": config.urdu_font_path,
+                    "size": config.urdu_font_size,
+                }
+            )
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error saving Urdu font config: {e}")
+            raise
+        finally:
+            db.close()
+
+    def set_ui_font_config(
+        self,
+        enabled: bool,
+        family: str,
+        size: int,
+        sidebar_font_size: int,
+        sidebar_group_font_size: int,
+        sidebar_header_font_size: int,
+        sidebar_footer_font_size: int,
+        sidebar_exit_font_size: int,
+        sidebar_collapsed_font_size: int,
+    ) -> None:
+        db = SessionLocal()
+        try:
+            config = db.query(AppConfiguration).first()
+            if not config:
+                config = AppConfiguration(auto_push_enabled=False, auto_push_interval=5)
+                db.add(config)
+                db.flush()
+
+            config.ui_font_enabled = bool(enabled)
+            config.ui_font_family = str(family or "").strip()
+            config.ui_font_size = int(size or 13)
+            config.sidebar_font_size = int(sidebar_font_size or 15)
+            config.sidebar_group_font_size = int(sidebar_group_font_size or 12)
+            config.sidebar_header_font_size = int(sidebar_header_font_size or 18)
+            config.sidebar_footer_font_size = int(sidebar_footer_font_size or 15)
+            config.sidebar_exit_font_size = int(sidebar_exit_font_size or 16)
+            config.sidebar_collapsed_font_size = int(sidebar_collapsed_font_size or 18)
+
+            db.commit()
+            self._invalidate_cache()
+            self._bump_revision()
+            self._notify(
+                {
+                    "type": "ui_font_updated",
+                    "enabled": config.ui_font_enabled,
+                    "family": config.ui_font_family,
+                    "size": config.ui_font_size,
+                    "sidebar_font_size": config.sidebar_font_size,
+                    "sidebar_group_font_size": config.sidebar_group_font_size,
+                    "sidebar_header_font_size": config.sidebar_header_font_size,
+                    "sidebar_footer_font_size": config.sidebar_footer_font_size,
+                    "sidebar_exit_font_size": config.sidebar_exit_font_size,
+                    "sidebar_collapsed_font_size": config.sidebar_collapsed_font_size,
+                }
+            )
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error saving UI font config: {e}")
             raise
         finally:
             db.close()

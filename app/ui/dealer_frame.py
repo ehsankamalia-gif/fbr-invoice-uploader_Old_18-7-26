@@ -2,6 +2,7 @@ import customtkinter as ctk
 from tkinter import messagebox, ttk, Menu
 import re
 from app.services.dealer_service import dealer_service
+from app.ui.address_entry import AddressEntry
 
 class DealerFrame(ctk.CTkFrame):
     def __init__(self, master, **kwargs):
@@ -75,8 +76,8 @@ class DealerFrame(ctk.CTkFrame):
         # 6. Address
         ctk.CTkLabel(self.form_frame, text="Address *").grid(row=6, column=0, padx=10, pady=5, sticky="e")
         self.address_var = ctk.StringVar()
-        self.address_var.trace_add("write", lambda *args: self.validate_upper(self.address_var))
-        self.address_entry = ctk.CTkEntry(self.form_frame, textvariable=self.address_var)
+        # AddressEntry handles uppercase expansion
+        self.address_entry = AddressEntry(self.form_frame, textvariable=self.address_var)
         self.address_entry.grid(row=6, column=1, padx=10, pady=5, sticky="ew")
 
         # Buttons

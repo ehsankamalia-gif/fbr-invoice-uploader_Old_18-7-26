@@ -4,6 +4,7 @@ import re
 import logging
 from app.services.customer_service import customer_service
 from app.db.models import CustomerType
+from app.ui.address_entry import AddressEntry
 
 logger = logging.getLogger(__name__)
 
@@ -202,8 +203,8 @@ class CustomerFrame(ctk.CTkFrame):
         # 6. Address
         ctk.CTkLabel(self.form_frame, text="Address").grid(row=6, column=0, padx=10, pady=5, sticky="e")
         self.address_var = ctk.StringVar()
-        self.address_var.trace_add("write", lambda *args: self._force_uppercase(self.address_var))
-        self.address_entry = ctk.CTkEntry(self.form_frame, textvariable=self.address_var)
+        # Removed redundant uppercase trace as AddressEntry handles it
+        self.address_entry = AddressEntry(self.form_frame, textvariable=self.address_var)
         self.address_entry.grid(row=6, column=1, padx=10, pady=5, sticky="ew")
 
         # 7. NTN

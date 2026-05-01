@@ -474,6 +474,20 @@ class AppConfiguration(Base):
     id = Column(Integer, primary_key=True, index=True)
     auto_push_enabled = Column(Boolean, default=False)
     auto_push_interval = Column(Integer, default=5) # seconds
+    address_shortcodes = Column(JSON, nullable=True)
+    urdu_font_enabled = Column(Boolean, default=False)
+    urdu_font_family = Column(String(200), default="Jameel Noori Nastaleeq")
+    urdu_font_path = Column(String(500), default="")
+    urdu_font_size = Column(Integer, default=14)
+    ui_font_enabled = Column(Boolean, default=False)
+    ui_font_family = Column(String(200), default="")
+    ui_font_size = Column(Integer, default=13)
+    sidebar_font_size = Column(Integer, default=15)
+    sidebar_group_font_size = Column(Integer, default=12)
+    sidebar_header_font_size = Column(Integer, default=18)
+    sidebar_footer_font_size = Column(Integer, default=15)
+    sidebar_exit_font_size = Column(Integer, default=16)
+    sidebar_collapsed_font_size = Column(Integer, default=18)
     
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
 
@@ -522,4 +536,13 @@ class ReportRun(Base):
     error_message = Column(String(1000), nullable=True)
 
     schedule = relationship("ReportSchedule")
+
+
+class PrintTemplateLayout(Base):
+    __tablename__ = "print_template_layouts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    template_name = Column(String(80), unique=True, index=True, nullable=False)
+    positions = Column(JSON, nullable=False)
+    updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow, index=True)
 

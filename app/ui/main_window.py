@@ -32,6 +32,7 @@ from app.ui.captured_data_frame import CapturedDataFrame
 from app.ui.welcome_frame import WelcomeFrame
 from app.ui.autocomplete_entry import AutocompleteEntry
 from app.ui.stock_summary_frame import StockSummaryFrame
+from app.ui.address_entry import AddressEntry
 
 from app.utils.auto_git import auto_git_manager
 from app.utils.price_data import price_manager
@@ -1009,8 +1010,8 @@ class App(ctk.CTk):
         # 5. Address
         ctk.CTkLabel(self.form_frame, text="Address").grid(row=6, column=0, padx=10, pady=5, sticky="e")
         self.buyer_address_var = ctk.StringVar()
-        self.buyer_address_var.trace_add("write", self.validate_address)
-        self.buyer_address_entry = ctk.CTkEntry(self.form_frame, textvariable=self.buyer_address_var)
+        # AddressEntry handles uppercase and expansion
+        self.buyer_address_entry = AddressEntry(self.form_frame, textvariable=self.buyer_address_var)
         self.buyer_address_entry.grid(row=6, column=1, padx=10, pady=5, sticky="ew")
 
         # 5.5 Model & Color

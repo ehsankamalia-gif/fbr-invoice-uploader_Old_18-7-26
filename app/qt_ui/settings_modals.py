@@ -7,13 +7,13 @@ import base64
 import asyncio
 from pathlib import Path
 from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QThread, QTimer
-from PyQt6.QtGui import QPixmap, QImage, QAction, QIcon
+from PyQt6.QtGui import QPixmap, QImage, QAction, QIcon, QFont, QFontDatabase
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
     QPushButton, QComboBox, QDoubleSpinBox, QSpinBox, 
     QFrame, QGridLayout, QCheckBox, QScrollArea, 
     QMessageBox, QApplication, QTableWidget, QTableWidgetItem, QHeaderView, QInputDialog,
-    QProgressDialog, QWidget, QTextEdit, QTabWidget
+    QProgressDialog, QWidget, QTextEdit, QTabWidget, QFileDialog, QSlider
 )
 import logging
 import datetime as dt
@@ -979,3 +979,598 @@ class AppUpdatesDialog(BaseSettingsDialog):
         except Exception as e:
             logger.error(f"Error triggering update check: {e}")
             self._show_error("Error", f"Failed to check for updates: {str(e)}")
+
+class AddressShortcodeDialog(BaseSettingsDialog):
+    """Modal for managing address shortcodes (PyQt6 version)."""
+    def __init__(self, parent=None):
+        super().__init__("Address Shortcodes Management", parent)
+        self.setMinimumWidth(700)
+        self.setMinimumHeight(600)
+        self._init_ui()
+        self._load_data()
+
+    def _init_ui(self):
+        # Form layout for adding/editing
+        form_group = QFrame()
+        form_group.setStyleSheet("background-color: #fcfcfc; border: 1px solid #dee2e6; border-radius: 4px; padding: 10px;")
+        form_layout = QGridLayout(form_group)
+        
+        form_layout.addWidget(QLabel("Short Code:"), 0, 0)
+        self.code_input = QLineEdit()
+        self.code_input.setPlaceholderText("e.g. KT")
+        form_layout.addWidget(self.code_input, 0, 1)
+        
+        form_layout.addWidget(QLabel("Full Address:"), 1, 0)
+        self.address_input = QLineEdit()
+        self.address_input.setPlaceholderText("e.g. Tehsil Kamalia District Toba Tek Singh")
+        form_layout.addWidget(self.address_input, 1, 1)
+        
+        self.add_btn = QPushButton("Add / Update Shortcode")
+        self.add_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                font-weight: bold;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        self.add_btn.clicked.connect(self._on_add_shortcode)
+        form_layout.addWidget(self.add_btn, 2, 0, 1, 2)
+        
+        self.content_layout.addWidget(form_group)
+        
+        # Table for displaying shortcodes
+        self.table = QTableWidget()
+        self.table.setColumnCount(2)
+        self.table.setHorizontalHeaderLabels(["Short Code", "Full Address"])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.itemSelectionChanged.connect(self._on_selection_changed)
+        
+        self.content_layout.addWidget(self.table)
+        
+        # Delete button
+        self.delete_btn = QPushButton("Delete Selected")
+        self.delete_btn.setStyleSheet("background-color: #e74c3c; color: white; padding: 8px; font-weight: bold; border-radius: 4px;")
+        self.delete_btn.setEnabled(False)
+        self.delete_btn.clicked.connect(self._on_delete_shortcode)
+        self.content_layout.addWidget(self.delete_btn)
+        
+        # Override save_btn text
+        self.save_btn.setText("Close")
+        self.save_btn.clicked.disconnect()
+        self.save_btn.clicked.connect(self.accept)
+
+    def _load_data(self):
+        shortcodes = settings_service.get_address_shortcodes()
+        self.table.setRowCount(0)
+        for code, address in sorted(shortcodes.items()):
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            self.table.setItem(row, 0, QTableWidgetItem(code))
+            self.table.setItem(row, 1, QTableWidgetItem(address))
+
+    def _on_selection_changed(self):
+        selected_items = self.table.selectedItems()
+        if selected_items:
+            self.delete_btn.setEnabled(True)
+            row = selected_items[0].row()
+            self.code_input.setText(self.table.item(row, 0).text())
+            self.address_input.setText(self.table.item(row, 1).text())
+        else:
+            self.delete_btn.setEnabled(False)
+
+    def _on_add_shortcode(self):
+        code = self.code_input.text().strip().upper()
+        address = self.address_input.text().strip().upper()
+        
+        if not code or not address:
+            self._show_error("Validation Error", "Both code and address are required!")
+            return
+            
+        try:
+            shortcodes = settings_service.get_address_shortcodes()
+            shortcodes[code] = address
+            settings_service.set_address_shortcodes(shortcodes)
+            self._load_data()
+            self.code_input.clear()
+            self.address_input.clear()
+            self._show_success("Success", f"Shortcode '{code}' saved.")
+        except Exception as e:
+            self._show_error("Error", f"Failed to save shortcode: {e}")
+
+    def _on_delete_shortcode(self):
+        selected_items = self.table.selectedItems()
+        if not selected_items:
+            return
+            
+        row = selected_items[0].row()
+        code = self.table.item(row, 0).text()
+        
+        if QMessageBox.question(self, "Confirm Delete", f"Are you sure you want to delete shortcode '{code}'?") != QMessageBox.StandardButton.Yes:
+            return
+            
+        try:
+            shortcodes = settings_service.get_address_shortcodes()
+            if code in shortcodes:
+                del shortcodes[code]
+                settings_service.set_address_shortcodes(shortcodes)
+                self._load_data()
+                self.code_input.clear()
+                self.address_input.clear()
+                self._show_success("Success", f"Shortcode '{code}' deleted.")
+        except Exception as e:
+            self._show_error("Error", f"Failed to delete shortcode: {e}")
+
+
+class UrduFontDialog(BaseSettingsDialog):
+    def __init__(self, parent=None):
+        super().__init__("Urdu Font (Noori Nastaleeq)", parent)
+        self.setMinimumWidth(700)
+        self._init_ui()
+        self._load_data()
+
+    def _init_ui(self):
+        layout = QGridLayout()
+        layout.setSpacing(15)
+
+        self.enable_cb = QCheckBox("Enable Urdu Font (Jameel Noori Nastaleeq / Noori Nastaleeq)")
+        layout.addWidget(self.enable_cb, 0, 0, 1, 2)
+
+        layout.addWidget(QLabel("Font Family:"), 1, 0)
+        self.family_combo = QComboBox()
+        self.family_combo.setMinimumHeight(36)
+        layout.addWidget(self.family_combo, 1, 1)
+
+        layout.addWidget(QLabel("Font Size:"), 2, 0)
+        self.size_spin = QSpinBox()
+        self.size_spin.setRange(8, 48)
+        self.size_spin.setMinimumHeight(36)
+        layout.addWidget(self.size_spin, 2, 1)
+
+        layout.addWidget(QLabel("Font File (Optional):"), 3, 0)
+        path_row = QWidget()
+        path_layout = QHBoxLayout(path_row)
+        path_layout.setContentsMargins(0, 0, 0, 0)
+        path_layout.setSpacing(10)
+        self.path_input = QLineEdit()
+        self.path_input.setPlaceholderText("Select .ttf / .otf if the font is not installed")
+        browse_btn = QPushButton("Browse")
+        browse_btn.setObjectName("secondaryButton")
+        browse_btn.clicked.connect(self._browse_font)
+        path_layout.addWidget(self.path_input, 1)
+        path_layout.addWidget(browse_btn)
+        layout.addWidget(path_row, 3, 1)
+
+        layout.addWidget(QLabel("Preview:"), 4, 0)
+        self.preview = QLabel("نمونہ اردو متن  |  Sample Urdu Text")
+        self.preview.setStyleSheet("background-color: #ffffff; border: 1px solid #dee2e6; border-radius: 6px; padding: 12px;")
+        self.preview.setMinimumHeight(80)
+        self.preview.setWordWrap(True)
+        layout.addWidget(self.preview, 4, 1)
+
+        self.content_layout.addLayout(layout)
+
+        self.enable_cb.stateChanged.connect(self._update_preview)
+        self.family_combo.currentTextChanged.connect(self._update_preview)
+        self.size_spin.valueChanged.connect(self._update_preview)
+        self.path_input.textChanged.connect(self._update_preview)
+
+    def _load_data(self):
+        cfg = settings_service.get_app_config() or {}
+        enabled = bool(cfg.get("urdu_font_enabled", False))
+        family = str(cfg.get("urdu_font_family", "") or "").strip()
+        path = str(cfg.get("urdu_font_path", "") or "").strip()
+        size = int(cfg.get("urdu_font_size", 14) or 14)
+
+        self.enable_cb.setChecked(enabled)
+        self.size_spin.setValue(size)
+        self.path_input.setText(path)
+        self._populate_families(selected_family=family)
+        self._update_preview()
+
+    def _populate_families(self, selected_family: str = ""):
+        families = list(QFontDatabase.families())
+        preferred = []
+        for cand in ["Jameel Noori Nastaleeq", "Noori Nastaleeq", "Noto Nastaliq Urdu"]:
+            if cand in families:
+                preferred.append(cand)
+        filtered = []
+        for f in families:
+            fl = f.lower()
+            if "nast" in fl or "noori" in fl or "urdu" in fl:
+                filtered.append(f)
+        items = []
+        seen = set()
+        for f in preferred + filtered:
+            if f not in seen:
+                seen.add(f)
+                items.append(f)
+        if not items:
+            items = preferred or filtered or families
+        self.family_combo.clear()
+        self.family_combo.addItems(items)
+        if selected_family:
+            idx = self.family_combo.findText(selected_family)
+            if idx >= 0:
+                self.family_combo.setCurrentIndex(idx)
+
+    def _browse_font(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Urdu Font File",
+            "",
+            "Font Files (*.ttf *.otf);;All Files (*)",
+        )
+        if not file_path:
+            return
+        self.path_input.setText(file_path)
+        font_id = QFontDatabase.addApplicationFont(file_path)
+        if font_id != -1:
+            families = QFontDatabase.applicationFontFamilies(font_id)
+            if families:
+                self._populate_families(selected_family=families[0])
+
+    def _update_preview(self):
+        enabled = self.enable_cb.isChecked()
+        size = self.size_spin.value()
+        family = self.family_combo.currentText().strip()
+        if enabled and family:
+            self.preview.setFont(QFont(family, size))
+        else:
+            self.preview.setFont(QFont())
+
+    def save_settings(self):
+        enabled = self.enable_cb.isChecked()
+        family = self.family_combo.currentText().strip()
+        path = self.path_input.text().strip()
+        size = int(self.size_spin.value())
+
+        try:
+            settings_service.set_urdu_font_config(
+                enabled=enabled,
+                family=family,
+                path=path,
+                size=size,
+            )
+            app = QApplication.instance()
+            if isinstance(app, QApplication):
+                font_manager = getattr(app, "_font_manager", None)
+                refresh = getattr(font_manager, "refresh_from_settings", None) if font_manager is not None else None
+                if callable(refresh):
+                    refresh()
+            self._show_success("Saved", "Urdu font settings have been applied.")
+            self.accept()
+        except Exception as e:
+            self._show_error("Error", f"Failed to save Urdu font settings: {e}")
+
+
+class FontCustomizationDialog(BaseSettingsDialog):
+    def __init__(self, parent=None):
+        super().__init__("Font Customization & Accessibility", parent)
+        self.setMinimumWidth(760)
+        self._initial_cfg: dict = {}
+        self._init_ui()
+        self._load_data()
+
+    def _init_ui(self):
+        layout = QGridLayout()
+        layout.setSpacing(15)
+
+        self.enable_ui_font_cb = QCheckBox("Enable Custom UI Font")
+        layout.addWidget(self.enable_ui_font_cb, 0, 0, 1, 2)
+
+        layout.addWidget(QLabel("UI Font Family:"), 1, 0)
+        self.ui_family_combo = QComboBox()
+        self.ui_family_combo.setMinimumHeight(36)
+        layout.addWidget(self.ui_family_combo, 1, 1)
+
+        layout.addWidget(QLabel("UI Font Size:"), 2, 0)
+        ui_size_row = QWidget()
+        ui_size_layout = QHBoxLayout(ui_size_row)
+        ui_size_layout.setContentsMargins(0, 0, 0, 0)
+        ui_size_layout.setSpacing(10)
+        self.ui_size_slider = QSlider(Qt.Orientation.Horizontal)
+        self.ui_size_slider.setRange(8, 24)
+        self.ui_size_spin = QSpinBox()
+        self.ui_size_spin.setRange(8, 24)
+        self.ui_size_spin.setMinimumHeight(36)
+        ui_size_layout.addWidget(self.ui_size_slider, 1)
+        ui_size_layout.addWidget(self.ui_size_spin)
+        layout.addWidget(ui_size_row, 2, 1)
+
+        layout.addWidget(QLabel("Sidebar Menu Font Size:"), 3, 0)
+        sb_row = QWidget()
+        sb_layout = QHBoxLayout(sb_row)
+        sb_layout.setContentsMargins(0, 0, 0, 0)
+        sb_layout.setSpacing(10)
+        self.sidebar_font_slider = QSlider(Qt.Orientation.Horizontal)
+        self.sidebar_font_slider.setRange(8, 24)
+        self.sidebar_font_spin = QSpinBox()
+        self.sidebar_font_spin.setRange(8, 24)
+        self.sidebar_font_spin.setMinimumHeight(36)
+        sb_layout.addWidget(self.sidebar_font_slider, 1)
+        sb_layout.addWidget(self.sidebar_font_spin)
+        layout.addWidget(sb_row, 3, 1)
+
+        layout.addWidget(QLabel("Sidebar Group Header Size:"), 4, 0)
+        sgh_row = QWidget()
+        sgh_layout = QHBoxLayout(sgh_row)
+        sgh_layout.setContentsMargins(0, 0, 0, 0)
+        sgh_layout.setSpacing(10)
+        self.sidebar_group_slider = QSlider(Qt.Orientation.Horizontal)
+        self.sidebar_group_slider.setRange(8, 24)
+        self.sidebar_group_spin = QSpinBox()
+        self.sidebar_group_spin.setRange(8, 24)
+        self.sidebar_group_spin.setMinimumHeight(36)
+        sgh_layout.addWidget(self.sidebar_group_slider, 1)
+        sgh_layout.addWidget(self.sidebar_group_spin)
+        layout.addWidget(sgh_row, 4, 1)
+
+        layout.addWidget(QLabel("Sidebar Header Size:"), 5, 0)
+        sh_row = QWidget()
+        sh_layout = QHBoxLayout(sh_row)
+        sh_layout.setContentsMargins(0, 0, 0, 0)
+        sh_layout.setSpacing(10)
+        self.sidebar_header_slider = QSlider(Qt.Orientation.Horizontal)
+        self.sidebar_header_slider.setRange(8, 24)
+        self.sidebar_header_spin = QSpinBox()
+        self.sidebar_header_spin.setRange(8, 24)
+        self.sidebar_header_spin.setMinimumHeight(36)
+        sh_layout.addWidget(self.sidebar_header_slider, 1)
+        sh_layout.addWidget(self.sidebar_header_spin)
+        layout.addWidget(sh_row, 5, 1)
+
+        layout.addWidget(QLabel("Sidebar Footer Size:"), 6, 0)
+        sf_row = QWidget()
+        sf_layout = QHBoxLayout(sf_row)
+        sf_layout.setContentsMargins(0, 0, 0, 0)
+        sf_layout.setSpacing(10)
+        self.sidebar_footer_slider = QSlider(Qt.Orientation.Horizontal)
+        self.sidebar_footer_slider.setRange(8, 24)
+        self.sidebar_footer_spin = QSpinBox()
+        self.sidebar_footer_spin.setRange(8, 24)
+        self.sidebar_footer_spin.setMinimumHeight(36)
+        sf_layout.addWidget(self.sidebar_footer_slider, 1)
+        sf_layout.addWidget(self.sidebar_footer_spin)
+        layout.addWidget(sf_row, 6, 1)
+
+        layout.addWidget(QLabel("Sidebar Exit Size:"), 7, 0)
+        se_row = QWidget()
+        se_layout = QHBoxLayout(se_row)
+        se_layout.setContentsMargins(0, 0, 0, 0)
+        se_layout.setSpacing(10)
+        self.sidebar_exit_slider = QSlider(Qt.Orientation.Horizontal)
+        self.sidebar_exit_slider.setRange(8, 24)
+        self.sidebar_exit_spin = QSpinBox()
+        self.sidebar_exit_spin.setRange(8, 24)
+        self.sidebar_exit_spin.setMinimumHeight(36)
+        se_layout.addWidget(self.sidebar_exit_slider, 1)
+        se_layout.addWidget(self.sidebar_exit_spin)
+        layout.addWidget(se_row, 7, 1)
+
+        layout.addWidget(QLabel("Preview:"), 8, 0)
+        self.preview = QLabel("Preview: The quick brown fox jumps over the lazy dog. | 0123456789")
+        self.preview.setStyleSheet("background-color: #ffffff; border: 1px solid #dee2e6; border-radius: 6px; padding: 12px;")
+        self.preview.setMinimumHeight(70)
+        self.preview.setWordWrap(True)
+        layout.addWidget(self.preview, 8, 1)
+
+        quick_row = QWidget()
+        quick_layout = QHBoxLayout(quick_row)
+        quick_layout.setContentsMargins(0, 0, 0, 0)
+        quick_layout.setSpacing(10)
+        reset_btn = QPushButton("Reset to Default")
+        reset_btn.setObjectName("secondaryButton")
+        reset_btn.clicked.connect(self._reset_defaults)
+        large_btn = QPushButton("Accessibility: Large Text")
+        large_btn.setObjectName("secondaryButton")
+        large_btn.clicked.connect(self._set_large_text)
+        quick_layout.addWidget(reset_btn)
+        quick_layout.addWidget(large_btn)
+        quick_layout.addStretch(1)
+        layout.addWidget(quick_row, 9, 1)
+
+        self.content_layout.addLayout(layout)
+
+        self.ui_size_slider.valueChanged.connect(self.ui_size_spin.setValue)
+        self.ui_size_spin.valueChanged.connect(self.ui_size_slider.setValue)
+        self.sidebar_font_slider.valueChanged.connect(self.sidebar_font_spin.setValue)
+        self.sidebar_font_spin.valueChanged.connect(self.sidebar_font_slider.setValue)
+        self.sidebar_group_slider.valueChanged.connect(self.sidebar_group_spin.setValue)
+        self.sidebar_group_spin.valueChanged.connect(self.sidebar_group_slider.setValue)
+        self.sidebar_header_slider.valueChanged.connect(self.sidebar_header_spin.setValue)
+        self.sidebar_header_spin.valueChanged.connect(self.sidebar_header_slider.setValue)
+        self.sidebar_footer_slider.valueChanged.connect(self.sidebar_footer_spin.setValue)
+        self.sidebar_footer_spin.valueChanged.connect(self.sidebar_footer_slider.setValue)
+        self.sidebar_exit_slider.valueChanged.connect(self.sidebar_exit_spin.setValue)
+        self.sidebar_exit_spin.valueChanged.connect(self.sidebar_exit_slider.setValue)
+
+        self.enable_ui_font_cb.stateChanged.connect(self._update_preview)
+        self.ui_family_combo.currentTextChanged.connect(self._update_preview)
+        self.ui_size_spin.valueChanged.connect(self._update_preview)
+        self.sidebar_font_spin.valueChanged.connect(self._update_sidebar_preview_apply)
+        self.sidebar_group_spin.valueChanged.connect(self._update_sidebar_preview_apply)
+        self.sidebar_header_spin.valueChanged.connect(self._update_sidebar_preview_apply)
+        self.sidebar_footer_spin.valueChanged.connect(self._update_sidebar_preview_apply)
+        self.sidebar_exit_spin.valueChanged.connect(self._update_sidebar_preview_apply)
+
+    def _load_data(self):
+        cfg = settings_service.get_app_config() or {}
+        self._initial_cfg = dict(cfg)
+
+        self._populate_families(selected_family=str(cfg.get("ui_font_family") or "").strip())
+        self.enable_ui_font_cb.setChecked(bool(cfg.get("ui_font_enabled", False)))
+        self.ui_size_spin.setValue(int(cfg.get("ui_font_size", 13) or 13))
+        self.sidebar_font_spin.setValue(int(cfg.get("sidebar_font_size", 15) or 15))
+        self.sidebar_group_spin.setValue(int(cfg.get("sidebar_group_font_size", 12) or 12))
+        self.sidebar_header_spin.setValue(int(cfg.get("sidebar_header_font_size", 18) or 18))
+        self.sidebar_footer_spin.setValue(int(cfg.get("sidebar_footer_font_size", 15) or 15))
+        self.sidebar_exit_spin.setValue(int(cfg.get("sidebar_exit_font_size", 16) or 16))
+
+        self._update_preview()
+        self._update_sidebar_preview_apply()
+
+    def _populate_families(self, selected_family: str = ""):
+        families = list(QFontDatabase.families())
+        common = ["Segoe UI", "Arial", "Calibri", "Times New Roman", "Tahoma", "Verdana"]
+        preferred = [f for f in common if f in families]
+        items = []
+        seen = set()
+        for f in preferred + families:
+            if f not in seen:
+                seen.add(f)
+                items.append(f)
+        self.ui_family_combo.clear()
+        self.ui_family_combo.addItem("")
+        self.ui_family_combo.addItems(items)
+        if selected_family:
+            idx = self.ui_family_combo.findText(selected_family)
+            if idx >= 0:
+                self.ui_family_combo.setCurrentIndex(idx)
+
+    def _current_ui_font(self) -> QFont:
+        size = int(self.ui_size_spin.value())
+        family = self.ui_family_combo.currentText().strip()
+        if self.enable_ui_font_cb.isChecked() and family:
+            return QFont(family, size)
+        font = QApplication.instance().font() if QApplication.instance() else QFont()
+        font.setPointSize(size)
+        return font
+
+    def _update_preview(self):
+        self.preview.setFont(self._current_ui_font())
+        self._apply_live()
+
+    def _apply_live(self):
+        app = QApplication.instance()
+        if not isinstance(app, QApplication):
+            return
+        font_manager = getattr(app, "_font_manager", None)
+        if self.enable_ui_font_cb.isChecked():
+            if font_manager is not None and hasattr(font_manager, "apply_existing_widgets"):
+                try:
+                    font_manager._ui_font = self._current_ui_font()
+                    font_manager.apply_existing_widgets()
+                except Exception:
+                    pass
+            else:
+                try:
+                    app.setFont(self._current_ui_font())
+                except Exception:
+                    pass
+        else:
+            refresh = getattr(font_manager, "refresh_from_settings", None) if font_manager is not None else None
+            if callable(refresh):
+                refresh()
+        self._update_sidebar_preview_apply()
+
+    def _update_sidebar_preview_apply(self):
+        parent = self.parent()
+        while parent is not None and not hasattr(parent, "apply_sidebar_font_settings"):
+            parent = parent.parent()
+        apply_fn = getattr(parent, "apply_sidebar_font_settings", None) if parent is not None else None
+        if callable(apply_fn):
+            apply_fn(
+                {
+                    "sidebar_font_size": int(self.sidebar_font_spin.value()),
+                    "sidebar_group_font_size": int(self.sidebar_group_spin.value()),
+                    "sidebar_header_font_size": int(self.sidebar_header_spin.value()),
+                    "sidebar_footer_font_size": int(self.sidebar_footer_spin.value()),
+                    "sidebar_exit_font_size": int(self.sidebar_exit_spin.value()),
+                    "sidebar_collapsed_font_size": int(self._initial_cfg.get("sidebar_collapsed_font_size", 18) or 18),
+                }
+            )
+
+    def _reset_defaults(self):
+        self.enable_ui_font_cb.setChecked(False)
+        self.ui_family_combo.setCurrentIndex(0)
+        self.ui_size_spin.setValue(13)
+        self.sidebar_font_spin.setValue(15)
+        self.sidebar_group_spin.setValue(12)
+        self.sidebar_header_spin.setValue(18)
+        self.sidebar_footer_spin.setValue(15)
+        self.sidebar_exit_spin.setValue(16)
+
+    def _set_large_text(self):
+        self.enable_ui_font_cb.setChecked(True)
+        if not self.ui_family_combo.currentText().strip():
+            if self.ui_family_combo.count() > 1:
+                self.ui_family_combo.setCurrentIndex(1)
+        self.ui_size_spin.setValue(18)
+        self.sidebar_font_spin.setValue(18)
+        self.sidebar_group_spin.setValue(14)
+        self.sidebar_header_spin.setValue(20)
+        self.sidebar_footer_spin.setValue(18)
+        self.sidebar_exit_spin.setValue(18)
+
+    def reject(self):
+        try:
+            cfg = self._initial_cfg or {}
+            settings_service.set_ui_font_config(
+                enabled=bool(cfg.get("ui_font_enabled", False)),
+                family=str(cfg.get("ui_font_family", "") or ""),
+                size=int(cfg.get("ui_font_size", 13) or 13),
+                sidebar_font_size=int(cfg.get("sidebar_font_size", 15) or 15),
+                sidebar_group_font_size=int(cfg.get("sidebar_group_font_size", 12) or 12),
+                sidebar_header_font_size=int(cfg.get("sidebar_header_font_size", 18) or 18),
+                sidebar_footer_font_size=int(cfg.get("sidebar_footer_font_size", 15) or 15),
+                sidebar_exit_font_size=int(cfg.get("sidebar_exit_font_size", 16) or 16),
+                sidebar_collapsed_font_size=int(cfg.get("sidebar_collapsed_font_size", 18) or 18),
+            )
+            app = QApplication.instance()
+            if isinstance(app, QApplication):
+                font_manager = getattr(app, "_font_manager", None)
+                refresh = getattr(font_manager, "refresh_from_settings", None) if font_manager is not None else None
+                if callable(refresh):
+                    refresh()
+            parent = self.parent()
+            while parent is not None and not hasattr(parent, "apply_sidebar_font_settings"):
+                parent = parent.parent()
+            apply_fn = getattr(parent, "apply_sidebar_font_settings", None) if parent is not None else None
+            if callable(apply_fn):
+                apply_fn(cfg)
+        except Exception:
+            pass
+        super().reject()
+
+    def save_settings(self):
+        enabled = self.enable_ui_font_cb.isChecked()
+        family = self.ui_family_combo.currentText().strip()
+        size = int(self.ui_size_spin.value())
+
+        try:
+            settings_service.set_ui_font_config(
+                enabled=enabled,
+                family=family,
+                size=size,
+                sidebar_font_size=int(self.sidebar_font_spin.value()),
+                sidebar_group_font_size=int(self.sidebar_group_spin.value()),
+                sidebar_header_font_size=int(self.sidebar_header_spin.value()),
+                sidebar_footer_font_size=int(self.sidebar_footer_spin.value()),
+                sidebar_exit_font_size=int(self.sidebar_exit_spin.value()),
+                sidebar_collapsed_font_size=int(self._initial_cfg.get("sidebar_collapsed_font_size", 18) or 18),
+            )
+            app = QApplication.instance()
+            if isinstance(app, QApplication):
+                font_manager = getattr(app, "_font_manager", None)
+                refresh = getattr(font_manager, "refresh_from_settings", None) if font_manager is not None else None
+                if callable(refresh):
+                    refresh()
+            parent = self.parent()
+            while parent is not None and not hasattr(parent, "apply_sidebar_font_settings"):
+                parent = parent.parent()
+            apply_fn = getattr(parent, "apply_sidebar_font_settings", None) if parent is not None else None
+            if callable(apply_fn):
+                apply_fn(settings_service.get_app_config() or {})
+            self._show_success("Saved", "Font settings have been applied.")
+            self.accept()
+        except Exception as e:
+            self._show_error("Error", f"Failed to save font settings: {e}")

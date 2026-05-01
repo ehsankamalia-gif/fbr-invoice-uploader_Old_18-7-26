@@ -99,7 +99,10 @@ from app.qt_ui.settings_modals import (
     DatabaseSettingsDialog, 
     BackupSettingsDialog,
     AppUpdatesDialog,
-    SMSConfigDialog
+    SMSConfigDialog,
+    AddressShortcodeDialog,
+    UrduFontDialog,
+    FontCustomizationDialog
 )
 from app.core.signals import booking_signals
 from app.core.logger import logger
@@ -527,11 +530,21 @@ class BookingCard(QFrame):
             self.update_quantity(count)
 
 class NavigationButton(QPushButton):
-    def __init__(self, icon_text: str, title: str, page_key: str, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        icon_text: str,
+        title: str,
+        page_key: str,
+        parent: QWidget | None = None,
+        expanded_font_size: int = 15,
+        collapsed_font_size: int = 18,
+    ) -> None:
         super().__init__(parent)
         self.icon_text = icon_text
         self.title = title
         self.page_key = page_key
+        self.expanded_font_size = int(expanded_font_size)
+        self.collapsed_font_size = int(collapsed_font_size)
         self.setCheckable(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -541,76 +554,81 @@ class NavigationButton(QPushButton):
         if collapsed:
             self.setText(self.icon_text)
             self.setToolTip(self.title)
-            self.setStyleSheet("""
-                NavigationButton {
+            self.setStyleSheet(f"""
+                NavigationButton {{
                     background-color: transparent;
                     color: #bdc3c7;
                     border: none;
                     border-left: 4px solid transparent;
                     text-align: center;
                     padding: 10px 0px;
-                    font-size: 18px;
+                    font-size: {self.collapsed_font_size}px;
                     border-radius: 0;
-                }
-                NavigationButton:hover {
+                }}
+                NavigationButton:hover {{
                     background-color: #3e4f5f;
                     color: white;
-                }
-                NavigationButton:checked {
+                }}
+                NavigationButton:checked {{
                     background-color: #3498db;
                     color: white;
                     border-left: 4px solid #2980b9;
-                }
+                }}
             """)
         else:
             self.setText(f"{self.icon_text}  {self.title}")
             self.setToolTip("")
-            self.setStyleSheet("""
-                NavigationButton {
+            self.setStyleSheet(f"""
+                NavigationButton {{
                     background-color: transparent;
                     color: #bdc3c7;
                     border: none;
                     border-left: 4px solid transparent;
                     text-align: left;
                     padding: 10px 15px;
-                    font-size: 13px;
+                    font-size: {self.expanded_font_size}px;
                     border-radius: 0;
-                }
-                NavigationButton:hover {
+                }}
+                NavigationButton:hover {{
                     background-color: #3e4f5f;
                     color: white;
-                }
-                NavigationButton:checked {
+                }}
+                NavigationButton:checked {{
                     background-color: #3498db;
                     color: white;
                     border-left: 4px solid #2980b9;
-                }
+                }}
             """)
+
+    def set_font_sizes(self, expanded_font_size: int, collapsed_font_size: int) -> None:
+        self.expanded_font_size = int(expanded_font_size)
+        self.collapsed_font_size = int(collapsed_font_size)
 
 
 class GroupHeaderButton(QPushButton):
-    def __init__(self, arrow: str, group_name: str, parent: QWidget | None = None) -> None:
+    def __init__(self, arrow: str, group_name: str, parent: QWidget | None = None, font_size: int = 12) -> None:
         super().__init__(parent)
         self.arrow = arrow
         self.group_name = group_name
+        self.font_size = int(font_size)
         self.setCheckable(True)
         self.setChecked(True) # Expanded by default
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setText(f"{arrow} {group_name}")
-        self.setStyleSheet("""
-            QPushButton {
+        self.setStyleSheet(f"""
+            QPushButton {{
                 background-color: transparent;
                 color: #7f8c8d;
                 border: none;
                 text-align: left;
                 padding: 15px 20px 5px 20px;
-                font-size: 10px;
+                font-size: {self.font_size}px;
                 font-weight: bold;
                 letter-spacing: 1px;
-            }
-            QPushButton:hover {
+            }}
+            QPushButton:hover {{
                 color: white;
-            }
+            }}
         """)
 
     def set_collapsed(self, collapsed: bool) -> None:
@@ -620,6 +638,24 @@ class GroupHeaderButton(QPushButton):
         else:
             self.setText(f"{self.arrow} {self.group_name}")
             self.setMaximumHeight(16777215)
+
+    def set_font_size(self, font_size: int) -> None:
+        self.font_size = int(font_size)
+        self.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: #7f8c8d;
+                border: none;
+                text-align: left;
+                padding: 15px 20px 5px 20px;
+                font-size: {self.font_size}px;
+                font-weight: bold;
+                letter-spacing: 1px;
+            }}
+            QPushButton:hover {{
+                color: white;
+            }}
+        """)
 
 
 class AutocompleteLineEdit(QLineEdit):
@@ -663,6 +699,85 @@ class AutocompleteLineEdit(QLineEdit):
         if event.key() in (Qt.Key.Key_Up, Qt.Key.Key_Down):
             self.is_navigating = False
         super().keyReleaseEvent(event)
+
+
+class AddressShortcodeLineEdit(QLineEdit):
+    """
+    A PyQt6 QLineEdit for address fields that supports auto-expansion of shortcodes.
+    Example: Typing 'KT' and pressing Space expands to 'Tehsil Kamalia District Toba Tek Singh'.
+    """
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+
+    def keyReleaseEvent(self, event) -> None:
+        # Trigger expansion on space, comma, or return
+        if event.key() in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Comma):
+            self._check_expansion(event.key())
+        
+        # Also force uppercase if it's not already (common pattern in this app)
+        val = self.text()
+        if val != val.upper():
+            pos = self.cursorPosition()
+            self.setText(val.upper())
+            self.setCursorPosition(pos)
+        
+        super().keyReleaseEvent(event)
+
+    def _check_expansion(self, key):
+        content = self.text()
+        if not content:
+            return
+            
+        # Get latest shortcodes
+        try:
+            shortcodes = settings_service.get_address_shortcodes()
+        except Exception as e:
+            logger.error(f"Failed to fetch shortcodes: {e}")
+            return
+            
+        if not shortcodes:
+            return
+            
+        # text_to_check is the content before the last key press was processed
+        # For Return, it's the whole text. For Space/Comma, it's the text minus the last char.
+        text_to_check = content.strip()
+        if not text_to_check:
+            return
+            
+        words = text_to_check.split()
+        if not words:
+            return
+            
+        # Strip trailing comma if present on the last word for matching
+        last_word_raw = words[-1].upper()
+        last_word = last_word_raw.rstrip(',')
+        
+        if last_word in shortcodes:
+            expansion = shortcodes[last_word].upper()
+            
+            # Reconstruct the text
+            prefix = " ".join(words[:-1])
+            
+            if prefix:
+                new_content = prefix + " " + expansion
+            else:
+                new_content = expansion
+                
+            # Add back comma if it was stripped from last_word_raw
+            if last_word_raw.endswith(','):
+                new_content += ","
+                
+            # Add back the delimiter if it wasn't Return
+            if key == Qt.Key.Key_Space:
+                new_content += " "
+            elif key == Qt.Key.Key_Comma:
+                if not new_content.endswith(','):
+                    new_content += ","
+                new_content += " "
+                
+            self.setText(new_content)
+            self.setCursorPosition(len(new_content))
+            logger.info(f"Expanded shortcode '{last_word}' to '{expansion}'")
 
 
 class MainWindow(QMainWindow):
@@ -895,6 +1010,8 @@ class MainWindow(QMainWindow):
         central = QWidget(self)
         self.setCentralWidget(central)
 
+        self._ui_cfg = settings_service.get_app_config() or {}
+
         # Global Stylesheet for professional look
         self.setStyleSheet("""
             QMainWindow {
@@ -1021,7 +1138,7 @@ class MainWindow(QMainWindow):
         self.nav_header_layout.addWidget(self.sidebar_toggle_btn)
         
         self.nav_header_label = QLabel("EHSAN TRADER")
-        self.nav_header_label.setStyleSheet("color: white; font-size: 16px; font-weight: bold; border: none;")
+        self.nav_header_label.setStyleSheet("color: white; font-weight: bold; border: none;")
         
         self.nav_header_layout.addWidget(self.nav_header_label, 1)
         nav_layout.addWidget(nav_header_container)
@@ -1084,7 +1201,12 @@ class MainWindow(QMainWindow):
             # Group Header
             is_first = (i == 0)
             arrow = "▼" if is_first else "▶"
-            header = GroupHeaderButton(arrow, group_name, self.nav_widget)
+            header = GroupHeaderButton(
+                arrow,
+                group_name,
+                self.nav_widget,
+                font_size=int(self._ui_cfg.get("sidebar_group_font_size", 12) or 12),
+            )
             header.setChecked(is_first)
             header.clicked.connect(self._on_group_header_clicked)
             self._group_header_manager.addButton(header)
@@ -1095,28 +1217,15 @@ class MainWindow(QMainWindow):
             for key in keys:
                 title = self._pages[key].windowTitle()
                 icon = self.nav_icons.get(key, "🔹")
-                button = NavigationButton(icon, title, key, self.nav_widget)
-                button.setStyleSheet("""
-                    NavigationButton {
-                        background-color: transparent;
-                        color: #bdc3c7;
-                        border: none;
-                        border-left: 4px solid transparent;
-                        text-align: left;
-                        padding: 10px 15px;
-                        font-size: 13px;
-                        border-radius: 0;
-                    }
-                    NavigationButton:hover {
-                        background-color: #3e4f5f;
-                        color: white;
-                    }
-                    NavigationButton:checked {
-                        background-color: #3498db;
-                        color: white;
-                        border-left: 4px solid #2980b9;
-                    }
-                """)
+                button = NavigationButton(
+                    icon,
+                    title,
+                    key,
+                    self.nav_widget,
+                    expanded_font_size=int(self._ui_cfg.get("sidebar_font_size", 15) or 15),
+                    collapsed_font_size=int(self._ui_cfg.get("sidebar_collapsed_font_size", 18) or 18),
+                )
+                button.set_collapsed(self._is_sidebar_collapsed)
                 button.clicked.connect(self._on_nav_clicked)  # type: ignore[arg-type]
                 button.setVisible(is_first) # Only first group visible by default
                 nav_layout.addWidget(button)
@@ -1129,48 +1238,50 @@ class MainWindow(QMainWindow):
         self.footer_update_btn = QPushButton("🔄 Check for Updates")
         self.footer_update_btn.setToolTip("Check for latest version and new features")
         self.footer_update_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.footer_update_btn.setStyleSheet("""
-            QPushButton {
+        self.footer_update_btn.setStyleSheet(f"""
+            QPushButton {{
                 background-color: transparent;
                 color: #bdc3c7;
                 border: none;
                 border-left: 4px solid transparent;
                 text-align: left;
                 padding: 15px 20px;
-                font-size: 13px;
+                font-size: {int(self._ui_cfg.get("sidebar_footer_font_size", 15) or 15)}px;
                 border-radius: 0;
-            }
-            QPushButton:hover {
+            }}
+            QPushButton:hover {{
                 background-color: #34495e;
                 color: white;
                 border-left: 4px solid #3498db;
-            }
+            }}
         """)
         self.footer_update_btn.clicked.connect(self._on_manual_update_check)
         nav_layout.addWidget(self.footer_update_btn)
 
         # Exit Button
         self.exit_btn = QPushButton("🚪 Exit Application")
-        self.exit_btn.setStyleSheet("""
-            QPushButton {
+        self.exit_btn.setStyleSheet(f"""
+            QPushButton {{
                 background-color: transparent;
                 color: #e74c3c;
                 border: none;
                 border-left: 4px solid transparent;
                 text-align: left;
                 padding: 15px 20px;
-                font-size: 14px;
+                font-size: {int(self._ui_cfg.get("sidebar_exit_font_size", 16) or 16)}px;
                 font-weight: bold;
                 border-radius: 0;
-            }
-            QPushButton:hover {
+            }}
+            QPushButton:hover {{
                 background-color: #c0392b;
                 color: white;
-            }
+            }}
         """)
         self.exit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.exit_btn.clicked.connect(self.close)
         nav_layout.addWidget(self.exit_btn)
+
+        self.apply_sidebar_font_settings(self._ui_cfg)
 
         self._select_page("dashboard")
         self._update_fbr_submitted_counter() # Initial load of counter state
@@ -1224,86 +1335,7 @@ class MainWindow(QMainWindow):
             self.nav_header_layout.setContentsMargins(15, 15, 15, 15)
             self.nav_header_layout.setSpacing(10)
             self.nav_header_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        
-        # Update Footer buttons text and style
-        if self._is_sidebar_collapsed:
-            self.footer_update_btn.setText("🔄")
-            self.footer_update_btn.setToolTip("Check for Updates")
-            self.footer_update_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: transparent;
-                    color: #bdc3c7;
-                    border: none;
-                    border-left: 4px solid transparent;
-                    text-align: center;
-                    padding: 15px 0px;
-                    font-size: 18px;
-                    border-radius: 0;
-                }
-                QPushButton:hover {
-                    background-color: #34495e;
-                    color: white;
-                    border-left: 4px solid #3498db;
-                }
-            """)
-            self.exit_btn.setText("🚪")
-            self.exit_btn.setToolTip("Exit Application")
-            self.exit_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: transparent;
-                    color: #e74c3c;
-                    border: none;
-                    border-left: 4px solid transparent;
-                    text-align: center;
-                    padding: 15px 0px;
-                    font-size: 18px;
-                    font-weight: bold;
-                    border-radius: 0;
-                }
-                QPushButton:hover {
-                    background-color: #c0392b;
-                    color: white;
-                }
-            """)
-        else:
-            self.footer_update_btn.setText("🔄 Check for Updates")
-            self.footer_update_btn.setToolTip("")
-            self.footer_update_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: transparent;
-                    color: #bdc3c7;
-                    border: none;
-                    border-left: 4px solid transparent;
-                    text-align: left;
-                    padding: 15px 20px;
-                    font-size: 13px;
-                    border-radius: 0;
-                }
-                QPushButton:hover {
-                    background-color: #34495e;
-                    color: white;
-                    border-left: 4px solid #3498db;
-                }
-            """)
-            self.exit_btn.setText("🚪 Exit Application")
-            self.exit_btn.setToolTip("")
-            self.exit_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: transparent;
-                    color: #e74c3c;
-                    border: none;
-                    border-left: 4px solid transparent;
-                    text-align: left;
-                    padding: 15px 20px;
-                    font-size: 14px;
-                    font-weight: bold;
-                    border-radius: 0;
-                }
-                QPushButton:hover {
-                    background-color: #c0392b;
-                    color: white;
-                }
-            """)
+        self.apply_sidebar_font_settings(self._ui_cfg)
 
         # Update Group Headers and Nav Buttons
         for group_name, header in self._group_headers.items():
@@ -1319,6 +1351,114 @@ class MainWindow(QMainWindow):
                 else:
                     # Restore group-based visibility when expanded
                     btn.setVisible(header.isChecked())
+
+    def apply_sidebar_font_settings(self, cfg: dict) -> None:
+        self._ui_cfg = {**(getattr(self, "_ui_cfg", {}) or {}), **(cfg or {})}
+        sidebar_font_size = max(8, min(24, int(self._ui_cfg.get("sidebar_font_size", 15) or 15)))
+        sidebar_group_font_size = max(8, min(24, int(self._ui_cfg.get("sidebar_group_font_size", 12) or 12)))
+        sidebar_header_font_size = max(8, min(24, int(self._ui_cfg.get("sidebar_header_font_size", 18) or 18)))
+        sidebar_footer_font_size = max(8, min(24, int(self._ui_cfg.get("sidebar_footer_font_size", 15) or 15)))
+        sidebar_exit_font_size = max(8, min(24, int(self._ui_cfg.get("sidebar_exit_font_size", 16) or 16)))
+        sidebar_collapsed_font_size = max(8, min(24, int(self._ui_cfg.get("sidebar_collapsed_font_size", 18) or 18)))
+
+        if hasattr(self, "nav_header_label"):
+            self.nav_header_label.setStyleSheet(
+                f"color: white; font-size: {sidebar_header_font_size}px; font-weight: bold; border: none;"
+            )
+
+        for header in getattr(self, "_group_headers", {}).values():
+            if hasattr(header, "set_font_size"):
+                header.set_font_size(sidebar_group_font_size)
+
+        for btn in getattr(self, "_nav_buttons", {}).values():
+            if hasattr(btn, "set_font_sizes"):
+                btn.set_font_sizes(sidebar_font_size, sidebar_collapsed_font_size)
+            if hasattr(btn, "set_collapsed"):
+                btn.set_collapsed(self._is_sidebar_collapsed)
+
+        if hasattr(self, "footer_update_btn"):
+            if self._is_sidebar_collapsed:
+                self.footer_update_btn.setText("🔄")
+                self.footer_update_btn.setToolTip("Check for Updates")
+                self.footer_update_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: transparent;
+                        color: #bdc3c7;
+                        border: none;
+                        border-left: 4px solid transparent;
+                        text-align: center;
+                        padding: 15px 0px;
+                        font-size: {sidebar_collapsed_font_size}px;
+                        border-radius: 0;
+                    }}
+                    QPushButton:hover {{
+                        background-color: #34495e;
+                        color: white;
+                        border-left: 4px solid #3498db;
+                    }}
+                """)
+            else:
+                self.footer_update_btn.setText("🔄 Check for Updates")
+                self.footer_update_btn.setToolTip("")
+                self.footer_update_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: transparent;
+                        color: #bdc3c7;
+                        border: none;
+                        border-left: 4px solid transparent;
+                        text-align: left;
+                        padding: 15px 20px;
+                        font-size: {sidebar_footer_font_size}px;
+                        border-radius: 0;
+                    }}
+                    QPushButton:hover {{
+                        background-color: #34495e;
+                        color: white;
+                        border-left: 4px solid #3498db;
+                    }}
+                """)
+
+        if hasattr(self, "exit_btn"):
+            if self._is_sidebar_collapsed:
+                self.exit_btn.setText("🚪")
+                self.exit_btn.setToolTip("Exit Application")
+                self.exit_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: transparent;
+                        color: #e74c3c;
+                        border: none;
+                        border-left: 4px solid transparent;
+                        text-align: center;
+                        padding: 15px 0px;
+                        font-size: {sidebar_collapsed_font_size}px;
+                        font-weight: bold;
+                        border-radius: 0;
+                    }}
+                    QPushButton:hover {{
+                        background-color: #c0392b;
+                        color: white;
+                    }}
+                """)
+            else:
+                self.exit_btn.setText("🚪 Exit Application")
+                self.exit_btn.setToolTip("")
+                self.exit_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: transparent;
+                        color: #e74c3c;
+                        border: none;
+                        border-left: 4px solid transparent;
+                        text-align: left;
+                        padding: 15px 20px;
+                        font-size: {sidebar_exit_font_size}px;
+                        font-weight: bold;
+                        border-radius: 0;
+                    }}
+                    QPushButton:hover {{
+                        background-color: #c0392b;
+                        color: white;
+                    }}
+                """)
 
     def _select_page(self, key: str) -> None:
         if key not in self._pages:
@@ -1650,10 +1790,10 @@ class MainWindow(QMainWindow):
         form_grid = QGridLayout()
         form_grid.setSpacing(15)
 
-        def add_field(row, col, label_text):
+        def add_field(row, col, label_text, widget_factory=QLineEdit):
             lbl = QLabel(label_text)
             lbl.setStyleSheet("font-weight: bold; color: #7f8c8d;")
-            edit = QLineEdit()
+            edit = widget_factory()
             edit.setMinimumHeight(35)
             edit.setStyleSheet("background-color: #f9f9f9; border: 1px solid #ddd; padding: 0 10px;")
             form_grid.addWidget(lbl, row, col)
@@ -1661,11 +1801,42 @@ class MainWindow(QMainWindow):
             return edit
 
         self.print_field_invoice = add_field(0, 0, "Invoice Number")
-        self.print_field_fbr = add_field(0, 1, "FBR Number")
+        self.print_field_fbr = add_field(0, 1, "FBR Generated ID")
         self.print_field_date = add_field(2, 0, "Date")
         self.print_field_customer = add_field(2, 1, "Customer Name")
         self.print_field_cnic = add_field(4, 0, "Customer CNIC")
-        self.print_field_motorcycle = add_field(4, 1, "Motorcycle Model")
+        father_lbl = QLabel("Father / Husband Name")
+        father_lbl.setStyleSheet("font-weight: bold; color: #7f8c8d;")
+        form_grid.addWidget(father_lbl, 4, 1)
+        father_row = QWidget()
+        father_row_layout = QHBoxLayout(father_row)
+        father_row_layout.setContentsMargins(0, 0, 0, 0)
+        father_row_layout.setSpacing(10)
+        self.print_field_relation = QComboBox()
+        self.print_field_relation.addItems(["S/O", "D/O", "W/O"])
+        self.print_field_relation.setMinimumHeight(35)
+        self.print_field_relation.setFixedWidth(80)
+        self.print_field_relation.setStyleSheet("background-color: #f9f9f9; border: 1px solid #ddd; padding: 0 6px;")
+        self.print_field_father = QLineEdit()
+        self.print_field_father.setMinimumHeight(35)
+        self.print_field_father.setStyleSheet("background-color: #f9f9f9; border: 1px solid #ddd; padding: 0 10px;")
+        father_row_layout.addWidget(self.print_field_relation)
+        father_row_layout.addWidget(self.print_field_father, 1)
+        form_grid.addWidget(father_row, 5, 1)
+        self.print_field_address = add_field(6, 0, "Address", AddressShortcodeLineEdit)
+        self.print_field_model = add_field(6, 1, "Model")
+        self.print_field_color = add_field(8, 0, "Color")
+
+        qr_lbl = QLabel("FBR Generated ID QR Code")
+        qr_lbl.setStyleSheet("font-weight: bold; color: #7f8c8d;")
+        self.print_field_qr = QLabel("")
+        self.print_field_qr.setMinimumHeight(120)
+        self.print_field_qr.setMinimumWidth(120)
+        self.print_field_qr.setFixedSize(140, 140)
+        self.print_field_qr.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.print_field_qr.setStyleSheet("background-color: #ffffff; border: 1px solid #ddd;")
+        form_grid.addWidget(qr_lbl, 8, 1)
+        form_grid.addWidget(self.print_field_qr, 9, 1)
         
         results_layout.addLayout(form_grid)
 
@@ -1722,13 +1893,47 @@ class MainWindow(QMainWindow):
             # Display Results in "Editable" fields
             self.current_print_invoice = invoice # Store for button actions
             cust = invoice.customer
+            first_item = invoice.items[0] if invoice.items else None
+            bike = first_item.motorcycle if first_item else None
             
             self.print_field_invoice.setText(invoice.invoice_number or "")
             self.print_field_fbr.setText(invoice.fbr_invoice_number or "")
             self.print_field_date.setText(invoice.datetime.strftime('%Y-%m-%d %H:%M') if invoice.datetime else "")
             self.print_field_customer.setText(cust.name if cust else "")
             self.print_field_cnic.setText(cust.cnic if cust else "")
-            self.print_field_motorcycle.setText(invoice.items[0].item_name if invoice.items else "")
+            self.print_field_father.setText((cust.father_name if cust else "") or "")
+            if hasattr(self, "print_field_relation"):
+                idx = self.print_field_relation.findText("S/O")
+                if idx >= 0:
+                    self.print_field_relation.setCurrentIndex(idx)
+            self.print_field_address.setText((cust.address if cust else "") or "")
+            self.print_field_model.setText((bike.model if bike else (first_item.item_name if first_item else "")) or "")
+            self.print_field_color.setText((bike.color if bike else "") or "")
+
+            self._print_doc_qr_base64 = ""
+            self.print_field_qr.setPixmap(QPixmap())
+            fbr_id = (invoice.fbr_invoice_number or "").strip()
+            if fbr_id:
+                try:
+                    qr = qrcode.QRCode(version=1, box_size=8, border=2)
+                    qr.add_data(fbr_id)
+                    qr.make(fit=True)
+                    img = qr.make_image(fill_color="black", back_color="white")
+                    buffered = io.BytesIO()
+                    img.save(buffered, format="PNG")
+                    png_bytes = buffered.getvalue()
+                    self._print_doc_qr_base64 = base64.b64encode(png_bytes).decode()
+                    pixmap = QPixmap()
+                    pixmap.loadFromData(png_bytes, "PNG")
+                    self.print_field_qr.setPixmap(
+                        pixmap.scaled(
+                            self.print_field_qr.size(),
+                            Qt.AspectRatioMode.KeepAspectRatio,
+                            Qt.TransformationMode.SmoothTransformation,
+                        )
+                    )
+                except Exception:
+                    self._print_doc_qr_base64 = ""
             
             # Connect actions (disconnect first to avoid multiple triggers)
             try: self.print_page_inv_btn.clicked.disconnect()
@@ -1736,8 +1941,8 @@ class MainWindow(QMainWindow):
             try: self.print_page_al_btn.clicked.disconnect()
             except: pass
             
-            self.print_page_inv_btn.clicked.connect(lambda: self._print_invoice_standalone(self.current_print_invoice))
-            self.print_page_al_btn.clicked.connect(lambda: self._print_authority_letter_standalone(self.current_print_invoice))
+            self.print_page_inv_btn.clicked.connect(self._on_print_page_print_invoice)
+            self.print_page_al_btn.clicked.connect(self._on_print_page_print_authority_letter)
             
             self.print_results_card.setVisible(True)
 
@@ -1746,6 +1951,39 @@ class MainWindow(QMainWindow):
             self._show_error("Search Error", f"An error occurred while searching: {e}")
         finally:
             db.close()
+
+    def _get_print_page_overrides(self) -> Dict[str, str]:
+        fbr_invoice_number = self.print_field_fbr.text().strip() if hasattr(self, "print_field_fbr") else ""
+        relation_prefix = ""
+        if hasattr(self, "print_field_relation"):
+            relation_prefix = self.print_field_relation.currentText().strip()
+        return {
+            "invoice_number": self.print_field_invoice.text().strip() if hasattr(self, "print_field_invoice") else "",
+            "date": self.print_field_date.text().strip() if hasattr(self, "print_field_date") else "",
+            "customer_name": self.print_field_customer.text().strip() if hasattr(self, "print_field_customer") else "",
+            "customer_cnic": self.print_field_cnic.text().strip() if hasattr(self, "print_field_cnic") else "",
+            "father_name": self.print_field_father.text().strip() if hasattr(self, "print_field_father") else "",
+            "relation_prefix": relation_prefix,
+            "customer_address": self.print_field_address.text().strip() if hasattr(self, "print_field_address") else "",
+            "model": self.print_field_model.text().strip() if hasattr(self, "print_field_model") else "",
+            "color": self.print_field_color.text().strip() if hasattr(self, "print_field_color") else "",
+            "fbr_invoice_number": fbr_invoice_number,
+            "qr_code_base64": getattr(self, "_print_doc_qr_base64", "") or "",
+        }
+
+    def _on_print_page_print_invoice(self) -> None:
+        invoice = getattr(self, "current_print_invoice", None)
+        if not invoice:
+            self._show_error("Error", "No invoice selected for printing.")
+            return
+        self._print_invoice_standalone(invoice, overrides=self._get_print_page_overrides())
+
+    def _on_print_page_print_authority_letter(self) -> None:
+        invoice = getattr(self, "current_print_invoice", None)
+        if not invoice:
+            self._show_error("Error", "No invoice selected for printing.")
+            return
+        self._print_authority_letter_standalone(invoice, overrides=self._get_print_page_overrides())
 
     def _create_reports_page(self) -> QWidget:
         page = QWidget(self)
@@ -2576,7 +2814,7 @@ class MainWindow(QMainWindow):
         self.invoice_buyer_phone_input.textChanged.connect(format_invoice_phone_input)
 
         group1_layout.addWidget(QLabel("Address"), 5, 2)
-        self.invoice_buyer_address_input = QLineEdit()
+        self.invoice_buyer_address_input = AddressShortcodeLineEdit()
         group1_layout.addWidget(self.invoice_buyer_address_input, 5, 3)
 
         def uppercase_invoice_address():
@@ -2853,6 +3091,9 @@ class MainWindow(QMainWindow):
             ("Backup & Maintenance", "💾", "Schedule backups, restore data, and manage storage.", self._open_backup_settings),
             ("System Updates", "🔄", "Check for software updates and view version info.", self._open_app_updates),
             ("SMS & Whatsapp Features", "💬", "Configure SMS gateways, WhatsApp, and bulk campaigns.", self._open_sms_settings),
+            ("Address Shortcodes", "⌨️", "Manage address shortcuts for faster data entry.", self._open_address_shortcodes),
+            ("Urdu Font", "ا", "Enable Urdu Noori Nastaleeq font for Urdu text entry.", self._open_urdu_font_settings),
+            ("Font Customization", "🔤", "Customize fonts and sizes for UI and sidebar (accessibility).", self._open_font_customization),
         ]
 
         for i, (title, icon, desc, callback) in enumerate(categories):
@@ -2924,6 +3165,18 @@ class MainWindow(QMainWindow):
 
     def _open_sms_settings(self):
         dialog = SMSConfigDialog(self)
+        dialog.exec()
+
+    def _open_address_shortcodes(self):
+        dialog = AddressShortcodeDialog(self)
+        dialog.exec()
+
+    def _open_urdu_font_settings(self):
+        dialog = UrduFontDialog(self)
+        dialog.exec()
+
+    def _open_font_customization(self):
+        dialog = FontCustomizationDialog(self)
         dialog.exec()
 
     def _update_app_branding(self, business_name: str) -> None:
@@ -5997,28 +6250,46 @@ class MainWindow(QMainWindow):
         elif clicked == print_letter_btn:
             self._print_authority_letter_standalone(invoice)
 
-    def _print_invoice_standalone(self, invoice: Invoice) -> None:
+    def _print_invoice_standalone(self, invoice: Invoice, overrides: Dict[str, str] | None = None) -> None:
         """Populates and displays the standalone invoice print template."""
         try:
+            o = overrides or {}
             items = []
             total = 0.0
-            for item in invoice.items:
+            model_override = o.get("model", "").strip()
+            color_override = o.get("color", "").strip()
+            for idx, item in enumerate(invoice.items):
                 bike = item.motorcycle
+                sale_value = float(getattr(item, "sale_value", 0.0) or 0.0)
+                sales_tax = float(getattr(item, "tax_charged", 0.0) or 0.0)
+                levy = float(getattr(item, "further_tax", 0.0) or 0.0)
+                line_total = sale_value + sales_tax + levy
+                model_value = bike.model if bike else item.item_name
+                color_value = bike.color if bike else "-"
+                if idx == 0 and model_override:
+                    model_value = model_override
+                if idx == 0 and color_override:
+                    color_value = color_override
                 items.append({
                     "description": item.item_name,
-                    "model": bike.model if bike else item.item_name,
-                    "color": bike.color if bike else "-",
+                    "model": model_value,
+                    "color": color_value,
                     "chassis": bike.chassis_number if bike else "-",
                     "engine": bike.engine_number if bike else "-",
-                    "price": f"{item.sale_value + item.tax_charged + item.further_tax:,.2f}"
+                    "sale_value": f"{sale_value:,.0f}",
+                    "sales_tax": f"{sales_tax:,.0f}",
+                    "levy": f"{levy:,.0f}",
+                    "total_line": f"{line_total:,.0f}",
+                    "price": f"{line_total:,.0f}",
                 })
-                total += (item.sale_value + item.tax_charged + item.further_tax)
+                total += line_total
 
             # Generate QR Base64
-            qr_base64 = ""
-            if invoice.fbr_invoice_number:
+            qr_base64 = (o.get("qr_code_base64") or "").strip()
+            fbr_invoice_number = (o.get("fbr_invoice_number") or invoice.fbr_invoice_number or "PENDING").strip()
+            if not qr_base64 and fbr_invoice_number and fbr_invoice_number != "PENDING":
                 qr = qrcode.QRCode(version=1, box_size=10, border=2)
-                qr.add_data(invoice.fbr_invoice_number)
+                qr.add_data(fbr_invoice_number)
                 qr.make(fit=True)
                 img = qr.make_image(fill_color="black", back_color="white")
                 buffered = io.BytesIO()
@@ -6026,20 +6297,24 @@ class MainWindow(QMainWindow):
                 qr_base64 = base64.b64encode(buffered.getvalue()).decode()
 
             cust = invoice.customer
+            date_value: object = invoice.datetime
+            if (o.get("date") or "").strip():
+                date_value = o["date"].strip()
             data = {
-                "invoice_number": invoice.invoice_number,
-                "date": invoice.datetime,
-                "customer_name": cust.name if cust else "-",
-                "father_name": (cust.father_name if cust else "-") or "-",
-                "customer_cnic": cust.cnic if cust else "-",
+                "invoice_number": (o.get("invoice_number") or invoice.invoice_number or "").strip(),
+                "date": date_value,
+                "customer_name": (o.get("customer_name") or (cust.name if cust else "-") or "-").strip(),
+                "father_name": (o.get("father_name") or (cust.father_name if cust else "-") or "-").strip(),
+                "relation_prefix": (o.get("relation_prefix") or "S/O").strip(),
+                "customer_cnic": (o.get("customer_cnic") or (cust.cnic if cust else "-") or "-").strip(),
                 "customer_phone": (cust.phone if cust else "-") or "-",
-                "customer_address": (cust.address if cust else "-") or "-",
+                "customer_address": (o.get("customer_address") or (cust.address if cust else "-") or "-").strip(),
                 "customer_ntn": (cust.ntn if cust else "-") or "-",
                 "items": items,
-                "total_amount": f"{total:,.2f}",
-                "amount_in_words": "N/A", # Optional: add number-to-words utility
-                "fbr_invoice_number": invoice.fbr_invoice_number or "PENDING",
-                "qr_code_base64": qr_base64
+                "total_amount": f"{total:,.0f}",
+                "registration_letter_no": str(invoice.id or ""),
+                "fbr_invoice_number": fbr_invoice_number,
+                "qr_code_base64": qr_base64,
             }
             
             html = print_service_v2.render_invoice(data)
@@ -6048,27 +6323,33 @@ class MainWindow(QMainWindow):
             logger.error(f"Standalone print failed: {e}", exc_info=True)
             self._show_error("Print Error", f"Failed to generate print: {e}")
 
-    def _print_authority_letter_standalone(self, invoice: Invoice) -> None:
+    def _print_authority_letter_standalone(self, invoice: Invoice, overrides: Dict[str, str] | None = None) -> None:
         """Populates and displays the standalone authority letter template."""
         try:
+            o = overrides or {}
             # Take the first item for the letter (standard for vehicle registration)
             item = invoice.items[0] if invoice.items else None
             if not item: return
 
             bike = item.motorcycle
             cust = invoice.customer
+            date_value: object = invoice.datetime
+            if (o.get("date") or "").strip():
+                date_value = o["date"].strip()
             data = {
                 "serial_number": invoice.id,
-                "date": invoice.datetime,
-                "customer_name": cust.name if cust else "-",
-                "father_name": (cust.father_name if cust else "-") or "-",
-                "customer_cnic": cust.cnic if cust else "-",
-                "customer_address": (cust.address if cust else "-") or "-",
-                "product_model": bike.model if bike else item.item_name,
-                "product_color": bike.color if bike else "-",
+                "date": date_value,
+                "customer_name": (o.get("customer_name") or (cust.name if cust else "-") or "-").strip(),
+                "father_name": (o.get("father_name") or (cust.father_name if cust else "-") or "-").strip(),
+                "relation_prefix": (o.get("relation_prefix") or "S/O").strip(),
+                "customer_cnic": (o.get("customer_cnic") or (cust.cnic if cust else "-") or "-").strip(),
+                "customer_address": (o.get("customer_address") or (cust.address if cust else "-") or "-").strip(),
+                "product_model": (o.get("model") or (bike.model if bike else item.item_name) or "-").strip(),
+                "product_color": (o.get("color") or (bike.color if bike else "-") or "-").strip(),
                 "chassis_number": bike.chassis_number if bike else "-",
                 "engine_number": bike.engine_number if bike else "-",
-                "invoice_number": invoice.invoice_number
+                "invoice_number": (o.get("invoice_number") or invoice.invoice_number or "").strip(),
+                "manufacturing_year": getattr(bike, "year", None) if bike else None,
             }
             
             html = print_service_v2.render_authority_letter(data)
@@ -6973,8 +7254,8 @@ class MainWindow(QMainWindow):
                     "balance_amount": booking.balance_amount,
                 }
             )
-            print_service_v2.print_html_direct(html)
-            self.statusBar().showMessage("Print job sent to printer.", 4000)
+            print_service_v2.print_html(html, title="Advance Booking Receipt")
+            self.statusBar().showMessage("Receipt preview opened.", 4000)
         except Exception as e:
             logger.error(f"Advance booking print failed: {e}", exc_info=True)
             self._show_error("Print Error", f"Failed to print receipt: {e}")
@@ -8388,7 +8669,7 @@ class MainWindow(QMainWindow):
         father_input = QLineEdit()
         cnic_input = QLineEdit()
         phone_input = QLineEdit()
-        address_input = QLineEdit()
+        address_input = AddressShortcodeLineEdit()
         ntn_input = QLineEdit()
 
         form_grid.addWidget(QLabel("Full Name:"), 0, 0)
@@ -8831,7 +9112,8 @@ class MainWindow(QMainWindow):
 
             # Address
             form_grid.addWidget(QLabel("Address:"), 4, 0)
-            address_input = QLineEdit(cust.address or "")
+            address_input = AddressShortcodeLineEdit()
+            address_input.setText(cust.address or "")
             form_grid.addWidget(address_input, 4, 1)
 
             # NTN
@@ -9121,7 +9403,7 @@ class MainWindow(QMainWindow):
 
         # Address
         form_grid.addWidget(QLabel("Address:"), 5, 0)
-        address_input = QLineEdit()
+        address_input = AddressShortcodeLineEdit()
         address_input.setPlaceholderText("Enter full business address")
         form_grid.addWidget(address_input, 5, 1)
 

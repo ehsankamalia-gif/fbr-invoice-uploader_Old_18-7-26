@@ -27,7 +27,8 @@ from app.db.models import (
     AuditLog,
     ReportTemplate,
     ReportSchedule,
-    ReportRun
+    ReportRun,
+    PrintTemplateLayout
 )
 import logging
 
