@@ -1,637 +1,405 @@
-from __future__ import annotations
-
-import datetime as dt
-from typing import Dict, List, Optional, Tuple
-
-from PyQt6.QtCore import QAbstractTableModel, QModelIndex, Qt
-from PyQt6.QtGui import QCursor
 from PyQt6.QtWidgets import (
-    QComboBox,
-    QDateEdit,
-    QDialog,
-    QDialogButtonBox,
-    QDoubleSpinBox,
-    QFrame,
-    QGridLayout,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QMenu,
-    QMessageBox,
-    QPushButton,
-    QTabWidget,
-    QTableView,
-    QTextEdit,
-    QVBoxLayout,
-    QWidget,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
+    QDateEdit, QTextEdit, QPushButton, QFormLayout, 
+    QFrame, QCompleter, QTableView, QHeaderView, QMessageBox,
+    QScrollArea, QSizePolicy, QAbstractItemView, QGridLayout
 )
-
-from app.db.session import SessionLocal
-from app.db.models import CreditBookTransaction, Customer
+from PyQt6.QtCore import Qt, QDate, pyqtSignal, QStringListModel, QTimer
+from PyQt6.QtGui import QFont, QStandardItemModel, QStandardItem
 from app.services.credit_book_service import credit_book_service
-
-
-class CreditCustomerRow:
-    def __init__(self, customer_id: int, name: str, cnic: str, phone: str, balance: float) -> None:
-        self.customer_id = customer_id
-        self.name = name
-        self.cnic = cnic
-        self.phone = phone
-        self.balance = balance
-
-
-class CreditTxnRow:
-    def __init__(
-        self,
-        txn_id: int,
-        timestamp: Optional[dt.datetime],
-        customer: str,
-        direction: str,
-        entry_type: str,
-        reference: str,
-        description: str,
-        debit: float,
-        credit: float,
-        balance: Optional[float],
-        is_void: bool,
-    ) -> None:
-        self.txn_id = txn_id
-        self.timestamp = timestamp
-        self.customer = customer
-        self.direction = direction
-        self.entry_type = entry_type
-        self.reference = reference
-        self.description = description
-        self.debit = debit
-        self.credit = credit
-        self.balance = balance
-        self.is_void = is_void
-
-
-class CreditCustomersTableModel(QAbstractTableModel):
-    headers = ["Customer", "CNIC", "Phone", "Balance"]
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._rows: List[CreditCustomerRow] = []
-
-    def rowCount(self, parent: QModelIndex | None = None) -> int:
-        return len(self._rows)
-
-    def columnCount(self, parent: QModelIndex | None = None) -> int:
-        return len(self.headers)
-
-    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
-        if not index.isValid():
-            return None
-        row = self._rows[index.row()]
-        col = index.column()
-
-        if role == Qt.ItemDataRole.DisplayRole:
-            if col == 0:
-                return row.name
-            if col == 1:
-                return row.cnic
-            if col == 2:
-                return row.phone
-            if col == 3:
-                return f"{row.balance:,.2f}"
-
-        if role == Qt.ItemDataRole.TextAlignmentRole:
-            if col == 3:
-                return Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-
-        if role == Qt.ItemDataRole.ForegroundRole:
-            if col == 3 and row.balance < 0:
-                return Qt.GlobalColor.red
-        return None
-
-    def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.ItemDataRole.DisplayRole):
-        if role != Qt.ItemDataRole.DisplayRole:
-            return None
-        if orientation == Qt.Orientation.Horizontal and 0 <= section < len(self.headers):
-            return self.headers[section]
-        return super().headerData(section, orientation, role)
-
-    def update_rows(self, rows: List[CreditCustomerRow]) -> None:
-        self.beginResetModel()
-        self._rows = rows
-        self.endResetModel()
-
-
-class CreditTransactionsTableModel(QAbstractTableModel):
-    headers = ["Date/Time", "Customer", "Type", "Direction", "Reference", "Description", "Debit", "Credit", "Balance", "Status"]
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._rows: List[CreditTxnRow] = []
-
-    def rowCount(self, parent: QModelIndex | None = None) -> int:
-        return len(self._rows)
-
-    def columnCount(self, parent: QModelIndex | None = None) -> int:
-        return len(self.headers)
-
-    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
-        if not index.isValid():
-            return None
-        row = self._rows[index.row()]
-        col = index.column()
-
-        if role == Qt.ItemDataRole.DisplayRole:
-            if col == 0:
-                return row.timestamp.strftime("%Y-%m-%d %H:%M") if row.timestamp else ""
-            if col == 1:
-                return row.customer
-            if col == 2:
-                return row.entry_type
-            if col == 3:
-                return row.direction
-            if col == 4:
-                return row.reference
-            if col == 5:
-                return row.description
-            if col == 6:
-                return f"{row.debit:,.2f}" if row.debit else ""
-            if col == 7:
-                return f"{row.credit:,.2f}" if row.credit else ""
-            if col == 8:
-                return f"{row.balance:,.2f}" if row.balance is not None else ""
-            if col == 9:
-                return "VOID" if row.is_void else ""
-
-        if role == Qt.ItemDataRole.TextAlignmentRole:
-            if col in (6, 7, 8):
-                return Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            if col in (0, 2, 3, 9):
-                return Qt.AlignmentFlag.AlignCenter
-            return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-
-        if role == Qt.ItemDataRole.ForegroundRole:
-            if row.is_void:
-                return Qt.GlobalColor.darkGray
-            if col == 6 and row.debit:
-                return Qt.GlobalColor.darkRed
-            if col == 7 and row.credit:
-                return Qt.GlobalColor.darkGreen
-        return None
-
-    def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.ItemDataRole.DisplayRole):
-        if role != Qt.ItemDataRole.DisplayRole:
-            return None
-        if orientation == Qt.Orientation.Horizontal and 0 <= section < len(self.headers):
-            return self.headers[section]
-        return super().headerData(section, orientation, role)
-
-    def update_rows(self, rows: List[CreditTxnRow]) -> None:
-        self.beginResetModel()
-        self._rows = rows
-        self.endResetModel()
-
+import datetime as dt
+from app.core.logger import logger
 
 class CreditBookPage(QWidget):
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Credit Book")
+        self.setup_ui()
+        self.load_data()
 
-        self._customer_cache: List[Tuple[int, str]] = []
-        self._customer_label_to_id: Dict[str, int] = {}
+    def setup_ui(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(15)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(20)
+        # Header
+        header_label = QLabel("Credit Book Management")
+        header_label.setObjectName("pageHeader")
+        header_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #2c3e50;")
+        main_layout.addWidget(header_label)
 
-        header_layout = QHBoxLayout()
-        header = QLabel("Credit Book")
-        header.setObjectName("pageHeader")
-        header_layout.addWidget(header)
-        header_layout.addStretch(1)
+        # Scrollable Area for Form
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setSpacing(20)
 
-        self.btn_refresh = QPushButton("↻ Refresh")
-        self.btn_refresh.setObjectName("resetButton")
-        self.btn_refresh.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_refresh.clicked.connect(self.refresh)  # type: ignore[arg-type]
-
-        self.btn_new = QPushButton("+ New Entry")
-        self.btn_new.setObjectName("primaryButton")
-        self.btn_new.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_new.clicked.connect(self._open_new_entry_dialog)  # type: ignore[arg-type]
-
-        header_layout.addWidget(self.btn_refresh)
-        header_layout.addWidget(self.btn_new)
-        layout.addLayout(header_layout)
-
-        stats_layout = QHBoxLayout()
-        stats_layout.setSpacing(15)
-        self.card_total_receivable = self._create_stat_card("TOTAL RECEIVABLE", "0.00", "#3498db")
-        self.card_total_debit = self._create_stat_card("TOTAL CHARGES (DEBIT)", "0.00", "#e74c3c")
-        self.card_total_credit = self._create_stat_card("TOTAL PAYMENTS (CREDIT)", "0.00", "#2ecc71")
-        stats_layout.addWidget(self.card_total_receivable)
-        stats_layout.addWidget(self.card_total_debit)
-        stats_layout.addWidget(self.card_total_credit)
-        layout.addLayout(stats_layout)
-
-        self.tabs = QTabWidget()
-        layout.addWidget(self.tabs, 1)
-
-        self.tab_customers = QWidget()
-        self.tab_transactions = QWidget()
-        self.tabs.addTab(self.tab_customers, "Customers")
-        self.tabs.addTab(self.tab_transactions, "Transactions")
-
-        self._build_customers_tab()
-        self._build_transactions_tab()
-
-        self.refresh()
-
-    def _create_stat_card(self, title: str, value: str, color: str) -> QFrame:
-        card = QFrame()
-        card.setObjectName("statCard")
-        card.setStyleSheet(
-            f"""
-            QFrame#statCard {{
-                background: white;
-                border-radius: 10px;
-                border-top: 4px solid {color};
-                padding: 12px;
-            }}
-            """
-        )
-        v = QVBoxLayout(card)
-        v.setContentsMargins(15, 15, 15, 15)
-        v.setSpacing(6)
-        t = QLabel(title)
-        t.setStyleSheet("color: #6c757d; font-size: 11px; font-weight: bold; letter-spacing: 0.5px;")
-        val = QLabel(value)
-        val.setStyleSheet(f"color: {color}; font-size: 24px; font-weight: bold;")
-        v.addWidget(t)
-        v.addWidget(val)
-        card.value_label = val
-        return card
-
-    def _build_customers_tab(self) -> None:
-        layout = QVBoxLayout(self.tab_customers)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(15)
-
-        controls = QFrame()
-        controls.setObjectName("formGroup")
-        controls_layout = QHBoxLayout(controls)
-        controls_layout.setContentsMargins(15, 10, 15, 10)
-        controls_layout.setSpacing(15)
-
-        controls_layout.addWidget(QLabel("Search:"))
-        self.customer_search = QLineEdit()
-        self.customer_search.setPlaceholderText("Name / CNIC / phone...")
-        self.customer_search.textChanged.connect(self.refresh)  # type: ignore[arg-type]
-        controls_layout.addWidget(self.customer_search, 1)
-
-        layout.addWidget(controls)
-
-        self.customers_model = CreditCustomersTableModel()
-        self.customers_table = QTableView()
-        self.customers_table.setModel(self.customers_model)
-        self.customers_table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
-        self.customers_table.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
-        self.customers_table.doubleClicked.connect(self._on_customer_double_clicked)  # type: ignore[arg-type]
-        self.customers_table.horizontalHeader().setStretchLastSection(True)
-        self.customers_table.verticalHeader().setVisible(False)
-        self.customers_table.setAlternatingRowColors(True)
-        layout.addWidget(self.customers_table, 1)
-
-    def _build_transactions_tab(self) -> None:
-        layout = QVBoxLayout(self.tab_transactions)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(15)
-
-        controls = QFrame()
-        controls.setObjectName("formGroup")
-        controls_layout = QHBoxLayout(controls)
-        controls_layout.setContentsMargins(15, 10, 15, 10)
-        controls_layout.setSpacing(15)
-
-        controls_layout.addWidget(QLabel("Customer:"))
-        self.txn_customer_combo = QComboBox()
-        self.txn_customer_combo.setEditable(True)
-        self.txn_customer_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.txn_customer_combo.currentTextChanged.connect(self.refresh)  # type: ignore[arg-type]
-        controls_layout.addWidget(self.txn_customer_combo, 1)
-
-        controls_layout.addWidget(QLabel("Direction:"))
-        self.txn_direction_combo = QComboBox()
-        self.txn_direction_combo.addItems(["All", "DEBIT", "CREDIT"])
-        self.txn_direction_combo.currentTextChanged.connect(self.refresh)  # type: ignore[arg-type]
-        controls_layout.addWidget(self.txn_direction_combo)
-
-        controls_layout.addWidget(QLabel("Search:"))
-        self.txn_search = QLineEdit()
-        self.txn_search.setPlaceholderText("Ref / description / customer...")
-        self.txn_search.textChanged.connect(self.refresh)  # type: ignore[arg-type]
-        controls_layout.addWidget(self.txn_search, 1)
-
-        layout.addWidget(controls)
-
-        self.txn_model = CreditTransactionsTableModel()
-        self.txn_table = QTableView()
-        self.txn_table.setModel(self.txn_model)
-        self.txn_table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
-        self.txn_table.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
-        self.txn_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.txn_table.customContextMenuRequested.connect(self._on_txn_context_menu)  # type: ignore[arg-type]
-        self.txn_table.horizontalHeader().setStretchLastSection(True)
-        self.txn_table.verticalHeader().setVisible(False)
-        self.txn_table.setAlternatingRowColors(True)
-        layout.addWidget(self.txn_table, 1)
-
-    def _load_customers_cache(self) -> None:
-        db = SessionLocal()
-        try:
-            customers = (
-                db.query(Customer)
-                .filter(Customer.is_deleted.is_(False))
-                .order_by(Customer.name.asc())
-                .limit(5000)
-                .all()
-            )
-            items: List[Tuple[int, str]] = []
-            label_to_id: Dict[str, int] = {}
-            for c in customers:
-                label = f"{c.name or ''} | {c.cnic or ''} | {c.phone or ''} | #{c.id}"
-                items.append((int(c.id), label))
-                label_to_id[label] = int(c.id)
-
-            self._customer_cache = items
-            self._customer_label_to_id = label_to_id
-
-            current = self.txn_customer_combo.currentText()
-            self.txn_customer_combo.blockSignals(True)
-            self.txn_customer_combo.clear()
-            self.txn_customer_combo.addItem("All Customers")
-            for _, label in items:
-                self.txn_customer_combo.addItem(label)
-            if current:
-                idx = self.txn_customer_combo.findText(current)
-                self.txn_customer_combo.setCurrentIndex(idx if idx >= 0 else 0)
-            else:
-                self.txn_customer_combo.setCurrentIndex(0)
-            self.txn_customer_combo.blockSignals(False)
-        finally:
-            db.close()
-
-    def _selected_customer_id(self) -> Optional[int]:
-        label = (self.txn_customer_combo.currentText() or "").strip()
-        if not label or label == "All Customers":
-            return None
-        return self._customer_label_to_id.get(label)
-
-    def _on_customer_double_clicked(self, index: QModelIndex) -> None:
-        if not index.isValid():
-            return
-        row = self.customers_model._rows[index.row()]
-        target_label = None
-        for cid, label in self._customer_cache:
-            if cid == row.customer_id:
-                target_label = label
-                break
-        if target_label:
-            idx = self.txn_customer_combo.findText(target_label)
-            if idx >= 0:
-                self.txn_customer_combo.setCurrentIndex(idx)
-        self.tabs.setCurrentWidget(self.tab_transactions)
-        self.refresh()
-
-    def _on_txn_context_menu(self, pos) -> None:
-        index = self.txn_table.indexAt(pos)
-        if not index.isValid():
-            return
-        row = self.txn_model._rows[index.row()]
-        if row.txn_id <= 0:
-            return
-
-        menu = QMenu(self)
-        void_action = menu.addAction("Void Entry")
-        if row.is_void:
-            void_action.setEnabled(False)
-        action = menu.exec(self.txn_table.viewport().mapToGlobal(pos))
-        if action == void_action:
-            self._void_transaction(row.txn_id)
-
-    def _void_transaction(self, txn_id: int) -> None:
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Void Credit Book Entry")
-        dlg.setFixedWidth(520)
-        lay = QVBoxLayout(dlg)
-        lay.setContentsMargins(20, 20, 20, 20)
-        lay.setSpacing(12)
-        lay.addWidget(QLabel("Reason (required):"))
-        reason = QTextEdit()
-        reason.setFixedHeight(90)
-        lay.addWidget(reason)
-        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        btns.button(QDialogButtonBox.StandardButton.Ok).setText("Void Entry")
-        btns.accepted.connect(dlg.accept)
-        btns.rejected.connect(dlg.reject)
-        lay.addWidget(btns)
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
-        r = reason.toPlainText().strip()
-        db = SessionLocal()
-        try:
-            credit_book_service.void_transaction(db, txn_id, r)
-            QMessageBox.information(self, "Voided", "Entry has been voided successfully.")
-            self.refresh()
-        except Exception as exc:
-            QMessageBox.critical(self, "Error", str(exc))
-        finally:
-            db.close()
-
-    def _open_new_entry_dialog(self) -> None:
-        dlg = QDialog(self)
-        dlg.setWindowTitle("New Credit Book Entry")
-        dlg.setFixedWidth(520)
-        dlg.setStyleSheet(
-            """
-            QDialog { background-color: white; }
-            QLabel { font-size: 13px; color: #2c3e50; font-weight: 500; }
-            QLineEdit, QComboBox, QDoubleSpinBox, QDateEdit, QTextEdit {
-                padding: 10px; border: 1px solid #dee2e6; border-radius: 6px;
-                background-color: #f8f9fa; font-size: 13px;
+        # --- Form Section ---
+        form_frame = QFrame()
+        form_frame.setObjectName("formGroup")
+        form_frame.setStyleSheet("""
+            QFrame#formGroup {
+                background-color: #ffffff;
+                border-radius: 8px;
+                border: 1px solid #dcdde1;
             }
-            QPushButton { padding: 10px 25px; border-radius: 6px; font-weight: bold; font-size: 13px; }
-            """
-        )
+        """)
+        form_layout = QGridLayout(form_frame)
+        form_layout.setContentsMargins(25, 25, 25, 25)
+        form_layout.setSpacing(15)
 
-        lay = QVBoxLayout(dlg)
-        lay.setContentsMargins(25, 25, 25, 25)
-        lay.setSpacing(18)
+        # 1. Date Field (Top)
+        form_layout.addWidget(QLabel("Date:"), 0, 0)
+        self.date_edit = QDateEdit()
+        self.date_edit.setCalendarPopup(True)
+        self.date_edit.setDate(QDate.currentDate())
+        self.date_edit.setDisplayFormat("dd-MM-yyyy")
+        self.date_edit.setMinimumWidth(200)
+        form_layout.addWidget(self.date_edit, 0, 1)
 
-        form = QGridLayout()
-        form.setHorizontalSpacing(12)
-        form.setVerticalSpacing(12)
+        # 2. Customer Name
+        form_layout.addWidget(QLabel("Customer/Dealer Name:"), 1, 0)
+        self.customer_input = QLineEdit()
+        self.customer_input.setPlaceholderText("Enter or search customer/dealer...")
+        self.customer_completer = QCompleter()
+        self.customer_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.customer_completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        self.customer_input.setCompleter(self.customer_completer)
+        self.customer_input.textChanged.connect(self.update_customer_suggestions)
+        form_layout.addWidget(self.customer_input, 1, 1, 1, 3)
 
-        customer_combo = QComboBox()
-        customer_combo.setEditable(True)
-        customer_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        customer_combo.addItem("Select Customer")
-        for _, label in self._customer_cache:
-            customer_combo.addItem(label)
+        # 3. Chassis Number
+        form_layout.addWidget(QLabel("Chassis Number:"), 2, 0)
+        self.chassis_input = QLineEdit()
+        self.chassis_input.setPlaceholderText("Enter or search chassis...")
+        self.chassis_completer = QCompleter()
+        self.chassis_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.chassis_input.setCompleter(self.chassis_completer)
+        self.chassis_input.textChanged.connect(self.update_chassis_suggestions)
+        self.chassis_input.editingFinished.connect(self.on_chassis_selected)
+        form_layout.addWidget(self.chassis_input, 2, 1)
 
-        entry_type_combo = QComboBox()
-        entry_type_combo.addItems(["SALE", "PAYMENT", "ADJUSTMENT", "OPENING"])
+        # 4, 5, 6. Auto-filled fields
+        form_layout.addWidget(QLabel("Model:"), 2, 2)
+        self.model_input = QLineEdit()
+        self.model_input.setReadOnly(True)
+        self.model_input.setStyleSheet("background-color: #f5f6fa;")
+        form_layout.addWidget(self.model_input, 2, 3)
 
-        direction_combo = QComboBox()
-        direction_combo.addItems(["DEBIT", "CREDIT"])
-        direction_combo.setEnabled(False)
+        form_layout.addWidget(QLabel("Color:"), 3, 0)
+        self.color_input = QLineEdit()
+        self.color_input.setReadOnly(True)
+        self.color_input.setStyleSheet("background-color: #f5f6fa;")
+        form_layout.addWidget(self.color_input, 3, 1)
 
-        def on_entry_type_changed(txt: str) -> None:
-            t = (txt or "").strip().upper()
-            if t in ("SALE", "OPENING"):
-                direction_combo.setCurrentText("DEBIT")
-                direction_combo.setEnabled(False)
-            elif t == "PAYMENT":
-                direction_combo.setCurrentText("CREDIT")
-                direction_combo.setEnabled(False)
-            else:
-                direction_combo.setEnabled(True)
+        form_layout.addWidget(QLabel("Price:"), 3, 2)
+        self.price_input = QLineEdit()
+        self.price_input.setReadOnly(True)
+        self.price_input.setStyleSheet("background-color: #f5f6fa;")
+        form_layout.addWidget(self.price_input, 3, 3)
 
-        entry_type_combo.currentTextChanged.connect(on_entry_type_changed)  # type: ignore[arg-type]
-        on_entry_type_changed(entry_type_combo.currentText())
+        # 7, 8. Manual Inputs
+        form_layout.addWidget(QLabel("Decided Credit Amount:"), 4, 0)
+        self.decided_amount_input = QLineEdit()
+        self.decided_amount_input.setPlaceholderText("0.00")
+        self.decided_amount_input.textChanged.connect(self.calculate_remaining)
+        form_layout.addWidget(self.decided_amount_input, 4, 1)
 
-        amount_spin = QDoubleSpinBox()
-        amount_spin.setRange(0, 99999999)
-        amount_spin.setDecimals(2)
-        amount_spin.setPrefix("Rs. ")
+        form_layout.addWidget(QLabel("Advance:"), 4, 2)
+        self.advance_input = QLineEdit()
+        self.advance_input.setPlaceholderText("0.00")
+        self.advance_input.textChanged.connect(self.calculate_remaining)
+        form_layout.addWidget(self.advance_input, 4, 3)
 
-        date_edit = QDateEdit()
-        date_edit.setCalendarPopup(True)
-        date_edit.setDate(dt.date.today())
+        # 9. Duration
+        duration_layout = QHBoxLayout()
+        self.months_input = QLineEdit()
+        self.months_input.setPlaceholderText("Months")
+        self.days_input = QLineEdit()
+        self.days_input.setPlaceholderText("Days")
+        duration_layout.addWidget(self.months_input)
+        duration_layout.addWidget(QLabel("M"))
+        duration_layout.addWidget(self.days_input)
+        duration_layout.addWidget(QLabel("D"))
+        
+        form_layout.addWidget(QLabel("Duration:"), 5, 0)
+        form_layout.addLayout(duration_layout, 5, 1)
 
-        ref_input = QLineEdit()
-        ref_input.setPlaceholderText("Optional reference (e.g., INV-123 / RCPT-01)")
+        # 10. Remaining Balance
+        form_layout.addWidget(QLabel("Remaining Balance:"), 5, 2)
+        self.remaining_input = QLineEdit()
+        self.remaining_input.setReadOnly(True)
+        self.remaining_input.setStyleSheet("background-color: #f1f2f6; font-weight: bold; color: #e74c3c;")
+        form_layout.addWidget(self.remaining_input, 5, 3)
 
-        desc_input = QTextEdit()
-        desc_input.setPlaceholderText("Optional description...")
-        desc_input.setFixedHeight(90)
+        # 11. Description
+        form_layout.addWidget(QLabel("Description:"), 6, 0)
+        self.description_input = QTextEdit()
+        self.description_input.setPlaceholderText("Add any additional notes here...")
+        self.description_input.setMaximumHeight(80)
+        form_layout.addWidget(self.description_input, 6, 1, 1, 3)
 
-        form.addWidget(QLabel("Customer"), 0, 0)
-        form.addWidget(customer_combo, 0, 1)
-        form.addWidget(QLabel("Entry Type"), 1, 0)
-        form.addWidget(entry_type_combo, 1, 1)
-        form.addWidget(QLabel("Direction"), 2, 0)
-        form.addWidget(direction_combo, 2, 1)
-        form.addWidget(QLabel("Amount"), 3, 0)
-        form.addWidget(amount_spin, 3, 1)
-        form.addWidget(QLabel("Date"), 4, 0)
-        form.addWidget(date_edit, 4, 1)
-        form.addWidget(QLabel("Reference"), 5, 0)
-        form.addWidget(ref_input, 5, 1)
-        form.addWidget(QLabel("Description"), 6, 0)
-        form.addWidget(desc_input, 6, 1)
+        # Buttons
+        btn_layout = QHBoxLayout()
+        self.save_btn = QPushButton("Save Entry")
+        self.save_btn.setObjectName("primaryButton")
+        self.save_btn.setStyleSheet("""
+            QPushButton#primaryButton {
+                background-color: #3498db;
+                color: white;
+                padding: 10px 20px;
+                border-radius: 5px;
+                font-weight: bold;
+            }
+            QPushButton#primaryButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        self.save_btn.clicked.connect(self.save_entry)
+        
+        self.print_btn = QPushButton("Print Receipt")
+        self.print_btn.setStyleSheet("padding: 10px 20px; background-color: #2ecc71; color: white; font-weight: bold; border-radius: 5px;")
+        self.print_btn.clicked.connect(self.print_receipt)
+        
+        self.clear_btn = QPushButton("Clear Form")
+        self.clear_btn.setStyleSheet("padding: 10px 20px;")
+        self.clear_btn.clicked.connect(self.clear_form)
+        
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.clear_btn)
+        btn_layout.addWidget(self.print_btn)
+        btn_layout.addWidget(self.save_btn)
+        form_layout.addLayout(btn_layout, 7, 0, 1, 4)
 
-        lay.addLayout(form)
+        container_layout.addWidget(form_frame)
 
-        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        btns.accepted.connect(dlg.accept)
-        btns.rejected.connect(dlg.reject)
-        lay.addWidget(btns)
+        # --- Table Section ---
+        table_frame = QFrame()
+        table_layout = QVBoxLayout(table_frame)
+        
+        table_header = QLabel("Recent Credit Entries")
+        table_header.setStyleSheet("font-size: 18px; font-weight: bold; margin-top: 10px;")
+        table_layout.addWidget(table_header)
 
-        if dlg.exec() != QDialog.DialogCode.Accepted:
+        self.table_view = QTableView()
+        self.table_model = QStandardItemModel()
+        self.table_model.setHorizontalHeaderLabels([
+            "Date", "Customer", "Chassis", "Model", "Amount", "Advance", "Remaining", "Duration"
+        ])
+        self.table_view.setModel(self.table_model)
+        self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table_view.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table_view.setAlternatingRowColors(True)
+        self.table_view.setStyleSheet("QTableView { border: 1px solid #dcdde1; }")
+        
+        table_layout.addWidget(self.table_view)
+        container_layout.addWidget(table_frame)
+
+        scroll.setWidget(container)
+        main_layout.addWidget(scroll)
+
+    # --- Logic ---
+
+    def update_customer_suggestions(self, text):
+        if len(text) < 1:
+            return
+        suggestions = credit_book_service.search_suggestions(text)
+        model = QStringListModel(suggestions)
+        self.customer_completer.setModel(model)
+
+    def update_chassis_suggestions(self, text):
+        if len(text) < 1:
+            return
+        suggestions = credit_book_service.search_chassis_suggestions(text)
+        model = QStringListModel(suggestions)
+        self.chassis_completer.setModel(model)
+
+    def on_chassis_selected(self):
+        chassis_no = self.chassis_input.text().strip()
+        if not chassis_no:
+            return
+        
+        details = credit_book_service.get_chassis_details(chassis_no)
+        if details:
+            self.model_input.setText(details.get("model", ""))
+            self.color_input.setText(details.get("color", ""))
+            price = details.get("price", 0)
+            self.price_input.setText(f"{price:.2f}")
+            # Automatically set decided amount to price if empty
+            if not self.decided_amount_input.text():
+                self.decided_amount_input.setText(f"{price:.2f}")
+
+    def calculate_remaining(self):
+        try:
+            decided = float(self.decided_amount_input.text() or 0)
+            advance = float(self.advance_input.text() or 0)
+            remaining = decided - advance
+            self.remaining_input.setText(f"{remaining:.2f}")
+        except ValueError:
+            self.remaining_input.setText("0.00")
+
+    def clear_form(self):
+        self.date_edit.setDate(QDate.currentDate())
+        self.customer_input.clear()
+        self.chassis_input.clear()
+        self.model_input.clear()
+        self.color_input.clear()
+        self.price_input.clear()
+        self.decided_amount_input.clear()
+        self.advance_input.clear()
+        self.months_input.clear()
+        self.days_input.clear()
+        self.remaining_input.clear()
+        self.description_input.clear()
+
+    def print_receipt(self):
+        """Generates a simple HTML receipt and opens the print dialog."""
+        customer = self.customer_input.text().strip()
+        if not customer:
+            QMessageBox.warning(self, "Input Error", "Please enter a customer name before printing.")
             return
 
-        customer_label = customer_combo.currentText().strip()
-        cid = self._customer_label_to_id.get(customer_label)
-        if not cid:
-            QMessageBox.warning(self, "Customer Required", "Please select a customer.")
+        html = f"""
+        <html>
+        <head>
+            <style>
+                body {{ font-family: Arial, sans-serif; margin: 40px; color: #333; }}
+                .header {{ text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }}
+                .title {{ font-size: 24px; font-weight: bold; }}
+                .content {{ margin-bottom: 20px; }}
+                .row {{ display: flex; justify-content: space-between; margin-bottom: 10px; }}
+                .label {{ font-weight: bold; }}
+                .footer {{ margin-top: 50px; border-top: 1px solid #ccc; padding-top: 10px; text-align: center; font-size: 12px; }}
+                table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
+                th, td {{ border: 1px solid #ddd; padding: 12px; text-align: left; }}
+                th {{ background-color: #f2f2f2; }}
+                .total-row {{ font-weight: bold; background-color: #f9f9f9; }}
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <div class="title">CREDIT BOOK RECEIPT</div>
+                <div>Date: {self.date_edit.date().toString("dd-MM-yyyy")}</div>
+            </div>
+            
+            <div class="content">
+                <div class="row">
+                    <span><span class="label">Customer:</span> {customer}</span>
+                    <span><span class="label">Chassis #:</span> {self.chassis_input.text()}</span>
+                </div>
+                <div class="row">
+                    <span><span class="label">Model:</span> {self.model_input.text()}</span>
+                    <span><span class="label">Color:</span> {self.color_input.text()}</span>
+                </div>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Description</th>
+                        <th>Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Decided Credit Amount</td>
+                        <td>Rs. {float(self.decided_amount_input.text() or 0):,.2f}</td>
+                    </tr>
+                    <tr>
+                        <td>Advance Paid</td>
+                        <td>Rs. {float(self.advance_input.text() or 0):,.2f}</td>
+                    </tr>
+                    <tr class="total-row">
+                        <td>Remaining Balance</td>
+                        <td>Rs. {float(self.remaining_input.text() or 0):,.2f}</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div style="margin-top: 20px;">
+                <span class="label">Duration:</span> {self.months_input.text()} Months, {self.days_input.text()} Days
+            </div>
+
+            <div style="margin-top: 20px;">
+                <span class="label">Notes:</span><br>
+                {self.description_input.toPlainText()}
+            </div>
+
+            <div class="footer">
+                <p>Thank you for your business!</p>
+                <p>Generated on: {dt.datetime.now().strftime("%d-%m-%Y %H:%M:%S")}</p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        try:
+            from app.services.print_service_v2 import print_service_v2
+            print_service_v2.print_html_with_dialog(html, self)
+        except Exception as e:
+            QMessageBox.critical(self, "Print Error", f"Could not open print dialog: {str(e)}")
+
+    def save_entry(self):
+        # Validation
+        customer = self.customer_input.text().strip()
+        chassis = self.chassis_input.text().strip()
+        try:
+            decided = float(self.decided_amount_input.text() or 0)
+            advance = float(self.advance_input.text() or 0)
+        except ValueError:
+            QMessageBox.warning(self, "Input Error", "Please enter valid numeric amounts.")
             return
 
-        qd = date_edit.date()
-        ts = dt.datetime(qd.year(), qd.month(), qd.day(), dt.datetime.now().hour, dt.datetime.now().minute)
+        if not customer or not chassis:
+            QMessageBox.warning(self, "Input Error", "Customer name and Chassis number are required.")
+            return
 
-        db = SessionLocal()
+        data = {
+            "date": self.date_edit.date().toPyDate(),
+            "customer_name": customer,
+            "chassis_no": chassis,
+            "model": self.model_input.text(),
+            "color": self.color_input.text(),
+            "price": float(self.price_input.text() or 0),
+            "decided_amount": decided,
+            "advance": advance,
+            "months": int(self.months_input.text() or 0),
+            "days": int(self.days_input.text() or 0),
+            "remaining_balance": decided - advance,
+            "description": self.description_input.toPlainText()
+        }
+
         try:
-            credit_book_service.create_transaction(
-                db=db,
-                customer_id=cid,
-                direction=direction_combo.currentText(),
-                entry_type=entry_type_combo.currentText(),
-                amount=float(amount_spin.value()),
-                reference_number=ref_input.text(),
-                description=desc_input.toPlainText(),
-                timestamp=ts,
-            )
-            QMessageBox.information(self, "Saved", "Credit book entry saved successfully.")
-            self.refresh()
-        except Exception as exc:
-            QMessageBox.critical(self, "Error", str(exc))
-        finally:
-            db.close()
+            credit_book_service.create_entry(data)
+            QMessageBox.information(self, "Success", "Credit entry saved successfully.")
+            self.clear_form()
+            self.load_data()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save entry: {str(e)}")
 
-    def refresh(self) -> None:
-        if not self._customer_cache:
-            self._load_customers_cache()
+    def refresh(self):
+        self.load_data()
 
-        db = SessionLocal()
+    def load_data(self):
+        """Load recent entries into the table."""
         try:
-            summary = credit_book_service.get_summary(db)
-            self.card_total_receivable.value_label.setText(f"{summary['total_balance']:,.2f}")
-            self.card_total_debit.value_label.setText(f"{summary['total_debit']:,.2f}")
-            self.card_total_credit.value_label.setText(f"{summary['total_credit']:,.2f}")
-
-            cust_search = self.customer_search.text().strip() if hasattr(self, "customer_search") else ""
-            cust_rows_raw = credit_book_service.list_customer_balances(db, search=cust_search, limit=800)
-            cust_rows = [
-                CreditCustomerRow(
-                    customer_id=r["customer_id"],
-                    name=r["name"],
-                    cnic=r["cnic"],
-                    phone=r["phone"],
-                    balance=r["balance"],
-                )
-                for r in cust_rows_raw
-            ]
-            self.customers_model.update_rows(cust_rows)
-
-            selected_customer_id = self._selected_customer_id()
-            direction = self.txn_direction_combo.currentText().strip().upper()
-            search = self.txn_search.text().strip()
-            txns = credit_book_service.list_transactions(
-                db,
-                customer_id=selected_customer_id,
-                direction=direction if direction != "ALL" else "ALL",
-                include_void=True,
-                search=search,
-                limit=3000,
-            )
-
-            rows: List[CreditTxnRow] = []
-            running_balance: Optional[float] = 0.0 if selected_customer_id else None
-            for t in txns:
-                debit = float(t.amount or 0.0) if (t.direction or "").upper() == "DEBIT" and not t.is_void else 0.0
-                credit = float(t.amount or 0.0) if (t.direction or "").upper() == "CREDIT" and not t.is_void else 0.0
-                if running_balance is not None:
-                    running_balance += (debit - credit)
-                customer_label = ""
-                try:
-                    customer_label = t.customer.name if t.customer else ""
-                except Exception:
-                    customer_label = ""
-                rows.append(
-                    CreditTxnRow(
-                        txn_id=int(t.id),
-                        timestamp=t.timestamp,
-                        customer=customer_label,
-                        direction=str(t.direction or ""),
-                        entry_type=str(t.entry_type or ""),
-                        reference=str(t.reference_number or ""),
-                        description=str(t.description or ""),
-                        debit=debit,
-                        credit=credit,
-                        balance=running_balance,
-                        is_void=bool(t.is_void),
-                    )
-                )
-            self.txn_model.update_rows(rows)
-        finally:
-            db.close()
-
+            self.table_model.removeRows(0, self.table_model.rowCount())
+            entries = credit_book_service.get_all_entries()
+            for entry in entries:
+                row = [
+                    QStandardItem(entry.date.strftime("%d-%m-%Y") if entry.date else ""),
+                    QStandardItem(str(entry.customer_name)),
+                    QStandardItem(str(entry.chassis_no)),
+                    QStandardItem(str(entry.model)),
+                    QStandardItem(f"{entry.decided_amount:,.2f}"),
+                    QStandardItem(f"{entry.advance:,.2f}"),
+                    QStandardItem(f"{entry.remaining_balance:,.2f}"),
+                    QStandardItem(f"{entry.months}M {entry.days}D")
+                ]
+                self.table_model.appendRow(row)
+        except Exception as e:
+            logger.error(f"Error loading credit book data: {e}")

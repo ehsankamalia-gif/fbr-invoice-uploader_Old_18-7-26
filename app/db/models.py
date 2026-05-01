@@ -368,332 +368,6 @@ class SpareLedgerAudit(Base):
     transaction_id = Column(Integer, ForeignKey("spare_ledger_transactions.id"), nullable=True)
     details = Column(JSON, nullable=True)
 
-class CreditBookDirection(str, enum.Enum):
-    DEBIT = "DEBIT"
-    CREDIT = "CREDIT"
-
-class CreditBookEntryType(str, enum.Enum):
-    SALE = "SALE"
-    PAYMENT = "PAYMENT"
-    ADJUSTMENT = "ADJUSTMENT"
-    OPENING = "OPENING"
-
-class CreditBookTransaction(Base):
-    __tablename__ = "credit_book_transactions"
-
-    id = Column(Integer, primary_key=True, index=True)
-    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
-    timestamp = Column(DateTime, default=dt.datetime.utcnow, index=True)
-    direction = Column(String(10), nullable=False, index=True)
-    entry_type = Column(String(20), nullable=False, index=True)
-    amount = Column(Float, nullable=False)
-    reference_number = Column(String(80), nullable=True, index=True)
-    description = Column(String(500), nullable=True)
-    related_invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=True, index=True)
-    finance_application_id = Column(Integer, ForeignKey("finance_applications.id"), nullable=True, index=True)
-    finance_loan_id = Column(Integer, ForeignKey("finance_loans.id"), nullable=True, index=True)
-    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
-    month_key = Column(String(7), index=True)
-    is_void = Column(Boolean, default=False, index=True)
-    voided_at = Column(DateTime, nullable=True)
-    void_reason = Column(String(255), nullable=True)
-    original_transaction_id = Column(Integer, ForeignKey("credit_book_transactions.id"), nullable=True, index=True)
-
-    customer = relationship("Customer")
-    invoice = relationship("Invoice")
-
-class CreditBookAudit(Base):
-    __tablename__ = "credit_book_audit"
-
-    id = Column(Integer, primary_key=True, index=True)
-    action = Column(String(50), nullable=False)
-    timestamp = Column(DateTime, default=dt.datetime.utcnow, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
-    transaction_id = Column(Integer, ForeignKey("credit_book_transactions.id"), nullable=True, index=True)
-    details = Column(JSON, nullable=True)
-
-class FinanceApplicantType(str, enum.Enum):
-    CUSTOMER = "CUSTOMER"
-    DEALER = "DEALER"
-
-class FinanceApplicationStatus(str, enum.Enum):
-    DRAFT = "DRAFT"
-    SUBMITTED = "SUBMITTED"
-    IN_REVIEW = "IN_REVIEW"
-    APPROVED = "APPROVED"
-    REJECTED = "REJECTED"
-    CANCELLED = "CANCELLED"
-
-class FinanceLoanStatus(str, enum.Enum):
-    ACTIVE = "ACTIVE"
-    CLOSED = "CLOSED"
-    DEFAULTED = "DEFAULTED"
-    REFINANCED = "REFINANCED"
-
-class FinanceInstallmentStatus(str, enum.Enum):
-    DUE = "DUE"
-    PARTIAL = "PARTIAL"
-    PAID = "PAID"
-    LATE = "LATE"
-    WAIVED = "WAIVED"
-
-class FinancePaymentStatus(str, enum.Enum):
-    POSTED = "POSTED"
-    REVERSED = "REVERSED"
-    PENDING = "PENDING"
-
-class FinancePaymentMethod(str, enum.Enum):
-    CASH = "CASH"
-    BANK_TRANSFER = "BANK_TRANSFER"
-    CHEQUE = "CHEQUE"
-    ONLINE = "ONLINE"
-    CARD = "CARD"
-
-class DealerProfile(Base):
-    __tablename__ = "dealer_profiles"
-
-    id = Column(Integer, primary_key=True, index=True)
-    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, unique=True, index=True)
-    is_verified = Column(Boolean, default=False, index=True)
-    verified_at = Column(DateTime, nullable=True)
-    credit_limit = Column(Float, default=0.0)
-    bulk_auto_approve = Column(Boolean, default=False)
-    max_active_loans = Column(Integer, default=10)
-    risk_tier_override = Column(String(20), nullable=True)
-    notes = Column(String(500), nullable=True)
-    updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
-
-    customer = relationship("Customer")
-
-class FinanceApplication(Base):
-    __tablename__ = "finance_applications"
-
-    id = Column(Integer, primary_key=True, index=True)
-    applicant_type = Column(String(20), nullable=False, default=FinanceApplicantType.CUSTOMER, index=True)
-    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
-    dealer_profile_id = Column(Integer, ForeignKey("dealer_profiles.id"), nullable=True, index=True)
-    status = Column(String(20), nullable=False, default=FinanceApplicationStatus.DRAFT, index=True)
-
-    requested_term_months = Column(Integer, nullable=False)
-    down_payment_percent = Column(Float, nullable=False)
-    interest_rate_annual = Column(Float, nullable=False)
-
-    cash_total_price = Column(Float, nullable=False, default=0.0)
-    requested_total_price = Column(Float, nullable=False, default=0.0)
-    requested_down_payment_amount = Column(Float, nullable=False, default=0.0)
-    requested_financed_amount = Column(Float, nullable=False, default=0.0)
-
-    monthly_income = Column(Float, nullable=True)
-    income_verified = Column(Boolean, default=False)
-    income_verification_method = Column(String(50), nullable=True)
-
-    credit_score = Column(Integer, nullable=True, index=True)
-    risk_tier = Column(String(20), nullable=True, index=True)
-    risk_profile = Column(JSON, nullable=True)
-
-    bureau_provider = Column(String(60), nullable=True)
-    bureau_reference = Column(String(120), nullable=True, index=True)
-    bureau_score = Column(Integer, nullable=True)
-
-    decision_reason = Column(String(500), nullable=True)
-    approved_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
-    approved_at = Column(DateTime, nullable=True)
-
-    created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
-    updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow, index=True)
-
-    customer = relationship("Customer")
-    dealer_profile = relationship("DealerProfile")
-    items = relationship("FinanceApplicationItem", back_populates="application", cascade="all, delete-orphan")
-
-class FinanceApplicationItem(Base):
-    __tablename__ = "finance_application_items"
-
-    id = Column(Integer, primary_key=True, index=True)
-    application_id = Column(Integer, ForeignKey("finance_applications.id"), nullable=False, index=True)
-    motorcycle_id = Column(Integer, ForeignKey("motorcycles.id"), nullable=True, index=True)
-    product_model_id = Column(Integer, ForeignKey("product_models.id"), nullable=True, index=True)
-    color = Column(String(30), nullable=True)
-    quantity = Column(Integer, nullable=False, default=1)
-    cash_unit_price = Column(Float, nullable=False, default=0.0)
-    cash_total_price = Column(Float, nullable=False, default=0.0)
-    unit_price = Column(Float, nullable=False, default=0.0)
-    total_price = Column(Float, nullable=False, default=0.0)
-
-    application = relationship("FinanceApplication", back_populates="items")
-    motorcycle = relationship("Motorcycle")
-    product_model = relationship("ProductModel")
-
-class FinanceInventoryReservation(Base):
-    __tablename__ = "finance_inventory_reservations"
-
-    id = Column(Integer, primary_key=True, index=True)
-    application_id = Column(Integer, ForeignKey("finance_applications.id"), nullable=False, index=True)
-    motorcycle_id = Column(Integer, ForeignKey("motorcycles.id"), nullable=False, unique=True, index=True)
-    reserved_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
-    expires_at = Column(DateTime, nullable=True, index=True)
-    released_at = Column(DateTime, nullable=True, index=True)
-    status = Column(String(20), nullable=False, default="RESERVED", index=True)
-
-class FinanceLoan(Base):
-    __tablename__ = "finance_loans"
-
-    id = Column(Integer, primary_key=True, index=True)
-    loan_number = Column(String(40), nullable=False, unique=True, index=True)
-    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
-    dealer_profile_id = Column(Integer, ForeignKey("dealer_profiles.id"), nullable=True, index=True)
-    application_id = Column(Integer, ForeignKey("finance_applications.id"), nullable=True, index=True)
-    status = Column(String(20), nullable=False, default=FinanceLoanStatus.ACTIVE, index=True)
-
-    cash_total_price = Column(Float, nullable=False, default=0.0)
-    credit_total_price = Column(Float, nullable=False, default=0.0)
-    principal_amount = Column(Float, nullable=False, default=0.0)
-    down_payment_amount = Column(Float, nullable=False, default=0.0)
-    financed_amount = Column(Float, nullable=False, default=0.0)
-    interest_rate_annual = Column(Float, nullable=False, default=0.0)
-    term_months = Column(Integer, nullable=False, default=12)
-    emi_amount = Column(Float, nullable=False, default=0.0)
-
-    total_interest = Column(Float, nullable=False, default=0.0)
-    total_payable = Column(Float, nullable=False, default=0.0)
-    currency = Column(String(10), nullable=False, default="PKR")
-
-    late_fee_flat = Column(Float, nullable=False, default=0.0)
-    late_fee_daily_percent = Column(Float, nullable=False, default=0.0)
-    grace_days = Column(Integer, nullable=False, default=0)
-
-    start_date = Column(DateTime, nullable=False, index=True)
-    next_due_date = Column(DateTime, nullable=True, index=True)
-    created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
-    closed_at = Column(DateTime, nullable=True)
-    closed_reason = Column(String(255), nullable=True)
-
-    customer = relationship("Customer")
-    dealer_profile = relationship("DealerProfile")
-    application = relationship("FinanceApplication")
-    items = relationship("FinanceLoanItem", back_populates="loan", cascade="all, delete-orphan")
-    installments = relationship("FinanceInstallment", back_populates="loan", cascade="all, delete-orphan")
-    payments = relationship("FinancePayment", back_populates="loan", cascade="all, delete-orphan")
-
-class FinanceLoanItem(Base):
-    __tablename__ = "finance_loan_items"
-
-    id = Column(Integer, primary_key=True, index=True)
-    loan_id = Column(Integer, ForeignKey("finance_loans.id"), nullable=False, index=True)
-    motorcycle_id = Column(Integer, ForeignKey("motorcycles.id"), nullable=True, index=True)
-    product_model_id = Column(Integer, ForeignKey("product_models.id"), nullable=True, index=True)
-    color = Column(String(30), nullable=True)
-    quantity = Column(Integer, nullable=False, default=1)
-    cash_unit_price = Column(Float, nullable=False, default=0.0)
-    cash_total_price = Column(Float, nullable=False, default=0.0)
-    unit_price = Column(Float, nullable=False, default=0.0)
-    total_price = Column(Float, nullable=False, default=0.0)
-
-    loan = relationship("FinanceLoan", back_populates="items")
-    motorcycle = relationship("Motorcycle")
-    product_model = relationship("ProductModel")
-
-class FinanceInstallment(Base):
-    __tablename__ = "finance_installments"
-
-    id = Column(Integer, primary_key=True, index=True)
-    loan_id = Column(Integer, ForeignKey("finance_loans.id"), nullable=False, index=True)
-    installment_no = Column(Integer, nullable=False, index=True)
-    due_date = Column(DateTime, nullable=False, index=True)
-
-    principal_due = Column(Float, nullable=False, default=0.0)
-    interest_due = Column(Float, nullable=False, default=0.0)
-    fees_due = Column(Float, nullable=False, default=0.0)
-    total_due = Column(Float, nullable=False, default=0.0)
-    late_fee_accrued = Column(Float, nullable=False, default=0.0)
-    late_fee_last_calculated_at = Column(DateTime, nullable=True, index=True)
-
-    status = Column(String(20), nullable=False, default=FinanceInstallmentStatus.DUE, index=True)
-    paid_principal = Column(Float, nullable=False, default=0.0)
-    paid_interest = Column(Float, nullable=False, default=0.0)
-    paid_fees = Column(Float, nullable=False, default=0.0)
-    paid_total = Column(Float, nullable=False, default=0.0)
-    paid_at = Column(DateTime, nullable=True, index=True)
-
-    loan = relationship("FinanceLoan", back_populates="installments")
-
-class FinancePayment(Base):
-    __tablename__ = "finance_payments"
-
-    id = Column(Integer, primary_key=True, index=True)
-    loan_id = Column(Integer, ForeignKey("finance_loans.id"), nullable=False, index=True)
-    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
-    timestamp = Column(DateTime, default=dt.datetime.utcnow, index=True)
-    amount = Column(Float, nullable=False)
-    method = Column(String(30), nullable=False, default=FinancePaymentMethod.CASH, index=True)
-    provider = Column(String(50), nullable=True)
-    reference_number = Column(String(100), nullable=True, index=True)
-    status = Column(String(20), nullable=False, default=FinancePaymentStatus.POSTED, index=True)
-    received_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
-    payment_metadata = Column("metadata", JSON, nullable=True)
-
-    loan = relationship("FinanceLoan", back_populates="payments")
-    allocations = relationship("FinancePaymentAllocation", back_populates="payment", cascade="all, delete-orphan")
-
-class FinancePaymentAllocation(Base):
-    __tablename__ = "finance_payment_allocations"
-
-    id = Column(Integer, primary_key=True, index=True)
-    payment_id = Column(Integer, ForeignKey("finance_payments.id"), nullable=False, index=True)
-    installment_id = Column(Integer, ForeignKey("finance_installments.id"), nullable=False, index=True)
-    principal_amount = Column(Float, nullable=False, default=0.0)
-    interest_amount = Column(Float, nullable=False, default=0.0)
-    fees_amount = Column(Float, nullable=False, default=0.0)
-    total_allocated = Column(Float, nullable=False, default=0.0)
-
-    payment = relationship("FinancePayment", back_populates="allocations")
-    installment = relationship("FinanceInstallment")
-
-class FinanceRefinance(Base):
-    __tablename__ = "finance_refinance"
-
-    id = Column(Integer, primary_key=True, index=True)
-    old_loan_id = Column(Integer, ForeignKey("finance_loans.id"), nullable=False, index=True)
-    new_loan_id = Column(Integer, ForeignKey("finance_loans.id"), nullable=False, index=True)
-    created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
-    reason = Column(String(500), nullable=True)
-    fees = Column(Float, nullable=False, default=0.0)
-
-class FinanceCreditBureauInquiry(Base):
-    __tablename__ = "finance_credit_bureau_inquiries"
-
-    id = Column(Integer, primary_key=True, index=True)
-    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
-    application_id = Column(Integer, ForeignKey("finance_applications.id"), nullable=True, index=True)
-    provider = Column(String(60), nullable=False)
-    request_id = Column(String(120), nullable=True, index=True)
-    status = Column(String(30), nullable=False, default="PENDING", index=True)
-    score = Column(Integer, nullable=True)
-    risk_grade = Column(String(20), nullable=True)
-    response_summary = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
-
-class FinancePortalToken(Base):
-    __tablename__ = "finance_portal_tokens"
-
-    id = Column(Integer, primary_key=True, index=True)
-    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
-    token = Column(String(64), nullable=False, unique=True, index=True)
-    created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
-    expires_at = Column(DateTime, nullable=True, index=True)
-    revoked_at = Column(DateTime, nullable=True, index=True)
-
-class FinanceAudit(Base):
-    __tablename__ = "finance_audit"
-
-    id = Column(Integer, primary_key=True, index=True)
-    action = Column(String(60), nullable=False, index=True)
-    timestamp = Column(DateTime, default=dt.datetime.utcnow, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
-    entity_type = Column(String(60), nullable=True, index=True)
-    entity_id = Column(Integer, nullable=True, index=True)
-    details = Column(JSON, nullable=True)
-
 # --- SMS & WhatsApp Module ---
 class SMSStatus(str, enum.Enum):
     PENDING = "PENDING"
@@ -828,6 +502,81 @@ class AppConfiguration(Base):
     sidebar_collapsed_font_size = Column(Integer, default=18)
     
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
+
+
+class CreditBook(Base):
+    __tablename__ = "credit_book"
+
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(DateTime, default=dt.datetime.utcnow, index=True)
+    customer_name = Column(String(100), nullable=False, index=True)
+    chassis_no = Column(String(50), nullable=False, index=True)
+    model = Column(String(50), nullable=True)
+    color = Column(String(30), nullable=True)
+    price = Column(Float, nullable=True)
+    decided_amount = Column(Float, nullable=False)
+    advance = Column(Float, nullable=False)
+    months = Column(Integer, default=0)
+    days = Column(Integer, default=0)
+    remaining_balance = Column(Float, nullable=False)
+    description = Column(String(500), nullable=True)
+    
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+
+
+class BulkCreditPurchase(Base):
+    __tablename__ = "bulk_credit_purchases"
+
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(DateTime, default=dt.datetime.utcnow, index=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True)
+    customer_name = Column(String(100), nullable=False)
+    
+    total_amount = Column(Float, default=0.0)
+    total_advance = Column(Float, default=0.0)
+    remaining_balance = Column(Float, default=0.0)
+    
+    months = Column(Integer, default=0)
+    days = Column(Integer, default=0)
+    
+    status = Column(String(20), default="ACTIVE") # ACTIVE, COMPLETED, OVERDUE
+    description = Column(String(500), nullable=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+
+    items = relationship("BulkCreditItem", back_populates="purchase", cascade="all, delete-orphan")
+    schedules = relationship("CreditPaymentSchedule", back_populates="purchase", cascade="all, delete-orphan")
+    customer = relationship("Customer")
+
+class BulkCreditItem(Base):
+    __tablename__ = "bulk_credit_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    purchase_id = Column(Integer, ForeignKey("bulk_credit_purchases.id"), nullable=False)
+    
+    chassis_no = Column(String(50), nullable=False, index=True)
+    engine_no = Column(String(50), nullable=True)
+    model = Column(String(50), nullable=True)
+    color = Column(String(30), nullable=True)
+    
+    unit_price = Column(Float, nullable=False)
+    discount = Column(Float, default=0.0)
+    net_price = Column(Float, nullable=False)
+    
+    purchase = relationship("BulkCreditPurchase", back_populates="items")
+
+class CreditPaymentSchedule(Base):
+    __tablename__ = "credit_payment_schedules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    purchase_id = Column(Integer, ForeignKey("bulk_credit_purchases.id"), nullable=False)
+    
+    installment_no = Column(Integer, nullable=False)
+    due_date = Column(DateTime, nullable=False)
+    amount_due = Column(Float, nullable=False)
+    amount_paid = Column(Float, default=0.0)
+    status = Column(String(20), default="PENDING") # PENDING, PAID, PARTIAL
+    
+    purchase = relationship("BulkCreditPurchase", back_populates="schedules")
 
 
 class ReportTemplate(Base):

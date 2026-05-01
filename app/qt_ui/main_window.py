@@ -1158,8 +1158,8 @@ class MainWindow(QMainWindow):
         self._add_page("customers", self._create_customers_page(), "Customers")
         self._add_page("dealers", self._create_dealers_page(), "Dealers")
         self._add_page("advance_booking", self._create_advance_booking_page(), "Advance Booking")
-        self._add_page("financing", self._create_financing_page(), "Financing")
         self._add_page("credit_book", self._create_credit_book_page(), "Credit Book")
+        self._add_page("bulk_credit", self._create_bulk_credit_page(), "Bulk Credit")
         self._add_page("spare_ledger", self._create_spare_ledger_page(), "Spare Ledger")
         self._add_page("sms", self._create_sms_page(), "SMS Module")
         self._add_page("whatsapp", self._create_whatsapp_page(), "Whatsapp Module")
@@ -1177,8 +1177,8 @@ class MainWindow(QMainWindow):
             "customers": "👥",
             "dealers": "🏢",
             "advance_booking": "🧾",
-            "financing": "🏍️",
             "credit_book": "💳",
+            "bulk_credit": "🚚",
             "spare_ledger": "📒",
             "sms": "💬",
             "whatsapp": "📱",
@@ -1190,7 +1190,7 @@ class MainWindow(QMainWindow):
 
         self.menu_groups = {
             "GENERAL": ["dashboard", "welcome"],
-            "SALES": ["invoice", "reports", "advance_booking", "financing", "credit_book", "print_document"],
+            "SALES": ["invoice", "reports", "advance_booking", "credit_book", "bulk_credit", "print_document"],
             "INVENTORY": ["inventory", "prices", "spare_ledger", "captured_data"],
             "DIRECTORY": ["customers", "dealers"],
             "SYSTEM": ["sms", "whatsapp", "settings"]
@@ -7577,18 +7577,18 @@ class MainWindow(QMainWindow):
         finally:
             db.close()
 
-    def _create_financing_page(self) -> QWidget:
-        from app.qt_ui.financing_page import FinancingPage
-
-        page = FinancingPage(self)
-        self.financing_page = page
-        return page
-
     def _create_credit_book_page(self) -> QWidget:
         from app.qt_ui.credit_book_page import CreditBookPage
 
         page = CreditBookPage(self)
         self.credit_book_page = page
+        return page
+
+    def _create_bulk_credit_page(self) -> QWidget:
+        from app.qt_ui.bulk_credit_page import BulkCreditPage
+
+        page = BulkCreditPage(self)
+        self.bulk_credit_page = page
         return page
 
     def _create_spare_ledger_page(self) -> QWidget:
@@ -8290,16 +8290,16 @@ class MainWindow(QMainWindow):
         elif key == "advance_booking":
             self._load_ab_models()
             self._reload_advance_bookings()
-        elif key == "financing":
-            if hasattr(self, "financing_page") and self.financing_page:
-                try:
-                    self.financing_page.refresh()
-                except Exception:
-                    pass
         elif key == "credit_book":
             if hasattr(self, "credit_book_page") and self.credit_book_page:
                 try:
                     self.credit_book_page.refresh()
+                except Exception:
+                    pass
+        elif key == "bulk_credit":
+            if hasattr(self, "bulk_credit_page") and self.bulk_credit_page:
+                try:
+                    self.bulk_credit_page.refresh()
                 except Exception:
                     pass
         elif key == "prices":
