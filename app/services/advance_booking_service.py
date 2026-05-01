@@ -7,7 +7,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.logger import logger
-from app.db.models import AdvanceBooking, AdvanceBookingAudit, AdvanceBookingModelCounter, SpareLedgerTransaction, pk_now
+from app.db.models import AdvanceBooking, AdvanceBookingAudit, AdvanceBookingModelCounter, pk_now
 
 
 class AdvanceBookingService:
@@ -128,20 +128,6 @@ class AdvanceBookingService:
                     note="Advance received at booking time.",
                 )
             )
-            if float(advance_paid) > 0:
-                ts = now
-                mk = self._month_key_for_ts(ts)
-                db.add(
-                    SpareLedgerTransaction(
-                        trans_type="CREDIT",
-                        amount=float(advance_paid),
-                        cash_type="HARD_CASH",
-                        reference_number=booking.booking_number,
-                        description=f"Advance Booking - Advance Received - {booking.customer_name} - {booking.motorcycle_model} {booking.color}",
-                        month_key=mk,
-                        timestamp=ts,
-                    )
-                )
             db.commit()
             db.refresh(booking)
             
@@ -366,19 +352,6 @@ class AdvanceBookingService:
                         note="Balance collected at delivery.",
                     )
                 )
-                ts = booking.delivered_at or pk_now()
-                mk = self._month_key_for_ts(ts)
-                db.add(
-                    SpareLedgerTransaction(
-                        trans_type="CREDIT",
-                        amount=pay,
-                        cash_type="HARD_CASH",
-                        reference_number=booking.booking_number,
-                        description=f"Advance Booking - Delivery Payment - {booking.customer_name} - {booking.motorcycle_model} {booking.color}",
-                        month_key=mk,
-                        timestamp=ts,
-                    )
-                )
             db.commit()
             db.refresh(booking)
         except Exception as e:
@@ -434,19 +407,6 @@ class AdvanceBookingService:
                         before_balance_amount=0.0,
                         after_balance_amount=restored_balance,
                         note="Reversed delivery payment (return/cancellation).",
-                    )
-                )
-                ts = dt.datetime.utcnow()
-                mk = self._month_key_for_ts(ts)
-                db.add(
-                    SpareLedgerTransaction(
-                        trans_type="DEBIT",
-                        amount=delivered_payment,
-                        cash_type="HARD_CASH",
-                        reference_number=booking.booking_number,
-                        description=f"Advance Booking - Reverse Delivery Payment - {booking.customer_name} - {booking.motorcycle_model} {booking.color}",
-                        month_key=mk,
-                        timestamp=ts,
                     )
                 )
             db.commit()

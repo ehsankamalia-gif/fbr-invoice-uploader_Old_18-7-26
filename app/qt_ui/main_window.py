@@ -8125,7 +8125,15 @@ class MainWindow(QMainWindow):
         db = SessionLocal()
         try:
             # Get all transactions chronologically
-            txns = db.query(SpareLedgerTransaction).order_by(SpareLedgerTransaction.timestamp.asc()).all()
+            txns = (
+                db.query(SpareLedgerTransaction)
+                .filter(
+                    (SpareLedgerTransaction.description.is_(None))
+                    | (~SpareLedgerTransaction.description.like("Advance Booking -%"))
+                )
+                .order_by(SpareLedgerTransaction.timestamp.asc())
+                .all()
+            )
             
             # Group by month_key
             month_stats: Dict[str, Dict[str, float]] = {}
@@ -9559,7 +9567,14 @@ class MainWindow(QMainWindow):
         data: List[SpareLedgerRow] = []
         try:
             # We fetch all rows chronologically to maintain correct running balance
-            query = db.query(SpareLedgerTransaction).order_by(SpareLedgerTransaction.timestamp.asc())
+            query = (
+                db.query(SpareLedgerTransaction)
+                .filter(
+                    (SpareLedgerTransaction.description.is_(None))
+                    | (~SpareLedgerTransaction.description.like("Advance Booking -%"))
+                )
+                .order_by(SpareLedgerTransaction.timestamp.asc())
+            )
             all_rows = query.all()
             
             # Extract unique month keys for the dropdown (sorted descending)
