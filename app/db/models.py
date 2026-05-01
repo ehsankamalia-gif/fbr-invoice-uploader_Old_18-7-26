@@ -2,11 +2,23 @@ from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Boo
 from sqlalchemy.orm import relationship, declarative_base
 import datetime as dt
 import enum
-from zoneinfo import ZoneInfo
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    ZoneInfo = None
 
 Base = declarative_base()
 
-_PK_TZ = ZoneInfo("Asia/Karachi")
+def _get_pk_tz() -> dt.tzinfo:
+    if ZoneInfo is not None:
+        try:
+            return ZoneInfo("Asia/Karachi")
+        except Exception:
+            pass
+    return dt.timezone(dt.timedelta(hours=5))
+
+
+_PK_TZ = _get_pk_tz()
 
 
 def pk_now() -> dt.datetime:

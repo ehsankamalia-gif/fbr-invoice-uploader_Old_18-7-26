@@ -1336,7 +1336,7 @@ class PrintServiceV2:
               .sheet {{
                 width: 8in;
                 height: 3in;
-                margin: 0 auto;
+                margin: 3.5in auto 0 auto;
                 overflow: hidden;
               }}
               .top-copies {{
@@ -1406,7 +1406,8 @@ class PrintServiceV2:
               .urdu-note {{
                 margin-top: 0.06in;
                 font-size: 10pt;
-                font-weight: 800;
+                font-family: "Jameel Noori Nastaleeq", "Noori Nastaleeq", "Noto Nastaliq Urdu", "Noto Nastaliq Urdu UI", serif !important;
+                font-weight: 400;
                 text-align: right;
                 direction: rtl;
                 unicode-bidi: plaintext;

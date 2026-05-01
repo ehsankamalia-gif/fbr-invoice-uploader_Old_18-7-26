@@ -62,6 +62,7 @@ def build():
     cmd.extend([
         "--collect-all", "PyQt6",
         "--collect-all", "customtkinter",
+        "--collect-all", "tzdata",
         "--hidden-import", "PyQt6.QtCore",
         "--hidden-import", "PyQt6.QtGui",
         "--hidden-import", "PyQt6.QtWidgets",
