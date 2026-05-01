@@ -1336,7 +1336,7 @@ class PrintServiceV2:
               .sheet {{
                 width: 8in;
                 height: 3in;
-                margin: 3.5in auto 0 auto;
+                margin: 1.5in auto 0 auto;
                 overflow: hidden;
               }}
               .top-copies {{

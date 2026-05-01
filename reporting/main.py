@@ -17,7 +17,22 @@ from sqlalchemy import asc, desc, func
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.session import SessionLocal
-from app.db.models import Customer, Invoice, InvoiceItem, Motorcycle, ProductModel, ReportTemplate, ReportSchedule, ReportRun, AuditLog, PrintTemplateLayout
+from app.db.models import (
+    Customer,
+    Invoice,
+    InvoiceItem,
+    Motorcycle,
+    ProductModel,
+    ReportTemplate,
+    ReportSchedule,
+    ReportRun,
+    AuditLog,
+    PrintTemplateLayout,
+    FinancePortalToken,
+    FinanceLoan,
+    FinanceInstallment,
+    FinancePayment,
+)
 from app.services.invoice_service import invoice_service
 from reporting.lookup_utils import format_cnic, validate_lookup_inputs
 from reporting.invoice_detail_utils import invoice_to_detail_dict
@@ -2682,3 +2697,313 @@ def update_schedule(
     db.commit()
     _audit(db, action="UPDATE", resource_type="REPORT_SCHEDULE", resource_id=sch.id, details={"enabled": sch.enabled}, request=request)
     return JSONResponse({"ok": True})
+
+
+def _get_valid_finance_token(db: Session, token: str) -> FinancePortalToken:
+    t = (token or "").strip()
+    if not t:
+        raise HTTPException(status_code=400, detail="Token is required.")
+    row = db.query(FinancePortalToken).filter(FinancePortalToken.token == t).first()
+    if not row or row.revoked_at is not None:
+        raise HTTPException(status_code=404, detail="Invalid token.")
+    if row.expires_at and row.expires_at <= datetime.utcnow():
+        raise HTTPException(status_code=403, detail="Token expired.")
+    return row
+
+
+@app.get("/credit-portal", response_class=HTMLResponse)
+def credit_portal_home() -> str:
+    return """
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1"/>
+        <title>Credit Portal</title>
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
+      </head>
+      <body class="bg-light">
+        <div class="container py-5">
+          <div class="row justify-content-center">
+            <div class="col-12 col-md-7 col-lg-5">
+              <div class="card shadow-sm">
+                <div class="card-body">
+                  <h4 class="mb-2">Credit Portal</h4>
+                  <p class="text-muted mb-4">Enter your access token to view your financing account.</p>
+                  <form method="GET" action="/credit-portal/go">
+                    <div class="mb-3">
+                      <label class="form-label">Access Token</label>
+                      <input class="form-control" name="token" placeholder="Paste token here" required/>
+                    </div>
+                    <button class="btn btn-primary w-100" type="submit">Continue</button>
+                  </form>
+                </div>
+              </div>
+              <div class="text-center text-muted small mt-3">
+                Do not share your token with anyone.
+              </div>
+            </div>
+          </div>
+        </div>
+      </body>
+    </html>
+    """
+
+
+@app.get("/credit-portal/go")
+def credit_portal_go(token: str = Query(default="")) -> RedirectResponse:
+    t = (token or "").strip()
+    if not t:
+        return RedirectResponse("/credit-portal", status_code=302)
+    return RedirectResponse(f"/credit-portal/{t}", status_code=302)
+
+
+@app.get("/credit-portal/{token}", response_class=HTMLResponse)
+def credit_portal_account(token: str, db: Session = Depends(get_db)) -> str:
+    tok = _get_valid_finance_token(db, token)
+    customer = db.query(Customer).filter(Customer.id == tok.customer_id).first()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found.")
+
+    loans = (
+        db.query(FinanceLoan)
+        .filter(FinanceLoan.customer_id == customer.id)
+        .order_by(FinanceLoan.created_at.desc())
+        .limit(50)
+        .all()
+    )
+
+    loan_cards = []
+    for ln in loans:
+        loan_cards.append(
+            f"""
+            <div class="card mb-3 shadow-sm">
+              <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start">
+                  <div>
+                    <div class="fw-bold">{ln.loan_number}</div>
+                    <div class="text-muted small">Status: {ln.status}</div>
+                  </div>
+                  <div class="text-end">
+                    <div class="fw-bold">Rs. {float(ln.financed_amount or 0.0):,.2f}</div>
+                    <div class="text-muted small">EMI: Rs. {float(ln.emi_amount or 0.0):,.2f}</div>
+                  </div>
+                </div>
+                <div class="mt-3 d-flex gap-2 flex-wrap">
+                  <a class="btn btn-outline-primary btn-sm" href="/credit-portal/{token}/loan/{ln.id}">View Schedule</a>
+                  <a class="btn btn-outline-secondary btn-sm" href="/credit-portal/{token}/loan/{ln.id}/payment">Submit Payment</a>
+                </div>
+              </div>
+            </div>
+            """
+        )
+
+    cards_html = "\n".join(loan_cards) if loan_cards else "<div class=\"text-muted\">No loans found.</div>"
+
+    return f"""
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1"/>
+        <title>Credit Portal</title>
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
+      </head>
+      <body class="bg-light">
+        <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+          <div class="container">
+            <span class="navbar-brand">Credit Portal</span>
+          </div>
+        </nav>
+        <div class="container py-4">
+          <div class="mb-3">
+            <div class="h5 mb-1">{customer.name or ''}</div>
+            <div class="text-muted small">{customer.cnic or ''} {customer.phone or ''}</div>
+          </div>
+          {cards_html}
+        </div>
+      </body>
+    </html>
+    """
+
+
+@app.get("/credit-portal/{token}/loan/{loan_id}", response_class=HTMLResponse)
+def credit_portal_loan(token: str, loan_id: int, db: Session = Depends(get_db)) -> str:
+    tok = _get_valid_finance_token(db, token)
+    loan = db.query(FinanceLoan).filter(FinanceLoan.id == int(loan_id), FinanceLoan.customer_id == tok.customer_id).first()
+    if not loan:
+        raise HTTPException(status_code=404, detail="Loan not found.")
+    installments = (
+        db.query(FinanceInstallment)
+        .filter(FinanceInstallment.loan_id == loan.id)
+        .order_by(FinanceInstallment.installment_no.asc())
+        .all()
+    )
+    rows = []
+    for it in installments:
+        out = float(it.total_due or 0.0) - float(it.paid_total or 0.0)
+        rows.append(
+            f"""
+            <tr>
+              <td class="text-center">{it.installment_no}</td>
+              <td class="text-center">{it.due_date.strftime('%Y-%m-%d') if it.due_date else ''}</td>
+              <td class="text-end">{float(it.total_due or 0.0):,.2f}</td>
+              <td class="text-end">{float(it.paid_total or 0.0):,.2f}</td>
+              <td class="text-end">{out:,.2f}</td>
+              <td class="text-center">{it.status}</td>
+            </tr>
+            """
+        )
+    rows_html = "\n".join(rows) if rows else ""
+    return f"""
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1"/>
+        <title>Loan Schedule</title>
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
+      </head>
+      <body class="bg-light">
+        <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+          <div class="container">
+            <a class="navbar-brand" href="/credit-portal/{token}">Credit Portal</a>
+          </div>
+        </nav>
+        <div class="container py-4">
+          <div class="d-flex justify-content-between align-items-start mb-3">
+            <div>
+              <div class="h5 mb-1">{loan.loan_number}</div>
+              <div class="text-muted small">Status: {loan.status}</div>
+            </div>
+            <div class="text-end">
+              <div class="fw-bold">Financed: Rs. {float(loan.financed_amount or 0.0):,.2f}</div>
+              <div class="text-muted small">EMI: Rs. {float(loan.emi_amount or 0.0):,.2f}</div>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm table-striped align-middle">
+              <thead>
+                <tr>
+                  <th class="text-center">#</th>
+                  <th class="text-center">Due</th>
+                  <th class="text-end">Total</th>
+                  <th class="text-end">Paid</th>
+                  <th class="text-end">Outstanding</th>
+                  <th class="text-center">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows_html}
+              </tbody>
+            </table>
+          </div>
+          <div class="mt-3">
+            <a class="btn btn-outline-secondary" href="/credit-portal/{token}">Back</a>
+            <a class="btn btn-primary" href="/credit-portal/{token}/loan/{loan.id}/payment">Submit Payment</a>
+          </div>
+        </div>
+      </body>
+    </html>
+    """
+
+
+@app.get("/credit-portal/{token}/loan/{loan_id}/payment", response_class=HTMLResponse)
+def credit_portal_payment_form(token: str, loan_id: int, db: Session = Depends(get_db)) -> str:
+    tok = _get_valid_finance_token(db, token)
+    loan = db.query(FinanceLoan).filter(FinanceLoan.id == int(loan_id), FinanceLoan.customer_id == tok.customer_id).first()
+    if not loan:
+        raise HTTPException(status_code=404, detail="Loan not found.")
+    return f"""
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1"/>
+        <title>Submit Payment</title>
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
+      </head>
+      <body class="bg-light">
+        <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+          <div class="container">
+            <a class="navbar-brand" href="/credit-portal/{token}">Credit Portal</a>
+          </div>
+        </nav>
+        <div class="container py-4">
+          <div class="h5 mb-1">Submit Payment</div>
+          <div class="text-muted mb-3">{loan.loan_number}</div>
+          <div class="card shadow-sm">
+            <div class="card-body">
+              <form method="POST" action="/credit-portal/{token}/loan/{loan.id}/payment">
+                <div class="mb-3">
+                  <label class="form-label">Amount</label>
+                  <input class="form-control" name="amount" type="number" step="0.01" min="1" required/>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Method</label>
+                  <select class="form-select" name="method">
+                    <option value="CASH">Cash</option>
+                    <option value="BANK_TRANSFER">Bank Transfer</option>
+                    <option value="CHEQUE">Cheque</option>
+                    <option value="ONLINE">Online</option>
+                    <option value="CARD">Card</option>
+                  </select>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Reference</label>
+                  <input class="form-control" name="reference" placeholder="Receipt / transaction id" />
+                </div>
+                <button class="btn btn-primary w-100" type="submit">Submit</button>
+              </form>
+            </div>
+          </div>
+          <div class="mt-3">
+            <a class="btn btn-outline-secondary" href="/credit-portal/{token}/loan/{loan.id}">Back</a>
+          </div>
+        </div>
+      </body>
+    </html>
+    """
+
+
+@app.post("/credit-portal/{token}/loan/{loan_id}/payment")
+async def credit_portal_submit_payment(
+    token: str,
+    loan_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    tok = _get_valid_finance_token(db, token)
+    try:
+        from urllib.parse import parse_qs
+        raw = (await request.body()) or b""
+        parsed = parse_qs(raw.decode("utf-8", errors="ignore"))
+    except Exception:
+        parsed = {}
+    amount_raw = str((parsed.get("amount") or [""])[0]).strip()
+    method = str((parsed.get("method") or ["ONLINE"])[0]).strip().upper()
+    reference = str((parsed.get("reference") or [""])[0]).strip()
+    try:
+        amount = float(amount_raw)
+    except Exception:
+        amount = 0.0
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Invalid amount.")
+    loan = db.query(FinanceLoan).filter(FinanceLoan.id == int(loan_id), FinanceLoan.customer_id == tok.customer_id).first()
+    if not loan:
+        raise HTTPException(status_code=404, detail="Loan not found.")
+    pay = FinancePayment(
+        loan_id=loan.id,
+        customer_id=tok.customer_id,
+        timestamp=datetime.utcnow(),
+        amount=float(amount),
+        method=method,
+        provider="PORTAL",
+        reference_number=reference or None,
+        status="PENDING",
+        received_by_user_id=None,
+        payment_metadata={"source": "portal"},
+    )
+    db.add(pay)
+    db.commit()
+    return RedirectResponse(f"/credit-portal/{token}/loan/{loan.id}", status_code=302)

@@ -71,6 +71,10 @@ def build():
         "--hidden-import", "pymysql", # Explicitly include MySQL driver
         "--hidden-import", "sqlalchemy",
         "--hidden-import", "tzdata",
+        "--hidden-import", "app.services.credit_book_service",
+        "--hidden-import", "app.services.financing_service",
+        "--hidden-import", "app.qt_ui.credit_book_page",
+        "--hidden-import", "app.qt_ui.financing_page",
         "--hidden-import", "PIL.SpiderImagePlugin",
         "--clean",
         str(app_main)
