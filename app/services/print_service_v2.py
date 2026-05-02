@@ -340,6 +340,131 @@ class PrintServiceV2:
             "business_ntn": settings.get("business_ntn", "1234597-8")
         }
 
+    def render_ledger_statement(self, ledger_data: Dict[str, Any]) -> str:
+        """Renders the HTML for a customer ledger statement."""
+        business = self._get_business_info()
+        cust = ledger_data.get("customer", {})
+        entries = ledger_data.get("entries", [])
+        
+        # Format dates and numbers
+        date_range = ledger_data.get("date_range", "Full Statement")
+        total_debit = sum(float(e.get("debit") or 0) for e in entries)
+        total_credit = sum(float(e.get("credit") or 0) for e in entries)
+        final_balance = entries[-1].get("balance") if entries else 0.0
+
+        rows_html = ""
+        for e in entries:
+            rows_html += f"""
+            <tr>
+                <td>{e.get('date', '')}</td>
+                <td>{e.get('description', '').replace('\n', '<br>')}</td>
+                <td style="text-align: right;">{float(e.get('debit') or 0):,.2f}</td>
+                <td style="text-align: right;">{float(e.get('credit') or 0):,.2f}</td>
+                <td style="text-align: right; font-weight: bold;">{float(e.get('balance') or 0):,.2f}</td>
+            </tr>
+            """
+
+        html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; padding: 20px; color: #333; }}
+        .header {{ text-align: center; border-bottom: 2px solid #2c3e50; padding-bottom: 10px; margin-bottom: 20px; }}
+        .business-name {{ font-size: 24px; font-weight: bold; color: #2c3e50; }}
+        .report-title {{ font-size: 18px; margin-top: 5px; text-transform: uppercase; letter-spacing: 1px; }}
+        
+        .customer-info {{ width: 100%; margin-bottom: 20px; border: 1px solid #ddd; padding: 10px; border-radius: 5px; background: #f9f9f9; }}
+        .customer-info td {{ padding: 5px; font-size: 14px; }}
+        .info-label {{ font-weight: bold; color: #7f8c8d; width: 150px; }}
+        
+        table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
+        th {{ background-color: #2c3e50; color: white; padding: 10px; text-align: left; font-size: 13px; }}
+        td {{ border-bottom: 1px solid #ddd; padding: 8px; font-size: 12px; vertical-align: top; }}
+        tr:nth-child(even) {{ background-color: #f2f2f2; }}
+        
+        .summary {{ margin-top: 20px; text-align: right; }}
+        .summary-box {{ display: inline-block; border: 2px solid #2c3e50; padding: 10px; border-radius: 5px; }}
+        .summary-item {{ font-size: 14px; margin: 5px 0; }}
+        .final-bal {{ font-size: 18px; font-weight: bold; color: #e74c3c; border-top: 1px solid #ddd; padding-top: 5px; }}
+        
+        @media print {{
+            body {{ padding: 0; }}
+            .no-print {{ display: none; }}
+        }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="business-name">{business['business_name']}</div>
+        <div>{business['business_address']} | {business['business_phone']}</div>
+        <div class="report-title">Customer Ledger Statement</div>
+        <div style="font-size: 12px; color: #7f8c8d;">Period: {date_range} | Generated: {dt.datetime.now().strftime('%d-%m-%Y %H:%M')}</div>
+    </div>
+
+    <div class="customer-info">
+        <table style="border: none; background: none; margin: 0;">
+            <tr>
+                <td class="info-label">Customer Name:</td>
+                <td style="font-weight: bold; font-size: 16px;">{cust.get('name', 'N/A')}</td>
+                <td class="info-label">Phone Number:</td>
+                <td>{cust.get('phone', 'N/A')}</td>
+            </tr>
+            <tr>
+                <td class="info-label">Father's Name:</td>
+                <td>{cust.get('father_name', 'N/A')}</td>
+                <td class="info-label">CNIC:</td>
+                <td>{cust.get('cnic', 'N/A')}</td>
+            </tr>
+            <tr>
+                <td class="info-label">Address:</td>
+                <td colspan="3">{cust.get('address', 'N/A')}</td>
+            </tr>
+        </table>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 100px;">Date</th>
+                <th>Description</th>
+                <th style="width: 100px; text-align: right;">Debit (Rs.)</th>
+                <th style="width: 100px; text-align: right;">Credit (Rs.)</th>
+                <th style="width: 120px; text-align: right;">Balance (Rs.)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {rows_html}
+        </tbody>
+    </table>
+
+    <div class="summary">
+        <div class="summary-box">
+            <div class="summary-item">Total Debits: Rs. {total_debit:,.2f}</div>
+            <div class="summary-item">Total Credits: Rs. {total_credit:,.2f}</div>
+            <div class="summary-item final-bal">Outstanding Balance: Rs. {final_balance:,.2f}</div>
+        </div>
+    </div>
+    
+    <div style="margin-top: 50px; font-size: 10px; color: #95a5a6; text-align: center;">
+        This is a computer-generated statement and does not require a signature.
+    </div>
+</body>
+</html>
+        """
+        return html
+
+    def print_custom_html(self, html_content: str, parent: Optional[QWidget] = None, on_done=None):
+        """Prints custom HTML content with a print dialog."""
+        if not _WEBENGINE_AVAILABLE:
+            QMessageBox.critical(parent, "Print Error", "WebEngine is not available. Cannot print HTML.")
+            return
+
+        job = _DialogPrintJob(html_content, parent, on_done)
+        job.start()
+        # Keep reference to prevent GC
+        self._last_job = job
+
     def render_invoice(self, invoice_data: Dict[str, Any]) -> str:
         """Renders the HTML for an invoice on a fixed (pre-printed) template."""
         data = self._get_business_info()

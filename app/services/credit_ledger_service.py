@@ -222,6 +222,23 @@ class CreditLedgerService:
         finally:
             db.close()
 
+    def get_customer_details(self, customer_id: int) -> Optional[Dict[str, Any]]:
+        """Fetch full details for a customer."""
+        db = self._get_db()
+        try:
+            c = db.query(Customer).filter(Customer.id == customer_id).first()
+            if c:
+                return {
+                    "name": c.name,
+                    "father_name": c.father_name or "N/A",
+                    "address": c.address or "N/A",
+                    "phone": c.phone or "N/A",
+                    "cnic": c.cnic or "N/A"
+                }
+            return None
+        finally:
+            db.close()
+
     def get_dashboard_stats(self) -> Dict[str, Any]:
         """Retrieve overview stats for the dashboard."""
         db = self._get_db()

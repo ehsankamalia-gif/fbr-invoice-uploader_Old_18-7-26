@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QDate, QStringListModel
 from PyQt6.QtGui import QStandardItemModel, QStandardItem, QFont
 from app.services.credit_ledger_service import credit_ledger_service
+from app.services.print_service_v2 import PrintServiceV2
 import datetime as dt
 from app.core.logger import logger
 
@@ -18,6 +19,8 @@ class CreditLedgerSystemPage(QWidget):
         self.selected_sale_buyer_id = None
         self.selected_pay_buyer_id = None
         self.selected_ledger_buyer_id = None
+        self.current_customer_details = None
+        self.print_service = PrintServiceV2()
         self.setup_ui()
         self.refresh_dashboard()
 
@@ -518,7 +521,44 @@ class CreditLedgerSystemPage(QWidget):
         view_btn.clicked.connect(self.load_ledger)
         filters.addWidget(view_btn)
         
+        self.print_ledger_btn = QPushButton("Print Ledger")
+        self.print_ledger_btn.setStyleSheet("background-color: #2c3e50; color: white;")
+        self.print_ledger_btn.clicked.connect(self.print_ledger)
+        filters.addWidget(self.print_ledger_btn)
+        
         layout.addLayout(filters)
+        
+        # Customer Info Header
+        self.customer_info_card = QFrame()
+        self.customer_info_card.setStyleSheet("""
+            QFrame {
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
+                border-radius: 5px;
+                margin-bottom: 5px;
+            }
+            QLabel {
+                font-size: 13px;
+                color: #2c3e50;
+            }
+            .header-label {
+                font-weight: bold;
+                color: #7f8c8d;
+            }
+        """)
+        info_layout = QGridLayout(self.customer_info_card)
+        
+        self.lbl_cust_name = QLabel("Name: -")
+        self.lbl_cust_father = QLabel("Father Name: -")
+        self.lbl_cust_address = QLabel("Address: -")
+        self.lbl_cust_phone = QLabel("Phone: -")
+        
+        info_layout.addWidget(self.lbl_cust_name, 0, 0)
+        info_layout.addWidget(self.lbl_cust_father, 0, 1)
+        info_layout.addWidget(self.lbl_cust_phone, 1, 0)
+        info_layout.addWidget(self.lbl_cust_address, 1, 1)
+        
+        layout.addWidget(self.customer_info_card)
         
         self.ledger_table = QTableView()
         self.ledger_model = QStandardItemModel()
@@ -550,15 +590,24 @@ class CreditLedgerSystemPage(QWidget):
         self.ledger_chassis_completer.setModel(QStringListModel(names))
 
     def load_ledger(self):
-        buyer = self.ledger_buyer_input.text().strip()
-        if not buyer or not self.selected_ledger_buyer_id:
+        buyer_name = self.ledger_buyer_input.text().strip()
+        if not buyer_name or not self.selected_ledger_buyer_id:
             # Try manual lookup
-            info = credit_ledger_service.get_buyer_type(buyer)
+            info = credit_ledger_service.get_buyer_type(buyer_name)
             if info:
                 self.selected_ledger_buyer_id = info['id']
             else:
                 QMessageBox.warning(self, "Filter Required", "Please enter a valid Buyer Name to view the ledger.")
                 return
+        
+        # Update Customer Header
+        cust_details = credit_ledger_service.get_customer_details(self.selected_ledger_buyer_id)
+        if cust_details:
+            self.lbl_cust_name.setText(f"Name: {cust_details['name']}")
+            self.lbl_cust_father.setText(f"Father Name: {cust_details['father_name']}")
+            self.lbl_cust_address.setText(f"Address: {cust_details['address']}")
+            self.lbl_cust_phone.setText(f"Phone: {cust_details['phone']}")
+            self.current_customer_details = cust_details
         
         chassis = self.ledger_chassis_input.text().strip()
         entries = credit_ledger_service.get_ledger(
@@ -578,6 +627,39 @@ class CreditLedgerSystemPage(QWidget):
                 QStandardItem(f"{e.balance:,.2f}")
             ]
             self.ledger_model.appendRow(row)
+
+    def print_ledger(self):
+        """Generates and prints a professional ledger statement."""
+        if not hasattr(self, 'current_customer_details') or not self.current_customer_details:
+            QMessageBox.warning(self, "Print Error", "Please load a customer ledger first.")
+            return
+
+        entries = []
+        for r in range(self.ledger_model.rowCount()):
+            entries.append({
+                "date": self.ledger_model.item(r, 0).text(),
+                "description": self.ledger_model.item(r, 1).text(),
+                "debit": self.ledger_model.item(r, 2).text().replace(',', ''),
+                "credit": self.ledger_model.item(r, 3).text().replace(',', ''),
+                "balance": self.ledger_model.item(r, 4).text().replace(',', '')
+            })
+
+        if not entries:
+            QMessageBox.warning(self, "Print Error", "No transactions found to print.")
+            return
+
+        ledger_data = {
+            "customer": self.current_customer_details,
+            "entries": entries,
+            "date_range": f"{self.start_date.date().toString('dd-MM-yyyy')} to {self.end_date.date().toString('dd-MM-yyyy')}"
+        }
+
+        try:
+            html = self.print_service.render_ledger_statement(ledger_data)
+            self.print_service.print_custom_html(html, self)
+        except Exception as e:
+            logger.error(f"Failed to print ledger: {e}")
+            QMessageBox.critical(self, "Print Error", f"Failed to generate print: {e}")
 
     def refresh(self):
         self.refresh_dashboard()
