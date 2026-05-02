@@ -21,6 +21,10 @@ from app.db.models import (
     BulkCreditPurchase,
     BulkCreditItem,
     CreditPaymentSchedule,
+    CreditSale,
+    CreditSaleItem,
+    CreditPayment,
+    BuyerLedger,
     CapturedData,
     FBRConfiguration,
     AppConfiguration,
@@ -68,8 +72,46 @@ def _ensure_critical_tables(target_engine):
                 logger.info("'customers' table created manually as fallback.")
             else:
                 logger.info(f"'customers' table exists on {target_engine.url}.")
+
+            # --- Schema Fix for Credit Ledger Normalization ---
+            if not is_sqlite:
+                logger.info("Running MySQL schema normalization fix...")
+                # 1. Fix credit_sales
+                # Check if buyer_id exists
+                res = conn.execute(text("SHOW COLUMNS FROM credit_sales LIKE 'buyer_id'")).fetchone()
+                if not res:
+                    conn.execute(text("ALTER TABLE credit_sales ADD COLUMN buyer_id INT, ADD FOREIGN KEY (buyer_id) REFERENCES customers(id)"))
+                    logger.info("Added buyer_id to credit_sales")
+                
+                # Make buyer_name nullable
+                conn.execute(text("ALTER TABLE credit_sales MODIFY COLUMN buyer_name VARCHAR(100) NULL"))
+                
+                # 2. Fix credit_payments
+                res = conn.execute(text("SHOW COLUMNS FROM credit_payments LIKE 'buyer_id'")).fetchone()
+                if not res:
+                    conn.execute(text("ALTER TABLE credit_payments ADD COLUMN buyer_id INT, ADD FOREIGN KEY (buyer_id) REFERENCES customers(id)"))
+                    logger.info("Added buyer_id to credit_payments")
+                
+                # Check for penalty and discount columns
+                res = conn.execute(text("SHOW COLUMNS FROM credit_payments LIKE 'penalty_amount'")).fetchone()
+                if not res:
+                    conn.execute(text("ALTER TABLE credit_payments ADD COLUMN penalty_amount FLOAT DEFAULT 0.0, ADD COLUMN discount_amount FLOAT DEFAULT 0.0, ADD COLUMN net_amount FLOAT NULL"))
+                    logger.info("Added penalty/discount columns to credit_payments")
+
+                conn.execute(text("ALTER TABLE credit_payments MODIFY COLUMN buyer_name VARCHAR(100) NULL"))
+                
+                # 3. Fix buyer_ledger
+                res = conn.execute(text("SHOW COLUMNS FROM buyer_ledger LIKE 'buyer_id'")).fetchone()
+                if not res:
+                    conn.execute(text("ALTER TABLE buyer_ledger ADD COLUMN buyer_id INT, ADD FOREIGN KEY (buyer_id) REFERENCES customers(id)"))
+                    logger.info("Added buyer_id to buyer_ledger")
+                conn.execute(text("ALTER TABLE buyer_ledger MODIFY COLUMN buyer_name VARCHAR(100) NULL"))
+                
+                conn.commit()
+                logger.info("Schema normalization fix completed.")
+
     except Exception as e:
-        logger.error(f"Error verifying critical tables on {target_engine.url}: {e}")
+        logger.error(f"Error verifying critical tables or running migrations on {target_engine.url}: {e}")
 
 # Global engine and SessionLocal placeholders
 # We start with a memory sqlite engine so that imports and initial UI loads don't crash.

@@ -41,15 +41,28 @@ class UpdaterManager(QObject):
                 checker = UpdateChecker(self.version_url, auth=self.auth)
                 update_info = checker.check_for_update(self.current_version)
                 
-                if update_info:
-                    logger.info(f"Update found: {update_info['latest_version']}")
-                    self.update_available_signal.emit(update_info)
-                else:
-                    logger.info("Application is up to date.")
-                    self.no_update_signal.emit()
+                # Check if the C++ object still exists before emitting signals
+                try:
+                    if update_info:
+                        logger.info(f"Update found: {update_info['latest_version']}")
+                        self.update_available_signal.emit(update_info)
+                    else:
+                        logger.info("Application is up to date.")
+                        self.no_update_signal.emit()
+                except RuntimeError as re:
+                    if "deleted" in str(re):
+                        logger.warning("UpdaterManager was deleted before signals could be emitted.")
+                    else:
+                        raise
             except Exception as e:
                 logger.error(f"Error in update check thread: {e}")
-                self.update_error_signal.emit(str(e))
+                try:
+                    self.update_error_signal.emit(str(e))
+                except RuntimeError as re:
+                    if "deleted" in str(re):
+                        logger.warning("UpdaterManager was deleted before error signal could be emitted.")
+                    else:
+                        raise
 
         thread = threading.Thread(target=run, daemon=True)
         thread.start()

@@ -579,6 +579,74 @@ class CreditPaymentSchedule(Base):
     purchase = relationship("BulkCreditPurchase", back_populates="schedules")
 
 
+class CreditSale(Base):
+    __tablename__ = "credit_sales"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sale_date = Column(DateTime, default=dt.datetime.utcnow, index=True)
+    buyer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
+    buyer_type = Column(String(20), nullable=False) # Customer or Dealer
+    duration_months = Column(Integer, default=0)
+    
+    total_cash_price = Column(Float, default=0.0)
+    total_credit_price = Column(Float, default=0.0)
+    advance_payment = Column(Float, default=0.0)
+    remaining_amount = Column(Float, default=0.0)
+    
+    status = Column(String(20), default="ACTIVE")
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+
+    items = relationship("CreditSaleItem", back_populates="sale", cascade="all, delete-orphan")
+    buyer = relationship("Customer")
+
+class CreditSaleItem(Base):
+    __tablename__ = "credit_sale_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sale_id = Column(Integer, ForeignKey("credit_sales.id"), nullable=False)
+    
+    chassis_number = Column(String(50), unique=True, nullable=False, index=True)
+    model = Column(String(50), nullable=True)
+    cash_price = Column(Float, nullable=False)
+    credit_price = Column(Float, nullable=False)
+    
+    sale = relationship("CreditSale", back_populates="items")
+
+class CreditPayment(Base):
+    __tablename__ = "credit_payments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    payment_date = Column(DateTime, default=dt.datetime.utcnow, index=True)
+    buyer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
+    amount = Column(Float, nullable=False) # Base payment amount
+    penalty_amount = Column(Float, default=0.0)
+    discount_amount = Column(Float, default=0.0)
+    net_amount = Column(Float, nullable=False) # amount + penalty - discount
+    invoice_reference = Column(String(50), nullable=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+
+    buyer = relationship("Customer")
+
+class BuyerLedger(Base):
+    __tablename__ = "buyer_ledger"
+
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(DateTime, default=dt.datetime.utcnow, index=True)
+    buyer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
+    chassis_number = Column(String(50), nullable=True, index=True)
+    description = Column(String(255), nullable=True)
+    debit = Column(Float, default=0.0) # For sales
+    credit = Column(Float, default=0.0) # For payments
+    balance = Column(Float, default=0.0) # Running balance
+    
+    reference_id = Column(Integer, nullable=True) # ID of CreditSale or CreditPayment
+    reference_type = Column(String(20), nullable=True) # SALE or PAYMENT
+    
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+
+    buyer = relationship("Customer")
+
+
 class ReportTemplate(Base):
     __tablename__ = "report_templates"
 
