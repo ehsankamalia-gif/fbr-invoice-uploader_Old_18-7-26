@@ -3,7 +3,7 @@ from sqlalchemy import func, desc
 from app.db.session import SessionLocal
 from app.db.models import (
     CreditSale, CreditSaleItem, CreditPayment, BuyerLedger,
-    Motorcycle, Customer
+    Motorcycle, Customer, Price, ProductModel, Invoice, InvoiceItem
 )
 from typing import List, Optional, Dict, Any
 import datetime as dt
@@ -14,13 +14,26 @@ class CreditLedgerService:
         return SessionLocal()
 
     def get_buyer_suggestions(self, query: str) -> List[Dict[str, Any]]:
-        """Search for buyer names and types from customers and dealers."""
+        """Search for buyer names, phones, or CNICs and return details."""
         db = self._get_db()
         try:
-            results = db.query(Customer.id, Customer.name, Customer.type).filter(
-                Customer.name.ilike(f"%{query}%")
+            from sqlalchemy import or_
+            results = db.query(Customer.id, Customer.name, Customer.type, Customer.phone, Customer.cnic).filter(
+                or_(
+                    Customer.name.ilike(f"%{query}%"),
+                    Customer.phone.ilike(f"%{query}%"),
+                    Customer.cnic.ilike(f"%{query}%")
+                )
             ).limit(20).all()
-            return [{"id": r[0], "name": r[1], "type": r[2]} for r in results]
+            return [
+                {
+                    "id": r[0], 
+                    "name": r[1], 
+                    "type": r[2], 
+                    "phone": r[3] or "N/A", 
+                    "cnic": r[4] or "N/A"
+                } for r in results
+            ]
         finally:
             db.close()
 
@@ -39,14 +52,40 @@ class CreditLedgerService:
             db.close()
 
     def get_chassis_suggestions(self, query: str) -> List[Dict[str, Any]]:
-        """Search for available chassis numbers."""
+        """Search for available chassis numbers with prices from the Price table.
+        Requirement: Only show motorcycles with a valid FBR invoice (is_fiscalized=True)."""
         db = self._get_db()
         try:
-            results = db.query(Motorcycle).filter(
+            # Join Motorcycle with ProductModel to get model name, 
+            # with Price to get the active price,
+            # and with InvoiceItem/Invoice to check FBR fiscalization status
+            results = db.query(
+                Motorcycle.chassis_number,
+                ProductModel.model_name,
+                Price.total_price,
+                Motorcycle.color
+            ).join(
+                ProductModel, Motorcycle.product_model_id == ProductModel.id
+            ).join(
+                InvoiceItem, InvoiceItem.motorcycle_id == Motorcycle.id
+            ).join(
+                Invoice, Invoice.id == InvoiceItem.invoice_id
+            ).outerjoin(
+                Price, (Price.product_model_id == ProductModel.id) & (Price.expiration_date.is_(None))
+            ).filter(
                 Motorcycle.chassis_number.ilike(f"%{query}%"),
-                Motorcycle.status == "IN_STOCK"
+                Motorcycle.status == "IN_STOCK",
+                Invoice.is_fiscalized == True
             ).limit(20).all()
-            return [{"chassis": m.chassis_number, "model": m.model, "cash_price": m.sale_price} for m in results]
+
+            return [
+                {
+                    "chassis": r[0], 
+                    "model": r[1], 
+                    "cash_price": r[2] or 0.0,
+                    "color": r[3] or ""
+                } for r in results
+            ]
         finally:
             db.close()
 
@@ -56,6 +95,23 @@ class CreditLedgerService:
         try:
             exists = db.query(CreditSaleItem).filter(CreditSaleItem.chassis_number == chassis_number).first()
             return exists is None
+        finally:
+            db.close()
+
+    def validate_fbr_invoice(self, chassis_number: str) -> bool:
+        """Check if a chassis has a fiscalized FBR invoice."""
+        db = self._get_db()
+        try:
+            # Check if motorcycle exists and has a fiscalized invoice
+            record = db.query(Invoice).join(
+                InvoiceItem, InvoiceItem.invoice_id == Invoice.id
+            ).join(
+                Motorcycle, Motorcycle.id == InvoiceItem.motorcycle_id
+            ).filter(
+                Motorcycle.chassis_number == chassis_number,
+                Invoice.is_fiscalized == True
+            ).first()
+            return record is not None
         finally:
             db.close()
 

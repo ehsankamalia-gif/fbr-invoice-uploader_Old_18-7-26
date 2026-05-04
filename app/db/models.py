@@ -607,6 +607,7 @@ class CreditSaleItem(Base):
     
     chassis_number = Column(String(50), unique=True, nullable=False, index=True)
     model = Column(String(50), nullable=True)
+    color = Column(String(30), nullable=True)
     cash_price = Column(Float, nullable=False)
     credit_price = Column(Float, nullable=False)
     

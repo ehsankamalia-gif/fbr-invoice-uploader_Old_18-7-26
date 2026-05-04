@@ -83,19 +83,26 @@ class CreditBookService:
             db.close()
 
     def get_chassis_details(self, chassis_no: str) -> Optional[Dict[str, Any]]:
-        """Get motorcycle details for a given chassis number."""
+        """Get motorcycle details for a given chassis number with price from Price table."""
         db = self._get_db()
         try:
-            # Try to get from Motorcycle table first
+            # Join Motorcycle with Price to get the current active price
             motorcycle = db.query(Motorcycle).filter(
                 Motorcycle.chassis_number == chassis_no
             ).first()
             
             if motorcycle:
+                # Fetch active price from Price table
+                from app.db.models import Price
+                active_price = db.query(Price).filter(
+                    Price.product_model_id == motorcycle.product_model_id,
+                    Price.expiration_date.is_(None)
+                ).first()
+
                 return {
                     "model": motorcycle.model,
                     "color": motorcycle.color,
-                    "price": motorcycle.sale_price,
+                    "price": active_price.total_price if active_price else motorcycle.sale_price,
                     "engine_no": motorcycle.engine_number
                 }
             

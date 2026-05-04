@@ -3,14 +3,53 @@ from PyQt6.QtWidgets import (
     QDateEdit, QTextEdit, QPushButton, QFrame, QCompleter, 
     QTableView, QHeaderView, QMessageBox, QScrollArea, 
     QGridLayout, QTableWidget, QTableWidgetItem, QTabWidget,
-    QComboBox, QSizePolicy, QAbstractItemView
+    QComboBox, QSizePolicy, QAbstractItemView, QListView
 )
-from PyQt6.QtCore import Qt, QDate, QStringListModel
-from PyQt6.QtGui import QStandardItemModel, QStandardItem, QFont
+from PyQt6.QtCore import Qt, QDate, QStringListModel, QModelIndex, QTimer, QEvent
+from PyQt6.QtGui import QStandardItemModel, QStandardItem, QFont, QShortcut, QKeySequence
 from app.services.credit_ledger_service import credit_ledger_service
 from app.services.print_service_v2 import PrintServiceV2
 import datetime as dt
 from app.core.logger import logger
+
+class BuyerCompleter(QCompleter):
+    """Custom completer that prevents auto-fill on arrow key navigation."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.setFilterMode(Qt.MatchFlag.MatchContains)
+        # DisplayRole is used for search, UserRole for final completion
+        self.setCompletionRole(Qt.ItemDataRole.UserRole)
+        
+        # Use QListView for better control and focus handling
+        popup = QListView()
+        popup.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        popup.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        popup.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.setPopup(popup)
+
+    def pathFromIndex(self, index: QModelIndex) -> str:
+        # Returning empty string prevents the LineEdit from being updated during navigation.
+        # This is CRITICAL to prevent auto-fill while arrowing through the list.
+        return ""
+
+class ChassisLineEdit(QLineEdit):
+    """Custom LineEdit that redirects arrow keys to the completer popup."""
+    def keyPressEvent(self, event):
+        completer = self.completer()
+        if completer and completer.popup().isVisible():
+            if event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up):
+                # Redirect arrow keys to the popup list
+                completer.popup().keyPressEvent(event)
+                return
+            if event.key() in (Qt.Key.Key_Enter, Qt.Key.Key_Return):
+                # Trigger selection for the highlighted item
+                index = completer.popup().currentIndex()
+                completer.activated[QModelIndex].emit(index)
+                completer.popup().hide()
+                return
+        super().keyPressEvent(event)
 
 class CreditLedgerSystemPage(QWidget):
     def __init__(self, parent=None):
@@ -117,10 +156,11 @@ class CreditLedgerSystemPage(QWidget):
         # Header Info
         grid.addWidget(QLabel("Buyer Name:"), 0, 0)
         self.sale_buyer_input = QLineEdit()
-        self.sale_buyer_completer = QCompleter()
+        self.sale_buyer_input.setPlaceholderText("Search by Name, Phone or CNIC...")
+        self.sale_buyer_completer = BuyerCompleter(self.sale_buyer_input)
         self.sale_buyer_input.setCompleter(self.sale_buyer_completer)
         self.sale_buyer_input.textChanged.connect(self._update_buyer_suggestions)
-        self.sale_buyer_completer.activated.connect(self._on_buyer_selected)
+        self.sale_buyer_completer.activated[QModelIndex].connect(self._on_buyer_selected_index)
         self.sale_buyer_input.editingFinished.connect(self._on_buyer_input_finished)
         grid.addWidget(self.sale_buyer_input, 0, 1)
         
@@ -143,8 +183,8 @@ class CreditLedgerSystemPage(QWidget):
         
         # Items Table
         grid.addWidget(QLabel("Motorcycles:"), 2, 0)
-        self.sale_items_table = QTableWidget(0, 5)
-        self.sale_items_table.setHorizontalHeaderLabels(["Chassis #", "Model", "Cash Price", "Credit Price", "Action"])
+        self.sale_items_table = QTableWidget(0, 6)
+        self.sale_items_table.setHorizontalHeaderLabels(["Chassis #", "Model", "Color", "Cash Price", "Credit Price", "Action"])
         self.sale_items_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         grid.addWidget(self.sale_items_table, 3, 0, 1, 4)
         
@@ -171,32 +211,70 @@ class CreditLedgerSystemPage(QWidget):
         save_btn.clicked.connect(self.process_sale)
         grid.addWidget(save_btn, 8, 0, 1, 4)
         
+        # Shortcuts (Requirement: Ctrl + N for new row)
+        self.new_row_shortcut = QShortcut(QKeySequence("Ctrl+N"), self.sale_tab)
+        self.new_row_shortcut.activated.connect(self._add_sale_item_row)
+
         scroll.setWidget(container)
         layout.addWidget(scroll)
 
-    def _update_buyer_suggestions(self, text):
-        if len(text) < 1: return
-        suggestions = credit_ledger_service.get_buyer_suggestions(text)
-        names = [s['name'] for s in suggestions]
-        self.sale_buyer_completer.setModel(QStringListModel(names))
-        # Store metadata for quick lookup if needed
-        self.sale_buyer_input.setProperty("suggestions", suggestions)
+        # Requirement: Automatically add one empty row on load
+        QTimer.singleShot(100, self._add_sale_item_row)
 
-    def _on_buyer_selected(self, name):
-        """Auto-fill buyer type and store ID when a buyer is selected from suggestions."""
-        suggestions = self.sale_buyer_input.property("suggestions") or []
+    def _format_buyer_suggestion(self, s):
+        """Format buyer details for dropdown display: Name | Type | Phone | CNIC"""
+        btype = "Dealer" if s['type'] == "DEALER" else "Customer"
+        return f"{s['name']} | {btype} | {s['phone']} | {s['cnic']}"
+
+    def _update_buyer_suggestions(self, text):
+        if not text: return
+        
+        # Auto-uppercase behavior
+        if text != text.upper():
+            self.sale_buyer_input.blockSignals(True)
+            self.sale_buyer_input.setText(text.upper())
+            self.sale_buyer_input.blockSignals(False)
+            text = text.upper()
+
+        suggestions = credit_ledger_service.get_buyer_suggestions(text)
+        model = QStandardItemModel()
         for s in suggestions:
-            if s['name'] == name:
-                self.selected_sale_buyer_id = s['id']
-                btype = "Dealer" if s['type'] == "DEALER" else "Customer"
-                self.buyer_type_combo.setEnabled(True)
-                self.buyer_type_combo.setCurrentText(btype)
-                self.buyer_type_combo.setEnabled(False)
-                return
+            formatted = self._format_buyer_suggestion(s)
+            item = QStandardItem(formatted)
+            # Store metadata in UserRoles
+            item.setData(s['name'], Qt.ItemDataRole.UserRole)
+            item.setData(s['id'], Qt.ItemDataRole.UserRole + 1)
+            item.setData(s['type'], Qt.ItemDataRole.UserRole + 2)
+            model.appendRow(item)
+            
+        self.sale_buyer_completer.setModel(model)
+
+    def _on_buyer_selected_index(self, index: QModelIndex):
+        """Handle selection from the completer popup using index (prevents auto-fill issues)."""
+        name = index.data(Qt.ItemDataRole.UserRole)
+        buyer_id = index.data(Qt.ItemDataRole.UserRole + 1)
+        buyer_type = index.data(Qt.ItemDataRole.UserRole + 2)
+        
+        # We use singleShot to ensure the text is set AFTER the completer's internal 
+        # event handling finishes, which prevents it from being overwritten.
+        QTimer.singleShot(0, lambda: self._apply_buyer_selection(name, buyer_id, buyer_type))
+
+    def _apply_buyer_selection(self, name, buyer_id, buyer_type):
+        # Fill ONLY the name (Requirement 1)
+        self.sale_buyer_input.blockSignals(True)
+        self.sale_buyer_input.setText(name)
+        self.sale_buyer_input.blockSignals(False)
+        self.selected_sale_buyer_id = buyer_id
+        
+        # Auto-fill buyer type (Requirement 5)
+        btype = "Dealer" if buyer_type == "DEALER" else "Customer"
+        self.buyer_type_combo.setEnabled(True)
+        self.buyer_type_combo.setCurrentText(btype)
+        self.buyer_type_combo.setEnabled(False)
 
     def _on_buyer_input_finished(self):
         """Handle cases where name is typed fully or pasted without using suggestions."""
-        name = self.sale_buyer_input.text().strip()
+        name = self.sale_buyer_input.text().strip().upper()
         if not name: 
             self.selected_sale_buyer_id = None
             return
@@ -217,56 +295,194 @@ class CreditLedgerSystemPage(QWidget):
             # self.sale_items_table.setRowCount(1) # Optional enforcement
 
     def _add_sale_item_row(self):
+        """Adds a new row to the motorcycles table. Requirement: Smart Row Handling (No duplicate empty rows)"""
         if self.buyer_type_combo.currentText() == "Customer" and self.sale_items_table.rowCount() >= 1:
             QMessageBox.warning(self, "Limit", "Customers can only purchase one motorcycle on credit.")
             return
             
+        # Check if last row is empty before adding a new one
+        if self.sale_items_table.rowCount() > 0:
+            last_row = self.sale_items_table.rowCount() - 1
+            chassis_widget = self.sale_items_table.cellWidget(last_row, 0)
+            if chassis_widget and isinstance(chassis_widget, QLineEdit):
+                if not chassis_widget.text().strip():
+                    # Focus the existing empty row instead of adding a new one
+                    chassis_widget.setFocus()
+                    return
+
         row = self.sale_items_table.rowCount()
         self.sale_items_table.insertRow(row)
         
-        chassis_edit = QLineEdit()
-        chassis_completer = QCompleter()
+        chassis_edit = ChassisLineEdit()
+        chassis_edit.setPlaceholderText("Scan/Type Chassis #")
+        chassis_completer = BuyerCompleter(chassis_edit) # Reuse logic for non-autofill
         chassis_edit.setCompleter(chassis_completer)
         chassis_edit.textChanged.connect(lambda text, ce=chassis_edit, cc=chassis_completer: self._update_chassis_suggest(text, ce, cc))
+        chassis_completer.activated[QModelIndex].connect(lambda index, ce=chassis_edit, r=row: self._on_chassis_selected_index(index, ce, r))
         chassis_edit.editingFinished.connect(lambda ce=chassis_edit, r=row: self._on_chassis_selected(ce, r))
+        
+        # Install event filter for Enter and Tab handling
+        chassis_edit.installEventFilter(self)
         
         self.sale_items_table.setCellWidget(row, 0, chassis_edit)
         self.sale_items_table.setItem(row, 1, QTableWidgetItem("")) # Model
-        self.sale_items_table.setItem(row, 2, QTableWidgetItem("0.00")) # Cash Price
+        
+        color_item = QTableWidgetItem("")
+        color_item.setFlags(color_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self.sale_items_table.setItem(row, 2, color_item) # Color (Read-only)
+        
+        cash_price_item = QTableWidgetItem("0.00")
+        cash_price_item.setFlags(cash_price_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self.sale_items_table.setItem(row, 3, cash_price_item) # Cash Price (Read-only)
         
         credit_price_edit = QLineEdit("0.00")
         credit_price_edit.textChanged.connect(self._calculate_sale_totals)
-        self.sale_items_table.setCellWidget(row, 3, credit_price_edit)
+        credit_price_edit.installEventFilter(self) # Tab from last column
+        self.sale_items_table.setCellWidget(row, 4, credit_price_edit)
         
         del_btn = QPushButton("Delete")
-        del_btn.clicked.connect(lambda: self.sale_items_table.removeRow(self.sale_items_table.currentRow()))
-        self.sale_items_table.setCellWidget(row, 4, del_btn)
+        del_btn.clicked.connect(lambda: self._remove_sale_item_row(row))
+        self.sale_items_table.setCellWidget(row, 5, del_btn)
+
+        # Requirement: Automatically focus on Chassis # field
+        chassis_edit.setFocus()
+
+    def _remove_sale_item_row(self, row_idx):
+        # We need to find the actual row index because rows might have shifted
+        for r in range(self.sale_items_table.rowCount()):
+            if self.sale_items_table.cellWidget(r, 5) == self.sender():
+                self.sale_items_table.removeRow(r)
+                break
+        self._calculate_sale_totals()
+
+    def eventFilter(self, source, event):
+        """Requirement: Handle Enter in last row and Tab in last column."""
+        if event.type() == QEvent.Type.KeyPress:
+            # Handle Enter key
+            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                # Find which row this widget belongs to
+                for r in range(self.sale_items_table.rowCount()):
+                    for c in (0, 4): # Only Chassis and Credit Price edits have event filter
+                        if self.sale_items_table.cellWidget(r, c) == source:
+                            # If it's the last row, add a new one
+                            if r == self.sale_items_table.rowCount() - 1:
+                                # Only add if current row has data
+                                chassis_widget = self.sale_items_table.cellWidget(r, 0)
+                                if chassis_widget and chassis_widget.text().strip():
+                                    self._add_sale_item_row()
+                                    return True
+                            break
+            
+            # Handle Tab key in the last column (Credit Price)
+            if event.key() == Qt.Key.Key_Tab:
+                for r in range(self.sale_items_table.rowCount()):
+                    if self.sale_items_table.cellWidget(r, 4) == source: # Last editable column
+                        if r == self.sale_items_table.rowCount() - 1:
+                            # Only add if current row has data
+                            chassis_widget = self.sale_items_table.cellWidget(r, 0)
+                            if chassis_widget and chassis_widget.text().strip():
+                                self._add_sale_item_row()
+                                return True
+                            
+        return super().eventFilter(source, event)
 
     def _update_chassis_suggest(self, text, edit, completer):
         if len(text) < 1: return
+        
+        # Auto-uppercase for chassis
+        if text != text.upper():
+            edit.blockSignals(True)
+            edit.setText(text.upper())
+            edit.blockSignals(False)
+            text = text.upper()
+
         suggestions = credit_ledger_service.get_chassis_suggestions(text)
-        names = [s['chassis'] for s in suggestions]
-        completer.setModel(QStringListModel(names))
-        # Store metadata for later use if needed
-        edit.setProperty("meta", suggestions)
+        model = QStandardItemModel()
+        for s in suggestions:
+            # We show just the chassis or more info if needed, 
+            # but BuyerCompleter uses UserRole for the final value.
+            item = QStandardItem(f"{s['chassis']} | {s['model']} | {s['color']}")
+            item.setData(s['chassis'], Qt.ItemDataRole.UserRole)
+            # Store full metadata for selection logic
+            item.setData(s, Qt.ItemDataRole.UserRole + 1)
+            model.appendRow(item)
+            
+        completer.setModel(model)
+
+    def _on_chassis_selected_index(self, index, edit, row):
+        """Handle selection from the chassis completer popup."""
+        chassis = index.data(Qt.ItemDataRole.UserRole)
+        m_data = index.data(Qt.ItemDataRole.UserRole + 1)
+        
+        # Set the clean chassis number
+        edit.setText(chassis)
+        
+        if m_data:
+            self._apply_chassis_details(m_data, row)
+
+    def _apply_chassis_details(self, m_data, row):
+        # Double check FBR invoice status (Requirement: Validation on Selection)
+        if not credit_ledger_service.validate_fbr_invoice(m_data['chassis']):
+            QMessageBox.critical(self, "Validation Error", 
+                f"Chassis {m_data['chassis']} does not have a fiscalized FBR invoice.\n"
+                "Credit sale is not allowed.")
+            # Clear fields
+            chassis_edit = self.sale_items_table.cellWidget(row, 0)
+            if chassis_edit: chassis_edit.clear()
+            self.sale_items_table.item(row, 1).setText("")
+            self.sale_items_table.item(row, 2).setText("")
+            self.sale_items_table.item(row, 3).setText("0.00")
+            credit_widget = self.sale_items_table.cellWidget(row, 4)
+            if credit_widget: credit_widget.setText("0.00")
+            return
+
+        # Auto-fill: Model, Color, Cash Price, and Credit Price
+        self.sale_items_table.item(row, 1).setText(m_data['model'])
+        self.sale_items_table.item(row, 2).setText(m_data.get('color', ''))
+        
+        price_str = f"{m_data['cash_price']:.2f}"
+        self.sale_items_table.item(row, 3).setText(price_str)
+        
+        credit_widget = self.sale_items_table.cellWidget(row, 4)
+        if credit_widget:
+            credit_widget.setText(price_str)
+            # Smooth transition: Move focus to Credit Price field
+            QTimer.singleShot(100, credit_widget.setFocus)
+            
+        self._calculate_sale_totals()
 
     def _on_chassis_selected(self, edit, row):
-        chassis = edit.text()
-        meta = edit.property("meta") or []
-        for m in meta:
-            if m['chassis'] == chassis:
-                self.sale_items_table.item(row, 1).setText(m['model'])
-                self.sale_items_table.item(row, 2).setText(f"{m['cash_price']:.2f}")
-                # Default credit price to cash price + markup if desired
-                self.sale_items_table.cellWidget(row, 3).setText(f"{m['cash_price'] * 1.12:.2f}")
+        chassis = edit.text().strip()
+        if not chassis: return
+        
+        # If already filled by selection, don't re-fetch
+        if self.sale_items_table.item(row, 1).text():
+            return
+
+        results = credit_ledger_service.get_chassis_suggestions(chassis)
+        m_data = None
+        for r in results:
+            if r['chassis'] == chassis:
+                m_data = r
                 break
+        
+        if m_data:
+            self._apply_chassis_details(m_data, row)
+        else:
+            # Clear if invalid chassis
+            self.sale_items_table.item(row, 1).setText("")
+            self.sale_items_table.item(row, 2).setText("")
+            self.sale_items_table.item(row, 3).setText("0.00")
+            credit_widget = self.sale_items_table.cellWidget(row, 4)
+            if credit_widget: credit_widget.setText("0.00")
+            
         self._calculate_sale_totals()
 
     def _calculate_sale_totals(self):
         total_credit = 0.0
         for r in range(self.sale_items_table.rowCount()):
             try:
-                total_credit += float(self.sale_items_table.cellWidget(r, 3).text() or 0)
+                total_credit += float(self.sale_items_table.cellWidget(r, 4).text() or 0)
             except: pass
         
         self.total_credit_label.setText(f"Total Credit: {total_credit:,.2f}")
@@ -296,11 +512,12 @@ class CreditLedgerSystemPage(QWidget):
             if not chassis: continue
             
             try:
-                cash_p = float(self.sale_items_table.item(r, 2).text())
-                credit_p = float(self.sale_items_table.cellWidget(r, 3).text())
+                cash_p = float(self.sale_items_table.item(r, 3).text())
+                credit_p = float(self.sale_items_table.cellWidget(r, 4).text())
                 items_data.append({
                     "chassis_number": chassis,
                     "model": self.sale_items_table.item(r, 1).text(),
+                    "color": self.sale_items_table.item(r, 2).text(),
                     "cash_price": cash_p,
                     "credit_price": credit_p
                 })
@@ -341,10 +558,11 @@ class CreditLedgerSystemPage(QWidget):
         
         form.addWidget(QLabel("Buyer Name:"), 0, 0)
         self.pay_buyer_input = QLineEdit()
-        self.pay_buyer_completer = QCompleter()
+        self.pay_buyer_input.setPlaceholderText("Search by Name, Phone or CNIC...")
+        self.pay_buyer_completer = BuyerCompleter(self.pay_buyer_input)
         self.pay_buyer_input.setCompleter(self.pay_buyer_completer)
         self.pay_buyer_input.textChanged.connect(self._update_pay_buyer_suggestions)
-        self.pay_buyer_completer.activated.connect(self._on_pay_buyer_selected)
+        self.pay_buyer_completer.activated[QModelIndex].connect(self._on_pay_buyer_selected_index)
         form.addWidget(self.pay_buyer_input, 0, 1)
         
         form.addWidget(QLabel("Payment Amount:"), 1, 0)
@@ -396,18 +614,37 @@ class CreditLedgerSystemPage(QWidget):
             self.pay_net_received.setText("0.00")
 
     def _update_pay_buyer_suggestions(self, text):
-        if len(text) < 1: return
-        suggestions = credit_ledger_service.get_buyer_suggestions(text)
-        names = [s['name'] for s in suggestions]
-        self.pay_buyer_completer.setModel(QStringListModel(names))
-        self.pay_buyer_input.setProperty("suggestions", suggestions)
+        if not text: return
+        
+        # Auto-uppercase behavior
+        if text != text.upper():
+            self.pay_buyer_input.blockSignals(True)
+            self.pay_buyer_input.setText(text.upper())
+            self.pay_buyer_input.blockSignals(False)
+            text = text.upper()
 
-    def _on_pay_buyer_selected(self, name):
-        suggestions = self.pay_buyer_input.property("suggestions") or []
+        suggestions = credit_ledger_service.get_buyer_suggestions(text)
+        model = QStandardItemModel()
         for s in suggestions:
-            if s['name'] == name:
-                self.selected_pay_buyer_id = s['id']
-                return
+            formatted = self._format_buyer_suggestion(s)
+            item = QStandardItem(formatted)
+            # Store metadata in UserRoles
+            item.setData(s['name'], Qt.ItemDataRole.UserRole)
+            item.setData(s['id'], Qt.ItemDataRole.UserRole + 1)
+            model.appendRow(item)
+            
+        self.pay_buyer_completer.setModel(model)
+
+    def _on_pay_buyer_selected_index(self, index: QModelIndex):
+        name = index.data(Qt.ItemDataRole.UserRole)
+        buyer_id = index.data(Qt.ItemDataRole.UserRole + 1)
+        QTimer.singleShot(0, lambda: self._apply_pay_buyer_selection(name, buyer_id))
+
+    def _apply_pay_buyer_selection(self, name, buyer_id):
+        self.pay_buyer_input.blockSignals(True)
+        self.pay_buyer_input.setText(name)
+        self.pay_buyer_input.blockSignals(False)
+        self.selected_pay_buyer_id = buyer_id
 
     def submit_payment(self):
         buyer = self.pay_buyer_input.text().strip()
@@ -493,11 +730,11 @@ class CreditLedgerSystemPage(QWidget):
         
         filters = QHBoxLayout()
         self.ledger_buyer_input = QLineEdit()
-        self.ledger_buyer_input.setPlaceholderText("Buyer Name...")
-        self.ledger_buyer_completer = QCompleter()
+        self.ledger_buyer_input.setPlaceholderText("Search by Name, Phone or CNIC...")
+        self.ledger_buyer_completer = BuyerCompleter(self.ledger_buyer_input)
         self.ledger_buyer_input.setCompleter(self.ledger_buyer_completer)
         self.ledger_buyer_input.textChanged.connect(self._update_ledger_buyer_suggestions)
-        self.ledger_buyer_completer.activated.connect(self._on_ledger_buyer_selected)
+        self.ledger_buyer_completer.activated[QModelIndex].connect(self._on_ledger_buyer_selected_index)
         filters.addWidget(self.ledger_buyer_input)
         
         self.ledger_chassis_input = QLineEdit()
@@ -570,18 +807,37 @@ class CreditLedgerSystemPage(QWidget):
         layout.addWidget(self.ledger_table)
 
     def _update_ledger_buyer_suggestions(self, text):
-        if len(text) < 1: return
-        suggestions = credit_ledger_service.get_buyer_suggestions(text)
-        names = [s['name'] for s in suggestions]
-        self.ledger_buyer_completer.setModel(QStringListModel(names))
-        self.ledger_buyer_input.setProperty("suggestions", suggestions)
+        if not text: return
+        
+        # Auto-uppercase behavior
+        if text != text.upper():
+            self.ledger_buyer_input.blockSignals(True)
+            self.ledger_buyer_input.setText(text.upper())
+            self.ledger_buyer_input.blockSignals(False)
+            text = text.upper()
 
-    def _on_ledger_buyer_selected(self, name):
-        suggestions = self.ledger_buyer_input.property("suggestions") or []
+        suggestions = credit_ledger_service.get_buyer_suggestions(text)
+        model = QStandardItemModel()
         for s in suggestions:
-            if s['name'] == name:
-                self.selected_ledger_buyer_id = s['id']
-                return
+            formatted = self._format_buyer_suggestion(s)
+            item = QStandardItem(formatted)
+            # Store metadata in UserRoles
+            item.setData(s['name'], Qt.ItemDataRole.UserRole)
+            item.setData(s['id'], Qt.ItemDataRole.UserRole + 1)
+            model.appendRow(item)
+            
+        self.ledger_buyer_completer.setModel(model)
+
+    def _on_ledger_buyer_selected_index(self, index: QModelIndex):
+        name = index.data(Qt.ItemDataRole.UserRole)
+        buyer_id = index.data(Qt.ItemDataRole.UserRole + 1)
+        QTimer.singleShot(0, lambda: self._apply_ledger_buyer_selection(name, buyer_id))
+
+    def _apply_ledger_buyer_selection(self, name, buyer_id):
+        self.ledger_buyer_input.blockSignals(True)
+        self.ledger_buyer_input.setText(name)
+        self.ledger_buyer_input.blockSignals(False)
+        self.selected_ledger_buyer_id = buyer_id
 
     def _update_ledger_chassis_suggestions(self, text):
         if len(text) < 1: return
