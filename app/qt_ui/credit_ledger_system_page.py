@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QComboBox, QSizePolicy, QAbstractItemView, QListView
 )
 from PyQt6.QtCore import Qt, QDate, QStringListModel, QModelIndex, QTimer, QEvent
-from PyQt6.QtGui import QStandardItemModel, QStandardItem, QFont, QShortcut, QKeySequence
+from PyQt6.QtGui import QStandardItemModel, QStandardItem, QFont, QShortcut, QKeySequence, QKeyEvent
 from app.services.credit_ledger_service import credit_ledger_service
 from app.services.print_service_v2 import PrintServiceV2
 import datetime as dt
@@ -37,16 +37,31 @@ class BuyerCompleter(QCompleter):
 class ChassisLineEdit(QLineEdit):
     """Custom LineEdit that redirects arrow keys to the completer popup."""
     def keyPressEvent(self, event):
+        # Auto-uppercase behavior without using setText() (Requirement 6)
+        if event.text().isalpha():
+            upper_event = QKeyEvent(
+                event.type(), 
+                event.key(), 
+                event.modifiers(), 
+                event.text().upper()
+            )
+            super().keyPressEvent(upper_event)
+            return
+
         completer = self.completer()
         if completer and completer.popup().isVisible():
-            if event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up):
-                # Redirect arrow keys to the popup list
+            if event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up, Qt.Key.Key_PageUp, Qt.Key.Key_PageDown):
+                # Redirect arrow keys to the popup list without moving focus (Requirement 2)
                 completer.popup().keyPressEvent(event)
                 return
             if event.key() in (Qt.Key.Key_Enter, Qt.Key.Key_Return):
                 # Trigger selection for the highlighted item
                 index = completer.popup().currentIndex()
-                completer.activated[QModelIndex].emit(index)
+                if index.isValid():
+                    completer.activated[QModelIndex].emit(index)
+                completer.popup().hide()
+                return
+            if event.key() == Qt.Key.Key_Escape:
                 completer.popup().hide()
                 return
         super().keyPressEvent(event)
@@ -237,7 +252,7 @@ class CreditLedgerSystemPage(QWidget):
             text = text.upper()
 
         suggestions = credit_ledger_service.get_buyer_suggestions(text)
-        model = QStandardItemModel()
+        model = QStandardItemModel(self.sale_buyer_completer)
         for s in suggestions:
             formatted = self._format_buyer_suggestion(s)
             item = QStandardItem(formatted)
@@ -248,6 +263,10 @@ class CreditLedgerSystemPage(QWidget):
             model.appendRow(item)
             
         self.sale_buyer_completer.setModel(model)
+        # Reset prefix to prevent internal filtering
+        self.sale_buyer_completer.setCompletionPrefix("")
+        if suggestions:
+            self.sale_buyer_completer.complete()
 
     def _on_buyer_selected_index(self, index: QModelIndex):
         """Handle selection from the completer popup using index (prevents auto-fill issues)."""
@@ -387,27 +406,39 @@ class CreditLedgerSystemPage(QWidget):
         return super().eventFilter(source, event)
 
     def _update_chassis_suggest(self, text, edit, completer):
-        if len(text) < 1: return
-        
-        # Auto-uppercase for chassis
-        if text != text.upper():
-            edit.blockSignals(True)
-            edit.setText(text.upper())
-            edit.blockSignals(False)
-            text = text.upper()
+        search_text = (text or "").strip().upper()
+        if not search_text: 
+            completer.popup().hide()
+            return
 
-        suggestions = credit_ledger_service.get_chassis_suggestions(text)
-        model = QStandardItemModel()
-        for s in suggestions:
-            # We show just the chassis or more info if needed, 
-            # but BuyerCompleter uses UserRole for the final value.
-            item = QStandardItem(f"{s['chassis']} | {s['model']} | {s['color']}")
-            item.setData(s['chassis'], Qt.ItemDataRole.UserRole)
-            # Store full metadata for selection logic
-            item.setData(s, Qt.ItemDataRole.UserRole + 1)
-            model.appendRow(item)
+        try:
+            # Fetch from DB
+            suggestions = credit_ledger_service.get_chassis_suggestions(search_text)
             
-        completer.setModel(model)
+            # Create model for the completer
+            model = QStandardItemModel(completer)
+            for s in suggestions:
+                display_text = f"{s['chassis']} | {s['model']} | {s['color']}"
+                if s.get('fbr_inv') and s['fbr_inv'] != "AVAILABLE":
+                    display_text += f" | FBR: {s['fbr_inv']}"
+                
+                item = QStandardItem(display_text)
+                item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                item.setData(s['chassis'], Qt.ItemDataRole.UserRole)
+                item.setData(s, Qt.ItemDataRole.UserRole + 1)
+                model.appendRow(item)
+                
+            completer.setModel(model)
+            
+            # Requirement: Show Dropdown Immediately without flickering
+            if suggestions:
+                # We do NOT use setCompletionPrefix here as we manually fetched matches
+                completer.complete()
+            else:
+                completer.popup().hide()
+            
+        except Exception as e:
+            logger.error(f"Error updating chassis suggestions: {e}")
 
     def _on_chassis_selected_index(self, index, edit, row):
         """Handle selection from the chassis completer popup."""
@@ -469,7 +500,14 @@ class CreditLedgerSystemPage(QWidget):
         if m_data:
             self._apply_chassis_details(m_data, row)
         else:
-            # Clear if invalid chassis
+            # Check if it exists but is missing FBR invoice
+            exists_in_db = credit_ledger_service.check_chassis_exists(chassis)
+            if exists_in_db:
+                QMessageBox.warning(self, "Invalid Chassis", 
+                    f"Chassis {chassis} exists but does not have a valid FBR invoice.\n"
+                    "Only FBR-invoiced motorcycles can be sold on credit.")
+            
+            # Clear if invalid chassis or missing FBR
             self.sale_items_table.item(row, 1).setText("")
             self.sale_items_table.item(row, 2).setText("")
             self.sale_items_table.item(row, 3).setText("0.00")
@@ -624,7 +662,7 @@ class CreditLedgerSystemPage(QWidget):
             text = text.upper()
 
         suggestions = credit_ledger_service.get_buyer_suggestions(text)
-        model = QStandardItemModel()
+        model = QStandardItemModel(self.pay_buyer_completer)
         for s in suggestions:
             formatted = self._format_buyer_suggestion(s)
             item = QStandardItem(formatted)
@@ -634,6 +672,10 @@ class CreditLedgerSystemPage(QWidget):
             model.appendRow(item)
             
         self.pay_buyer_completer.setModel(model)
+        # Reset prefix to prevent internal filtering
+        self.pay_buyer_completer.setCompletionPrefix("")
+        if suggestions:
+            self.pay_buyer_completer.complete()
 
     def _on_pay_buyer_selected_index(self, index: QModelIndex):
         name = index.data(Qt.ItemDataRole.UserRole)
@@ -817,7 +859,7 @@ class CreditLedgerSystemPage(QWidget):
             text = text.upper()
 
         suggestions = credit_ledger_service.get_buyer_suggestions(text)
-        model = QStandardItemModel()
+        model = QStandardItemModel(self.ledger_buyer_completer)
         for s in suggestions:
             formatted = self._format_buyer_suggestion(s)
             item = QStandardItem(formatted)
@@ -827,6 +869,10 @@ class CreditLedgerSystemPage(QWidget):
             model.appendRow(item)
             
         self.ledger_buyer_completer.setModel(model)
+        # Reset prefix to prevent internal filtering
+        self.ledger_buyer_completer.setCompletionPrefix("")
+        if suggestions:
+            self.ledger_buyer_completer.complete()
 
     def _on_ledger_buyer_selected_index(self, index: QModelIndex):
         name = index.data(Qt.ItemDataRole.UserRole)

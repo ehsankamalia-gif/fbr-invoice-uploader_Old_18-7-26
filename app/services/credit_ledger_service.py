@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func, desc
+from sqlalchemy import func, desc, or_
 from app.db.session import SessionLocal
 from app.db.models import (
     CreditSale, CreditSaleItem, CreditPayment, BuyerLedger,
@@ -52,18 +52,29 @@ class CreditLedgerService:
             db.close()
 
     def get_chassis_suggestions(self, query: str) -> List[Dict[str, Any]]:
-        """Search for available chassis numbers with prices from the Price table.
-        Requirement: Only show motorcycles with a valid FBR invoice (is_fiscalized=True)."""
+        """Search for chassis numbers from the inventory that are marked as SOLD and have FBR invoices.
+        Requirement: Chassis must come from inventory (Motorcycle table)."""
         db = self._get_db()
         try:
-            # Join Motorcycle with ProductModel to get model name, 
-            # with Price to get the active price,
-            # and with InvoiceItem/Invoice to check FBR fiscalization status
-            results = db.query(
+            search_text = (query or "").strip().upper()
+            if not search_text: return []
+
+            # Fix for MySQL Collation Mismatch (Requirement: Read text in picture)
+            # Enforce utf8mb4_unicode_ci for all chassis comparisons to prevent "Illegal mix of collations"
+            from sqlalchemy import collate
+            
+            # Subquery to identify chassis numbers already used in a credit sale
+            sold_credit_chassis = db.query(
+                collate(CreditSaleItem.chassis_number, 'utf8mb4_unicode_ci')
+            ).subquery()
+
+            # Core Query: Fetch from inventory (Motorcycle table)
+            stmt = db.query(
                 Motorcycle.chassis_number,
                 ProductModel.model_name,
                 Price.total_price,
-                Motorcycle.color
+                Motorcycle.color,
+                Invoice.fbr_invoice_number
             ).join(
                 ProductModel, Motorcycle.product_model_id == ProductModel.id
             ).join(
@@ -73,19 +84,32 @@ class CreditLedgerService:
             ).outerjoin(
                 Price, (Price.product_model_id == ProductModel.id) & (Price.expiration_date.is_(None))
             ).filter(
-                Motorcycle.chassis_number.ilike(f"%{query}%"),
-                Motorcycle.status == "IN_STOCK",
-                Invoice.is_fiscalized == True
-            ).limit(20).all()
+                collate(Motorcycle.chassis_number, 'utf8mb4_unicode_ci').ilike(f"%{search_text}%"),
+                Motorcycle.status == 'SOLD',
+                or_(
+                    Invoice.fbr_invoice_number.is_not(None),
+                    Invoice.is_fiscalized == True,
+                    Invoice.sync_status == "SENT"
+                ),
+                ~collate(Motorcycle.chassis_number, 'utf8mb4_unicode_ci').in_(sold_credit_chassis)
+            ).distinct()
 
+            results = stmt.limit(20).all()
+            
+            logger.info(f"CHASSIS SEARCH (FIXED COLLATION): '{search_text}' found {len(results)} sold results")
+            
             return [
                 {
                     "chassis": r[0], 
-                    "model": r[1], 
+                    "model": r[1] or "Unknown", 
                     "cash_price": r[2] or 0.0,
-                    "color": r[3] or ""
+                    "color": r[3] or "",
+                    "fbr_inv": r[4] or "AVAILABLE"
                 } for r in results
             ]
+        except Exception as e:
+            logger.error(f"Error in get_chassis_suggestions: {e}")
+            return []
         finally:
             db.close()
 
@@ -93,23 +117,44 @@ class CreditLedgerService:
         """Check if chassis has already been sold on credit."""
         db = self._get_db()
         try:
-            exists = db.query(CreditSaleItem).filter(CreditSaleItem.chassis_number == chassis_number).first()
+            from sqlalchemy import collate
+            exists = db.query(CreditSaleItem).filter(
+                collate(CreditSaleItem.chassis_number, 'utf8mb4_unicode_ci') == chassis_number
+            ).first()
             return exists is None
         finally:
             db.close()
 
-    def validate_fbr_invoice(self, chassis_number: str) -> bool:
-        """Check if a chassis has a fiscalized FBR invoice."""
+    def check_chassis_exists(self, chassis_number: str) -> bool:
+        """Check if a chassis exists in the inventory at all."""
         db = self._get_db()
         try:
-            # Check if motorcycle exists and has a fiscalized invoice
+            from sqlalchemy import collate
+            record = db.query(Motorcycle).filter(
+                collate(Motorcycle.chassis_number, 'utf8mb4_unicode_ci') == chassis_number
+            ).first()
+            return record is not None
+        finally:
+            db.close()
+
+    def validate_fbr_invoice(self, chassis_number: str) -> bool:
+        """Check if a chassis is SOLD and has a valid FBR invoice."""
+        db = self._get_db()
+        try:
+            from sqlalchemy import collate
+            chassis_number = (chassis_number or "").strip().upper()
             record = db.query(Invoice).join(
                 InvoiceItem, InvoiceItem.invoice_id == Invoice.id
             ).join(
                 Motorcycle, Motorcycle.id == InvoiceItem.motorcycle_id
             ).filter(
-                Motorcycle.chassis_number == chassis_number,
-                Invoice.is_fiscalized == True
+                collate(Motorcycle.chassis_number, 'utf8mb4_unicode_ci') == chassis_number,
+                Motorcycle.status == 'SOLD',
+                or_(
+                    Invoice.is_fiscalized == True,
+                    Invoice.fbr_invoice_number.is_not(None),
+                    Invoice.sync_status == "SENT"
+                )
             ).first()
             return record is not None
         finally:
