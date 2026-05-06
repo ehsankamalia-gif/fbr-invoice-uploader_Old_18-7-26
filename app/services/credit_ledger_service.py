@@ -52,59 +52,42 @@ class CreditLedgerService:
             db.close()
 
     def get_chassis_suggestions(self, query: str) -> List[Dict[str, Any]]:
-        """Search for chassis numbers from the inventory that are marked as SOLD and have FBR invoices.
-        Requirement: Chassis must come from inventory (Motorcycle table)."""
+        """Search for chassis numbers from the inventory."""
         db = self._get_db()
         try:
             search_text = (query or "").strip().upper()
             if not search_text: return []
 
-            # Fix for MySQL Collation Mismatch (Requirement: Read text in picture)
-            # Enforce utf8mb4_unicode_ci for all chassis comparisons to prevent "Illegal mix of collations"
             from sqlalchemy import collate
             
             # Subquery to identify chassis numbers already used in a credit sale
             sold_credit_chassis = db.query(
                 collate(CreditSaleItem.chassis_number, 'utf8mb4_unicode_ci')
-            ).subquery()
+            )
 
             # Core Query: Fetch from inventory (Motorcycle table)
             stmt = db.query(
                 Motorcycle.chassis_number,
                 ProductModel.model_name,
                 Price.total_price,
-                Motorcycle.color,
-                Invoice.fbr_invoice_number
+                Motorcycle.color
             ).join(
                 ProductModel, Motorcycle.product_model_id == ProductModel.id
-            ).join(
-                InvoiceItem, InvoiceItem.motorcycle_id == Motorcycle.id
-            ).join(
-                Invoice, Invoice.id == InvoiceItem.invoice_id
             ).outerjoin(
                 Price, (Price.product_model_id == ProductModel.id) & (Price.expiration_date.is_(None))
             ).filter(
                 collate(Motorcycle.chassis_number, 'utf8mb4_unicode_ci').ilike(f"%{search_text}%"),
-                Motorcycle.status == 'SOLD',
-                or_(
-                    Invoice.fbr_invoice_number.is_not(None),
-                    Invoice.is_fiscalized == True,
-                    Invoice.sync_status == "SENT"
-                ),
                 ~collate(Motorcycle.chassis_number, 'utf8mb4_unicode_ci').in_(sold_credit_chassis)
             ).distinct()
 
             results = stmt.limit(20).all()
-            
-            logger.info(f"CHASSIS SEARCH (FIXED COLLATION): '{search_text}' found {len(results)} sold results")
             
             return [
                 {
                     "chassis": r[0], 
                     "model": r[1] or "Unknown", 
                     "cash_price": r[2] or 0.0,
-                    "color": r[3] or "",
-                    "fbr_inv": r[4] or "AVAILABLE"
+                    "color": r[3] or ""
                 } for r in results
             ]
         except Exception as e:

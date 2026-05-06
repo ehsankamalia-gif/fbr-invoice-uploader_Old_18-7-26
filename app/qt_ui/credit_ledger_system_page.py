@@ -19,25 +19,29 @@ class BuyerCompleter(QCompleter):
         self.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
         self.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.setFilterMode(Qt.MatchFlag.MatchContains)
-        # DisplayRole is used for search, UserRole for final completion
-        self.setCompletionRole(Qt.ItemDataRole.UserRole)
         
         # Use QListView for better control and focus handling
         popup = QListView()
         popup.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         popup.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         popup.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        # Ensure the popup is wide enough for detailed info
+        popup.setMinimumWidth(500)
+        # Standard attributes for popup completion
+        popup.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setPopup(popup)
 
     def pathFromIndex(self, index: QModelIndex) -> str:
         # Returning empty string prevents the LineEdit from being updated during navigation.
-        # This is CRITICAL to prevent auto-fill while arrowing through the list.
+        # This is the standard way to disable auto-fill while arrowing through the list.
         return ""
 
-class ChassisLineEdit(QLineEdit):
-    """Custom LineEdit that redirects arrow keys to the completer popup."""
+class SharedLineEdit(QLineEdit):
+    """Custom LineEdit that redirects arrow keys to the completer popup for consistent behavior."""
     def keyPressEvent(self, event):
-        # Auto-uppercase behavior without using setText() (Requirement 6)
+        completer = self.completer()
+        
+        # Auto-uppercase behavior
         if event.text().isalpha():
             upper_event = QKeyEvent(
                 event.type(), 
@@ -48,23 +52,38 @@ class ChassisLineEdit(QLineEdit):
             super().keyPressEvent(upper_event)
             return
 
-        completer = self.completer()
-        if completer and completer.popup().isVisible():
+        if completer and completer.popup() and completer.popup().isVisible():
+            # 1. Handle Navigation Keys
             if event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up, Qt.Key.Key_PageUp, Qt.Key.Key_PageDown):
-                # Redirect arrow keys to the popup list without moving focus (Requirement 2)
+                # Redirect keys to the popup for visible highlighting WITHOUT updating LineEdit text
                 completer.popup().keyPressEvent(event)
                 return
+            
+            # 2. Handle Selection Keys (Enter/Return)
             if event.key() in (Qt.Key.Key_Enter, Qt.Key.Key_Return):
-                # Trigger selection for the highlighted item
                 index = completer.popup().currentIndex()
                 if index.isValid():
-                    completer.activated[QModelIndex].emit(index)
-                completer.popup().hide()
-                return
+                    # Get the correct index from the completion model
+                    completion_index = completer.completionModel().mapToSource(index)
+                    completer.activated[QModelIndex].emit(completion_index)
+                    completer.popup().hide()
+                    return
+            
+            # 3. Handle Escape
             if event.key() == Qt.Key.Key_Escape:
                 completer.popup().hide()
                 return
+
         super().keyPressEvent(event)
+
+    def focusInEvent(self, event):
+        """Ensure the widget is ready for interaction when focused."""
+        super().focusInEvent(event)
+        if self.completer():
+            # Standard setup for QCompleter in QTableWidget
+            self.completer().setWidget(self)
+            popup = self.completer().popup()
+            popup.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
 
 class CreditLedgerSystemPage(QWidget):
     def __init__(self, parent=None):
@@ -98,11 +117,14 @@ class CreditLedgerSystemPage(QWidget):
         self.payment_tab = QWidget()
         self._setup_payment_tab()
         self.tabs.addTab(self.payment_tab, "Payment Entry")
-        
+
         # 4. Ledger Statement Tab
         self.ledger_tab = QWidget()
         self._setup_ledger_tab()
         self.tabs.addTab(self.ledger_tab, "Ledger Statement")
+
+        # Auto-refresh dashboard when switching to it
+        self.tabs.currentChanged.connect(lambda index: self.refresh_dashboard() if index == 0 else None)
         
         main_layout.addWidget(self.tabs)
 
@@ -170,7 +192,7 @@ class CreditLedgerSystemPage(QWidget):
         
         # Header Info
         grid.addWidget(QLabel("Buyer Name:"), 0, 0)
-        self.sale_buyer_input = QLineEdit()
+        self.sale_buyer_input = SharedLineEdit()
         self.sale_buyer_input.setPlaceholderText("Search by Name, Phone or CNIC...")
         self.sale_buyer_completer = BuyerCompleter(self.sale_buyer_input)
         self.sale_buyer_input.setCompleter(self.sale_buyer_completer)
@@ -198,6 +220,7 @@ class CreditLedgerSystemPage(QWidget):
         
         # Items Table
         grid.addWidget(QLabel("Motorcycles:"), 2, 0)
+        
         self.sale_items_table = QTableWidget(0, 6)
         self.sale_items_table.setHorizontalHeaderLabels(["Chassis #", "Model", "Color", "Cash Price", "Credit Price", "Action"])
         self.sale_items_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -332,12 +355,12 @@ class CreditLedgerSystemPage(QWidget):
         row = self.sale_items_table.rowCount()
         self.sale_items_table.insertRow(row)
         
-        chassis_edit = ChassisLineEdit()
+        chassis_edit = QLineEdit()
         chassis_edit.setPlaceholderText("Scan/Type Chassis #")
-        chassis_completer = BuyerCompleter(chassis_edit) # Reuse logic for non-autofill
+        chassis_completer = QCompleter(chassis_edit)
         chassis_edit.setCompleter(chassis_completer)
         chassis_edit.textChanged.connect(lambda text, ce=chassis_edit, cc=chassis_completer: self._update_chassis_suggest(text, ce, cc))
-        chassis_completer.activated[QModelIndex].connect(lambda index, ce=chassis_edit, r=row: self._on_chassis_selected_index(index, ce, r))
+        chassis_completer.activated.connect(lambda text, ce=chassis_edit, r=row: self._on_chassis_selected(ce, r))
         chassis_edit.editingFinished.connect(lambda ce=chassis_edit, r=row: self._on_chassis_selected(ce, r))
         
         # Install event filter for Enter and Tab handling
@@ -377,6 +400,12 @@ class CreditLedgerSystemPage(QWidget):
     def eventFilter(self, source, event):
         """Requirement: Handle Enter in last row and Tab in last column."""
         if event.type() == QEvent.Type.KeyPress:
+            # IMPORTANT: If a completer popup is visible, do NOT handle navigation or selection keys here.
+            # Let the SharedLineEdit or the popup itself handle them.
+            if isinstance(source, QLineEdit) and source.completer() and source.completer().popup().isVisible():
+                if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Down, Qt.Key.Key_Up):
+                    return False # Pass to widget
+
             # Handle Enter key
             if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                 # Find which row this widget belongs to
@@ -416,71 +445,16 @@ class CreditLedgerSystemPage(QWidget):
             suggestions = credit_ledger_service.get_chassis_suggestions(search_text)
             
             # Create model for the completer
-            model = QStandardItemModel(completer)
-            for s in suggestions:
-                display_text = f"{s['chassis']} | {s['model']} | {s['color']}"
-                if s.get('fbr_inv') and s['fbr_inv'] != "AVAILABLE":
-                    display_text += f" | FBR: {s['fbr_inv']}"
-                
-                item = QStandardItem(display_text)
-                item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-                item.setData(s['chassis'], Qt.ItemDataRole.UserRole)
-                item.setData(s, Qt.ItemDataRole.UserRole + 1)
-                model.appendRow(item)
-                
+            model = QStringListModel([s['chassis'] for s in suggestions])
             completer.setModel(model)
             
-            # Requirement: Show Dropdown Immediately without flickering
             if suggestions:
-                # We do NOT use setCompletionPrefix here as we manually fetched matches
                 completer.complete()
             else:
                 completer.popup().hide()
             
         except Exception as e:
             logger.error(f"Error updating chassis suggestions: {e}")
-
-    def _on_chassis_selected_index(self, index, edit, row):
-        """Handle selection from the chassis completer popup."""
-        chassis = index.data(Qt.ItemDataRole.UserRole)
-        m_data = index.data(Qt.ItemDataRole.UserRole + 1)
-        
-        # Set the clean chassis number
-        edit.setText(chassis)
-        
-        if m_data:
-            self._apply_chassis_details(m_data, row)
-
-    def _apply_chassis_details(self, m_data, row):
-        # Double check FBR invoice status (Requirement: Validation on Selection)
-        if not credit_ledger_service.validate_fbr_invoice(m_data['chassis']):
-            QMessageBox.critical(self, "Validation Error", 
-                f"Chassis {m_data['chassis']} does not have a fiscalized FBR invoice.\n"
-                "Credit sale is not allowed.")
-            # Clear fields
-            chassis_edit = self.sale_items_table.cellWidget(row, 0)
-            if chassis_edit: chassis_edit.clear()
-            self.sale_items_table.item(row, 1).setText("")
-            self.sale_items_table.item(row, 2).setText("")
-            self.sale_items_table.item(row, 3).setText("0.00")
-            credit_widget = self.sale_items_table.cellWidget(row, 4)
-            if credit_widget: credit_widget.setText("0.00")
-            return
-
-        # Auto-fill: Model, Color, Cash Price, and Credit Price
-        self.sale_items_table.item(row, 1).setText(m_data['model'])
-        self.sale_items_table.item(row, 2).setText(m_data.get('color', ''))
-        
-        price_str = f"{m_data['cash_price']:.2f}"
-        self.sale_items_table.item(row, 3).setText(price_str)
-        
-        credit_widget = self.sale_items_table.cellWidget(row, 4)
-        if credit_widget:
-            credit_widget.setText(price_str)
-            # Smooth transition: Move focus to Credit Price field
-            QTimer.singleShot(100, credit_widget.setFocus)
-            
-        self._calculate_sale_totals()
 
     def _on_chassis_selected(self, edit, row):
         chassis = edit.text().strip()
@@ -500,19 +474,28 @@ class CreditLedgerSystemPage(QWidget):
         if m_data:
             self._apply_chassis_details(m_data, row)
         else:
-            # Check if it exists but is missing FBR invoice
-            exists_in_db = credit_ledger_service.check_chassis_exists(chassis)
-            if exists_in_db:
-                QMessageBox.warning(self, "Invalid Chassis", 
-                    f"Chassis {chassis} exists but does not have a valid FBR invoice.\n"
-                    "Only FBR-invoiced motorcycles can be sold on credit.")
-            
-            # Clear if invalid chassis or missing FBR
+            # Clear if invalid chassis
             self.sale_items_table.item(row, 1).setText("")
             self.sale_items_table.item(row, 2).setText("")
             self.sale_items_table.item(row, 3).setText("0.00")
             credit_widget = self.sale_items_table.cellWidget(row, 4)
             if credit_widget: credit_widget.setText("0.00")
+            
+        self._calculate_sale_totals()
+
+    def _apply_chassis_details(self, m_data, row):
+        """Auto-fill: Model, Color, Cash Price, and Credit Price."""
+        self.sale_items_table.item(row, 1).setText(m_data['model'])
+        self.sale_items_table.item(row, 2).setText(m_data.get('color', ''))
+        
+        price_str = f"{m_data['cash_price']:.2f}"
+        self.sale_items_table.item(row, 3).setText(price_str)
+        
+        credit_widget = self.sale_items_table.cellWidget(row, 4)
+        if credit_widget:
+            credit_widget.setText(price_str)
+            # Smooth transition: Move focus to Credit Price field
+            QTimer.singleShot(100, credit_widget.setFocus)
             
         self._calculate_sale_totals()
 
@@ -595,7 +578,7 @@ class CreditLedgerSystemPage(QWidget):
         form = QGridLayout()
         
         form.addWidget(QLabel("Buyer Name:"), 0, 0)
-        self.pay_buyer_input = QLineEdit()
+        self.pay_buyer_input = SharedLineEdit()
         self.pay_buyer_input.setPlaceholderText("Search by Name, Phone or CNIC...")
         self.pay_buyer_completer = BuyerCompleter(self.pay_buyer_input)
         self.pay_buyer_input.setCompleter(self.pay_buyer_completer)
@@ -770,9 +753,11 @@ class CreditLedgerSystemPage(QWidget):
     def _setup_ledger_tab(self):
         layout = QVBoxLayout(self.ledger_tab)
         
+        # Filters
         filters = QHBoxLayout()
-        self.ledger_buyer_input = QLineEdit()
-        self.ledger_buyer_input.setPlaceholderText("Search by Name, Phone or CNIC...")
+        filters.addWidget(QLabel("Buyer Name:"))
+        self.ledger_buyer_input = SharedLineEdit()
+        self.ledger_buyer_input.setPlaceholderText("Search Buyer...")
         self.ledger_buyer_completer = BuyerCompleter(self.ledger_buyer_input)
         self.ledger_buyer_input.setCompleter(self.ledger_buyer_completer)
         self.ledger_buyer_input.textChanged.connect(self._update_ledger_buyer_suggestions)
