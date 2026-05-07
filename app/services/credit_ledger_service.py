@@ -164,6 +164,9 @@ class CreditLedgerService:
                 if not self.check_chassis_unique(item_data['chassis_number']):
                     raise ValueError(f"Chassis {item_data['chassis_number']} already sold on credit.")
                 
+                # Extract description before creating CreditSaleItem model
+                user_desc = item_data.pop('description', None)
+                
                 item = CreditSaleItem(sale_id=sale.id, **item_data)
                 db.add(item)
                 
@@ -174,8 +177,13 @@ class CreditLedgerService:
 
                 # Individual Ledger Entry for this Chassis (Debit)
                 current_balance += item_data['credit_price']
-                # Requirement: “Motorcycle Sale - Honda CD 70 - Chassis No: ABC12345”
+                
+                # Base description: Requirement: “Motorcycle Sale - Honda CD 70 - Chassis No: ABC12345”
                 desc_text = f"Motorcycle Sale - {item_data.get('model', 'Unknown')} - Chassis No: {item_data['chassis_number']}"
+                
+                # If user provided a description, append it on a new line
+                if user_desc and user_desc.strip():
+                    desc_text += f"\n{user_desc.strip()}"
                 
                 ledger_entry = BuyerLedger(
                     date=sale.sale_date,
