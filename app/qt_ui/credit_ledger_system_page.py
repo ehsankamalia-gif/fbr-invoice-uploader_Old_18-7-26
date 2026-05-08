@@ -83,11 +83,11 @@ class CustomerFinancialSummaryDialog(QDialog):
             "Credit Amount", "Paid Amount", "Remaining", "Due Date", "Status"
         ])
         
-        # Workable Column Resizing
+        # Workable Column Resizing & Responsive Layout
         header = self.accounts_table.horizontalHeader()
-        header.setStretchLastSection(False)
+        header.setStretchLastSection(True)
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setCascadingSectionResizes(True)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch) # Model stretches
         
         self.accounts_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.accounts_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -242,11 +242,11 @@ class CustomerFinancialSummaryDialog(QDialog):
         table = QTableWidget(0, 5)
         table.setHorizontalHeaderLabels(["Date", "Description", "Debit", "Credit", "Balance"])
         
-        # Workable Column Resizing
+        # Workable Column Resizing & Responsive Layout
         header = table.horizontalHeader()
-        header.setStretchLastSection(False)
+        header.setStretchLastSection(True)
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setCascadingSectionResizes(True)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch) # Description stretches
         
         table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         table.setWordWrap(True)
@@ -626,11 +626,11 @@ class CreditLedgerSystemPage(QWidget):
         self.buyer_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.buyer_table.verticalHeader().setVisible(False)
         
-        # Workable Column Resizing
+        # Workable Column Resizing & Responsive Layout
         header = self.buyer_table.horizontalHeader()
-        header.setStretchLastSection(False)
+        header.setStretchLastSection(True)
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setCascadingSectionResizes(True)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch) # Name stretches
         
         self.buyer_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.buyer_table.itemClicked.connect(self._on_buyer_clicked)
@@ -651,10 +651,11 @@ class CreditLedgerSystemPage(QWidget):
         self.recent_payments_list = QTableWidget(0, 2)
         self.recent_payments_list.setHorizontalHeaderLabels(["Customer", "Amount"])
         
-        # Workable Column Resizing
+        # Workable Column Resizing & Responsive Layout
         rh = self.recent_payments_list.horizontalHeader()
-        rh.setStretchLastSection(False)
+        rh.setStretchLastSection(True)
         rh.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        rh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch) # Customer stretches
         
         self.recent_payments_list.verticalHeader().setVisible(False)
         self.recent_payments_list.setShowGrid(False)
@@ -922,10 +923,11 @@ class CreditLedgerSystemPage(QWidget):
         """)
         
         header = self.sale_items_table.horizontalHeader()
-        header.setStretchLastSection(False)
+        header.setStretchLastSection(True)
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setCascadingSectionResizes(True)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch) # Model stretches
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch) # Description stretches
         items_layout.addWidget(self.sale_items_table)
         
         self.add_item_btn = QPushButton("➕ Add Another Motorcycle")
@@ -1666,11 +1668,11 @@ class CreditLedgerSystemPage(QWidget):
             "Sale Date", "Due Date", "Credit Amt", "Paid", "Remaining", "Status"
         ])
         
-        # Workable Column Resizing
+        # Workable Column Resizing & Responsive Layout
         ch = self.cust_accounts_table.horizontalHeader()
-        ch.setStretchLastSection(False)
+        ch.setStretchLastSection(True)
         ch.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        ch.setCascadingSectionResizes(True)
+        ch.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch) # Motorcycle stretches
         
         self.cust_accounts_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.cust_accounts_table.setStyleSheet("QTableWidget { gridline-color: #ecf0f1; }")
@@ -1940,11 +1942,11 @@ class CreditLedgerSystemPage(QWidget):
             "Paid Amount", "Remaining", "Due Date", "Status"
         ])
         
-        # Workable Column Resizing
+        # Workable Column Resizing & Responsive Layout
         ah = self.active_table.horizontalHeader()
-        ah.setStretchLastSection(False)
+        ah.setStretchLastSection(True)
         ah.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        ah.setCascadingSectionResizes(True)
+        ah.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch) # Customer stretches
         
         self.active_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         layout.addWidget(self.active_table)
@@ -1983,11 +1985,11 @@ class CreditLedgerSystemPage(QWidget):
             "Due Date", "Overdue Days", "Action"
         ])
         
-        # Workable Column Resizing
+        # Workable Column Resizing & Responsive Layout
         dh = self.due_table.horizontalHeader()
-        dh.setStretchLastSection(False)
+        dh.setStretchLastSection(True)
         dh.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        dh.setCascadingSectionResizes(True)
+        dh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch) # Customer stretches
         
         self.due_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         layout.addWidget(self.due_table)
@@ -2098,11 +2100,11 @@ class CreditLedgerSystemPage(QWidget):
         self.ledger_table = QTableWidget(0, 6)
         self.ledger_table.setHorizontalHeaderLabels(["Date", "Description", "Sale ID", "Debit", "Credit", "Balance"])
         
-        # Workable Column Resizing
+        # Workable Column Resizing & Responsive Layout
         lh = self.ledger_table.horizontalHeader()
-        lh.setStretchLastSection(False)
+        lh.setStretchLastSection(True)
         lh.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        lh.setCascadingSectionResizes(True)
+        lh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch) # Description stretches
         
         self.ledger_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         
