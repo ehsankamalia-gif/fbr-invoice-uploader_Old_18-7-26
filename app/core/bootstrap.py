@@ -39,6 +39,11 @@ class Bootstrapper:
             
             # 3. Environment Variables (.env)
             self.setup_env_file()
+
+            # 4. Initialize Database (including migrations)
+            if not self.init_database():
+                logger.error("Database initialization failed.")
+                return False
             
             logger.info("Environment check completed successfully.")
             return True
@@ -94,6 +99,17 @@ class Bootstrapper:
             else:
                 logger.warning("Neither .env nor .env.example found. Creating empty .env")
                 env_file.touch()
+
+    def init_database(self) -> bool:
+        """Initializes the database connection and runs migrations."""
+        try:
+            logger.info("Initializing database and running migrations...")
+            from app.db.session import init_db
+            init_db()
+            return True
+        except Exception as e:
+            logger.error(f"Database initialization failed: {e}")
+            return False
 
 def run_bootstrap():
     """Entry point for the bootstrap process."""

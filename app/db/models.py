@@ -587,10 +587,12 @@ class CreditSale(Base):
     buyer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
     buyer_type = Column(String(20), nullable=False) # Customer or Dealer
     duration_months = Column(Integer, default=0)
+    duration_days = Column(Integer, default=0)
     
     total_cash_price = Column(Float, default=0.0)
     total_credit_price = Column(Float, default=0.0)
     advance_payment = Column(Float, default=0.0)
+    advance_payment_mode = Column(String(50), default="Cash")
     remaining_amount = Column(Float, default=0.0)
     
     status = Column(String(20), default="ACTIVE")
@@ -623,6 +625,7 @@ class CreditPayment(Base):
     penalty_amount = Column(Float, default=0.0)
     discount_amount = Column(Float, default=0.0)
     net_amount = Column(Float, nullable=False) # amount + penalty - discount
+    payment_mode = Column(String(50), default="Cash") # Cash, Bank Transfer, Credit Card, etc.
     invoice_reference = Column(String(50), nullable=True)
     created_at = Column(DateTime, default=dt.datetime.utcnow)
 
@@ -701,4 +704,82 @@ class PrintTemplateLayout(Base):
     template_name = Column(String(80), unique=True, index=True, nullable=False)
     positions = Column(JSON, nullable=False)
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow, index=True)
+
+
+class FinanceCreditSale(Base):
+    __tablename__ = "finance_credit_sales"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sale_id = Column(String(50), unique=True, index=True, nullable=False)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
+    customer_name = Column(String(100), nullable=False)
+    chassis_no = Column(String(50), nullable=False, index=True)
+    engine_no = Column(String(50), nullable=True)
+    model = Column(String(50), nullable=True)
+    cash_price = Column(Float, default=0.0)
+    credit_price = Column(Float, default=0.0)
+    down_payment = Column(Float, default=0.0)
+    down_payment_method = Column(String(50), default="Cash")
+    duration_months = Column(Integer, default=0)
+    duration_days = Column(Integer, default=0)
+    installment_amount = Column(Float, default=0.0)
+    sale_date = Column(DateTime, default=dt.datetime.utcnow, index=True)
+    due_date = Column(DateTime, nullable=True, index=True)
+    remaining_balance = Column(Float, default=0.0)
+    status = Column(String(20), default="ACTIVE") # ACTIVE, CLOSED, OVERDUE
+    credit_type = Column(String(50), default="Advanced Separate Finance")
+    notes = Column(String(500), nullable=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+
+    customer = relationship("Customer")
+
+class FinanceInstallment(Base):
+    __tablename__ = "finance_installments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    payment_id = Column(String(50), unique=True, index=True, nullable=False)
+    sale_id = Column(Integer, ForeignKey("finance_credit_sales.id"), nullable=False, index=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
+    paid_amount = Column(Float, nullable=False)
+    payment_date = Column(DateTime, default=dt.datetime.utcnow, index=True)
+    payment_method = Column(String(50), default="Cash")
+    reference_no = Column(String(50), nullable=True)
+    notes = Column(String(500), nullable=True)
+    loan_id = Column(Integer, nullable=True)
+    installment_no = Column(Integer, nullable=True)
+    due_date = Column(DateTime, nullable=True)
+    principal_due = Column(Float, default=0.0)
+    interest_due = Column(Float, default=0.0)
+    fees_due = Column(Float, default=0.0)
+    total_due = Column(Float, default=0.0)
+    late_fee_accrued = Column(Float, default=0.0)
+    late_fee_last_calculated_at = Column(DateTime, nullable=True)
+    status = Column(String(20), default="PAID")
+    paid_principal = Column(Float, default=0.0)
+    paid_interest = Column(Float, default=0.0)
+    paid_fees = Column(Float, default=0.0)
+    paid_total = Column(Float, default=0.0)
+    paid_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+
+    sale = relationship("FinanceCreditSale")
+    customer = relationship("Customer")
+
+class FinanceLedger(Base):
+    __tablename__ = "finance_ledger"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ledger_id = Column(String(50), unique=True, index=True, nullable=False)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
+    sale_id = Column(Integer, ForeignKey("finance_credit_sales.id"), nullable=True, index=True)
+    entry_type = Column(String(20), nullable=False)
+    description = Column(String(500), nullable=True)
+    debit = Column(Float, default=0.0)
+    credit = Column(Float, default=0.0)
+    balance = Column(Float, default=0.0)
+    entry_date = Column(DateTime, default=dt.datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+
+    customer = relationship("Customer")
+    sale = relationship("FinanceCreditSale")
 

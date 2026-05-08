@@ -350,6 +350,12 @@ def run_migrations():
                 (7, "Add unique constraint to sms_campaigns.name", _migration_v7_add_sms_campaign_unique_name),
                 (8, "Add reporting templates/schedules/runs tables", _migration_v8_add_reporting_tables),
                 (9, "Add booking_template to sms_configurations", _migration_v9_add_booking_template),
+                (10, "Add payment_date and created_at to finance_installments", _migration_v10_add_finance_cols),
+                (11, "Ensure created_at exists in finance_installments", _migration_v11_ensure_finance_created_at),
+                (12, "Make loan_id nullable in finance_installments", _migration_v12_nullable_loan_id),
+                (13, "Make installment_no nullable in finance_installments", _migration_v13_nullable_installment_no),
+                (14, "Make due_date nullable in finance_installments", _migration_v14_nullable_due_date),
+                (15, "Make finance fields nullable and add defaults", _migration_v15_comprehensive_finance_fix),
             ]
 
             for version, description, func in migrations:
@@ -583,6 +589,145 @@ def _migration_v9_add_booking_template(conn) -> bool:
         return True
     except Exception as e:
         logger.error(f"Migration v9 failed: {e}", exc_info=True)
+        return False
+
+def _migration_v10_add_finance_cols(conn) -> bool:
+    """Adds missing columns to the finance_installments table."""
+    try:
+        # 1. payment_date
+        try:
+            conn.execute(text("SELECT payment_date FROM finance_installments LIMIT 1"))
+        except Exception:
+            logger.info("Adding column 'payment_date' to 'finance_installments'...")
+            conn.execute(text("ALTER TABLE finance_installments ADD COLUMN payment_date DATETIME DEFAULT CURRENT_TIMESTAMP"))
+            try:
+                conn.commit()
+            except: pass
+
+        # 2. created_at
+        try:
+            conn.execute(text("SELECT created_at FROM finance_installments LIMIT 1"))
+        except Exception:
+            logger.info("Adding column 'created_at' to 'finance_installments'...")
+            conn.execute(text("ALTER TABLE finance_installments ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP"))
+            try:
+                conn.commit()
+            except: pass
+            
+        return True
+    except Exception as e:
+        logger.error(f"Migration v10 failed: {e}", exc_info=True)
+        return False
+
+def _migration_v11_ensure_finance_created_at(conn) -> bool:
+    """Fallback migration to ensure created_at exists in finance_installments."""
+    try:
+        try:
+            conn.execute(text("SELECT created_at FROM finance_installments LIMIT 1"))
+        except Exception:
+            logger.info("Adding missing 'created_at' column to 'finance_installments'...")
+            conn.execute(text("ALTER TABLE finance_installments ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP"))
+            try:
+                conn.commit()
+            except: pass
+        return True
+    except Exception as e:
+        logger.error(f"Migration v11 failed: {e}", exc_info=True)
+        return False
+
+def _migration_v12_nullable_loan_id(conn) -> bool:
+    """Makes loan_id column nullable in finance_installments table."""
+    try:
+        # Check if loan_id column exists
+        try:
+            conn.execute(text("SHOW COLUMNS FROM finance_installments LIKE 'loan_id'"))
+            result = conn.execute(text("SHOW COLUMNS FROM finance_installments LIKE 'loan_id'")).fetchone()
+            if result:
+                logger.info("Making 'loan_id' nullable in 'finance_installments'...")
+                # result[2] is the Nullable column in DESCRIBE/SHOW COLUMNS
+                # We'll just run the ALTER anyway to be sure
+                conn.execute(text("ALTER TABLE finance_installments MODIFY loan_id INT NULL"))
+                try:
+                    conn.commit()
+                except: pass
+        except Exception as e:
+            logger.warning(f"Could not modify loan_id (it might not exist): {e}")
+        
+        return True
+    except Exception as e:
+        logger.error(f"Migration v12 failed: {e}", exc_info=True)
+        return False
+
+def _migration_v13_nullable_installment_no(conn) -> bool:
+    """Makes installment_no column nullable in finance_installments table."""
+    try:
+        try:
+            conn.execute(text("SHOW COLUMNS FROM finance_installments LIKE 'installment_no'"))
+            result = conn.execute(text("SHOW COLUMNS FROM finance_installments LIKE 'installment_no'")).fetchone()
+            if result:
+                logger.info("Making 'installment_no' nullable in 'finance_installments'...")
+                conn.execute(text("ALTER TABLE finance_installments MODIFY installment_no INT NULL"))
+                try:
+                    conn.commit()
+                except: pass
+        except Exception as e:
+            logger.warning(f"Could not modify installment_no: {e}")
+        
+        return True
+    except Exception as e:
+        logger.error(f"Migration v13 failed: {e}", exc_info=True)
+        return False
+
+def _migration_v14_nullable_due_date(conn) -> bool:
+    """Makes due_date column nullable in finance_installments table."""
+    try:
+        try:
+            conn.execute(text("SHOW COLUMNS FROM finance_installments LIKE 'due_date'"))
+            result = conn.execute(text("SHOW COLUMNS FROM finance_installments LIKE 'due_date'")).fetchone()
+            if result:
+                logger.info("Making 'due_date' nullable in 'finance_installments'...")
+                conn.execute(text("ALTER TABLE finance_installments MODIFY due_date DATE NULL"))
+                try:
+                    conn.commit()
+                except: pass
+        except Exception as e:
+            logger.warning(f"Could not modify due_date: {e}")
+        
+        return True
+    except Exception as e:
+        logger.error(f"Migration v14 failed: {e}", exc_info=True)
+        return False
+
+def _migration_v15_comprehensive_finance_fix(conn) -> bool:
+    """Makes all reporting-specific columns nullable with defaults in finance_installments."""
+    try:
+        cols_to_fix = [
+            "principal_due", "interest_due", "fees_due", "total_due",
+            "late_fee_accrued", "paid_principal", "paid_interest",
+            "paid_fees", "paid_total"
+        ]
+        
+        for col in cols_to_fix:
+            try:
+                logger.info(f"Making '{col}' nullable in 'finance_installments'...")
+                conn.execute(text(f"ALTER TABLE finance_installments MODIFY {col} FLOAT NULL DEFAULT 0.0"))
+            except Exception as e:
+                logger.warning(f"Could not modify {col}: {e}")
+
+        # Also status field
+        try:
+            logger.info("Making 'status' nullable in 'finance_installments'...")
+            conn.execute(text("ALTER TABLE finance_installments MODIFY status VARCHAR(20) NULL DEFAULT 'PAID'"))
+        except Exception as e:
+            logger.warning(f"Could not modify status: {e}")
+
+        try:
+            conn.commit()
+        except: pass
+        
+        return True
+    except Exception as e:
+        logger.error(f"Migration v15 failed: {e}", exc_info=True)
         return False
 
 def get_db():
