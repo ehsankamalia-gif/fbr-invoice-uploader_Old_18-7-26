@@ -109,6 +109,7 @@ from app.core.logger import logger
 from app.core.version_manager import VersionManager
 from app.updater.updater_manager import UpdaterManager
 from app.qt_ui.whatsapp_campaign_widget import WhatsAppCampaignWidget
+from app.qt_ui.dms_automation_page import DMSAutomationPage
 
 
 @dataclass
@@ -1164,6 +1165,7 @@ class MainWindow(QMainWindow):
         self._add_page("whatsapp", self._create_whatsapp_page(), "Whatsapp Module")
         self._add_page("settings", self._create_settings_page(), "Settings")
         self._add_page("welcome", self._create_welcome_page(), "Welcome")
+        self._add_page("dms_automation", self._create_dms_automation_page(), "DMS Automation")
 
         nav_layout.addSpacing(10)
         
@@ -1184,6 +1186,7 @@ class MainWindow(QMainWindow):
             "welcome": "👋",
             "captured_data": "📁",
             "print_document": "🖨️",
+            "dms_automation": "🤖",
         }
 
         self.menu_groups = {
@@ -1191,6 +1194,7 @@ class MainWindow(QMainWindow):
             "SALES": ["invoice", "reports", "advance_booking", "credit_ledger", "print_document"],
             "INVENTORY": ["inventory", "prices", "spare_ledger", "captured_data"],
             "DIRECTORY": ["customers", "dealers"],
+            "AUTOMATION": ["dms_automation"],
             "SYSTEM": ["sms", "whatsapp", "settings"]
         }
 
@@ -3141,6 +3145,9 @@ class MainWindow(QMainWindow):
         root_layout.addStretch(1)
 
         return page
+
+    def _create_dms_automation_page(self) -> QWidget:
+        return DMSAutomationPage(self)
 
     def _open_fbr_security(self):
         dialog = FBRSecurityDialog(self)
