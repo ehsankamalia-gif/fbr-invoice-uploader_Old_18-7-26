@@ -793,7 +793,7 @@ def _render_dashboard_html() -> str:
           const body = rows.map(r => {
             const inv = r.invoice_number;
             const statusTd = `<td data-status-for="${inv}">${r.sync_status}</td>`;
-            const canRetry = (r.sync_status || '').toUpperCase() === 'PENDING';
+            const canRetry = ['PENDING', 'FAILED'].includes((r.sync_status || '').toUpperCase());
             const btn = canRetry
               ? `<button type="button" class="btn btn-sm btn-outline-primary retry-btn" data-invoice="${inv}">Retry</button>`
               : `<span class="text-muted small">—</span>`;
@@ -882,7 +882,7 @@ def _render_dashboard_html() -> str:
             if (!res.ok) {
               const msg = data && (data.detail || data.message) ? (data.detail || data.message) : 'Retry failed.';
               toast(msg, 'error');
-              if (statusCell) statusCell.textContent = 'PENDING';
+              if (statusCell) statusCell.textContent = (data && data.sync_status) ? data.sync_status : 'FAILED';
               buttonEl.disabled = false;
               buttonEl.innerHTML = originalHtml;
               return;
@@ -903,7 +903,7 @@ def _render_dashboard_html() -> str:
             }
           } catch (e) {
             toast(`Network error: ${e}`, 'error');
-            if (statusCell) statusCell.textContent = 'PENDING';
+            if (statusCell) statusCell.textContent = 'FAILED';
             buttonEl.disabled = false;
             buttonEl.innerHTML = originalHtml;
           }
@@ -1482,7 +1482,7 @@ def _render_lookup_html() -> str:
           selectedMeta.textContent = inv ? `Selected: ${inv}` : 'Selected row';
           copyInvBtn.disabled = !inv;
           copyChBtn.disabled = !ch;
-          retryBtn.disabled = !inv || st !== 'PENDING';
+          retryBtn.disabled = !inv || !['PENDING', 'FAILED'].includes(st);
         }
 
         async function retrySelected() {
@@ -2517,7 +2517,7 @@ def retry_invoice_upload(
     inv = db.query(Invoice).filter(Invoice.invoice_number == inv_num).first()
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
-    if (inv.sync_status or "").upper() != "PENDING":
+    if (inv.sync_status or "").upper() not in ["PENDING", "FAILED"]:
         return JSONResponse(
             {
                 "invoice_number": inv.invoice_number,
