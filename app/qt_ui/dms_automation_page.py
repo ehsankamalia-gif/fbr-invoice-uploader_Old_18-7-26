@@ -12,7 +12,10 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QSizePolicy,
     QScrollArea,
+    QDialog,
+    QFormLayout,
 )
+from app.qt_ui.settings_modals import DMSSettingsDialog
 import os
 import sys
 import json
@@ -41,6 +44,26 @@ class DMSAutomationPage(QWidget):
         header.setStyleSheet("font-size: 28px; color: #2c3e50; font-weight: bold;")
         header_layout.addWidget(header)
         header_layout.addStretch(1)
+
+        settings_btn = QPushButton("⚙️ DMS Settings")
+        settings_btn.setStyleSheet("""
+            QPushButton {
+                background-color: white;
+                color: #2c3e50;
+                border: 1px solid #dee2e6;
+                padding: 8px 15px;
+                border-radius: 6px;
+                font-weight: 500;
+            }
+            QPushButton:hover {
+                background-color: #f8f9fa;
+                border-color: #ced4da;
+            }
+        """)
+        settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        settings_btn.clicked.connect(self._show_settings_dialog)
+        header_layout.addWidget(settings_btn)
+
         main_layout.addLayout(header_layout)
 
         info_frame = self._create_info_frame()
@@ -244,20 +267,40 @@ class DMSAutomationPage(QWidget):
         open_btn_layout = QHBoxLayout()
         open_btn_layout.addStretch(1)
         
-        open_btn = QPushButton("📂 Open DMS Automation Directory")
-        open_btn.setStyleSheet("""
+        self.launch_btn = QPushButton("🚀 Launch DMS Automation")
+        self.launch_btn.setStyleSheet("""
             QPushButton {
-                background-color: #3498db;
+                background-color: #27ae60;
                 color: white;
                 border: none;
                 padding: 10px 25px;
                 border-radius: 4px;
                 font-weight: bold;
                 font-size: 14px;
-                min-width: 280px;
+                min-width: 240px;
             }
             QPushButton:hover {
-                background-color: #2980b9;
+                background-color: #219150;
+            }
+        """)
+        self.launch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.launch_btn.clicked.connect(self._launch_automation)
+        open_btn_layout.addWidget(self.launch_btn)
+
+        open_btn = QPushButton("📂 Open Directory")
+        open_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f8f9fa;
+                color: #2c3e50;
+                border: 1px solid #dee2e6;
+                padding: 10px 25px;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 14px;
+                min-width: 150px;
+            }
+            QPushButton:hover {
+                background-color: #e2e6ea;
             }
         """)
         open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -356,6 +399,49 @@ class DMSAutomationPage(QWidget):
             self.submission_count_label.setText(f"1 submission recorded")
         else:
             self.submission_count_label.setText(f"{count} submissions recorded")
+
+    def _show_settings_dialog(self):
+        dialog = DMSSettingsDialog(self)
+        dialog.exec()
+
+    def _launch_automation(self):
+        import subprocess
+        dms_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "dms_automation")
+        dms_dir = os.path.abspath(dms_dir)
+        main_py = os.path.join(dms_dir, "main.py")
+        
+        if not os.path.exists(main_py):
+            QMessageBox.warning(self, "Error", f"Automation script not found at:\n{main_py}")
+            return
+
+        try:
+            # Check if there are submissions to process
+            submissions_file = Path(dms_dir) / "data" / "submissions.json"
+            has_submissions = submissions_file.exists() and submissions_file.stat().st_size > 2 # [] is 2 bytes
+            
+            cmd = [sys.executable, "main.py"]
+            if has_submissions:
+                cmd.append("--auto")
+            
+            # Use CREATE_NEW_CONSOLE on Windows to show the terminal
+            creation_flags = 0
+            if sys.platform == "win32":
+                creation_flags = subprocess.CREATE_NEW_CONSOLE
+
+            subprocess.Popen(
+                cmd,
+                cwd=dms_dir,
+                creationflags=creation_flags
+            )
+            
+            status_msg = "Starting automation in background..."
+            if has_submissions:
+                status_msg = "Starting automation to process pending submissions..."
+            
+            QMessageBox.information(self, "DMS Automation", status_msg)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to launch automation: {str(e)}")
 
     def _open_dms_portal(self):
         dms_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "dms_automation")

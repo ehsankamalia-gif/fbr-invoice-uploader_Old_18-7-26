@@ -227,6 +227,22 @@ class SettingsService:
                     logger.info("Auto-corrected Production API URL to https://gw.fbr.gov.pk/imsp/v1/api/Live")
                     # Ensure we don't overwrite user customizations if they are different, 
                     # but here we specifically target the known bad default we shipped.
+
+            # Initialize DMS settings from module .env if present
+            app_cfg = db.query(AppConfiguration).first()
+            if app_cfg and not app_cfg.dms_username:
+                try:
+                    dms_env = Path(__file__).resolve().parent.parent.parent / "dms_automation" / ".env"
+                    if dms_env.exists():
+                        for line in dms_env.read_text().splitlines():
+                            if "=" in line:
+                                k, v = line.strip().split("=", 1)
+                                if k == "DMS_PORTAL_URL": app_cfg.dms_portal_url = v
+                                elif k == "DMS_USERNAME": app_cfg.dms_username = v
+                                elif k == "DMS_PASSWORD": app_cfg.dms_password = v
+                        logger.info("Initialized DMS database settings from module .env")
+                except Exception as e:
+                    logger.warning(f"Failed to migrate DMS settings from .env to DB: {e}")
             
             db.commit()
         except Exception as e:
@@ -595,6 +611,9 @@ class SettingsService:
                 "sidebar_footer_font_size": int(getattr(config, "sidebar_footer_font_size", 15) or 15),
                 "sidebar_exit_font_size": int(getattr(config, "sidebar_exit_font_size", 16) or 16),
                 "sidebar_collapsed_font_size": int(getattr(config, "sidebar_collapsed_font_size", 18) or 18),
+                "dms_portal_url": str(getattr(config, "dms_portal_url", "https://dms.ahlportal.com/login") or ""),
+                "dms_username": str(getattr(config, "dms_username", "") or ""),
+                "dms_password": str(getattr(config, "dms_password", "") or ""),
             }
         except Exception as e:
             logger.error(f"Error getting app config: {e}")
@@ -615,6 +634,9 @@ class SettingsService:
                 "sidebar_footer_font_size": 15,
                 "sidebar_exit_font_size": 16,
                 "sidebar_collapsed_font_size": 18,
+                "dms_portal_url": "https://dms.ahlportal.com/login",
+                "dms_username": "",
+                "dms_password": "",
             }
         finally:
             db.close()
@@ -846,6 +868,58 @@ class SettingsService:
             db.rollback()
             logger.error(f"CRITICAL: Error saving SMS/WhatsApp configuration: {e}", exc_info=True)
             raise RuntimeError(f"Failed to save settings: {str(e)}")
+        finally:
+            db.close()
+
+    def save_dms_config(self, url: str, user: str, password: str):
+        """Update DMS configuration in database and sync with module .env file."""
+        db = SessionLocal()
+        try:
+            config = db.query(AppConfiguration).first()
+            if not config:
+                config = AppConfiguration()
+                db.add(config)
+            
+            config.dms_portal_url = url
+            config.dms_username = user
+            config.dms_password = password
+            db.commit()
+
+            # Sync with dms_automation/.env
+            try:
+                dms_env_path = Path(__file__).resolve().parent.parent.parent / "dms_automation" / ".env"
+                if dms_env_path.exists():
+                    lines = []
+                    with open(dms_env_path, 'r') as f:
+                        for line in f:
+                            if '=' in line:
+                                k, v = line.strip().split('=', 1)
+                                if k == "DMS_PORTAL_URL":
+                                    lines.append(f"DMS_PORTAL_URL={url}")
+                                elif k == "DMS_USERNAME":
+                                    lines.append(f"DMS_USERNAME={user}")
+                                elif k == "DMS_PASSWORD":
+                                    lines.append(f"DMS_PASSWORD={password}")
+                                else:
+                                    lines.append(line.strip())
+                            else:
+                                lines.append(line.strip())
+                    
+                    with open(dms_env_path, 'w') as f:
+                        f.write("\n".join(lines) + "\n")
+                    logger.info("Synced DMS settings to dms_automation/.env")
+            except Exception as env_err:
+                logger.error(f"Failed to sync DMS settings to .env file: {env_err}")
+
+            self._invalidate_cache()
+            self._bump_revision()
+            self._notify({"type": "dms_settings_updated", "url": url, "username": user})
+            
+            logger.info(f"Updated DMS config: user={user}")
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error saving DMS config: {e}")
+            raise
         finally:
             db.close()
 

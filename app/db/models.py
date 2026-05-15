@@ -501,6 +501,11 @@ class AppConfiguration(Base):
     sidebar_exit_font_size = Column(Integer, default=16)
     sidebar_collapsed_font_size = Column(Integer, default=18)
     
+    # DMS Portal Automation Settings
+    dms_portal_url = Column(String(255), default="https://dms.ahlportal.com/login")
+    dms_username = Column(String(100), nullable=True)
+    dms_password = Column(String(100), nullable=True)
+    
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
 
 

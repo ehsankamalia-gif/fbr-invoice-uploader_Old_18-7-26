@@ -1574,3 +1574,61 @@ class FontCustomizationDialog(BaseSettingsDialog):
             self.accept()
         except Exception as e:
             self._show_error("Error", f"Failed to save font settings: {e}")
+
+class DMSSettingsDialog(BaseSettingsDialog):
+    """Modal for DMS Portal Automation settings."""
+    def __init__(self, parent=None):
+        super().__init__("DMS Portal Automation Settings", parent)
+        self.setFixedWidth(500)
+        self._init_ui()
+        self._load_data()
+
+    def _init_ui(self):
+        layout = QGridLayout()
+        layout.setSpacing(15)
+        
+        layout.addWidget(QLabel("DMS Portal URL:"), 0, 0)
+        self.portal_url = QLineEdit()
+        self.portal_url.setPlaceholderText("https://dms.ahlportal.com/login")
+        layout.addWidget(self.portal_url, 0, 1)
+        
+        layout.addWidget(QLabel("DMS Username:"), 1, 0)
+        self.username = QLineEdit()
+        self.username.setPlaceholderText("Enter your DMS username")
+        layout.addWidget(self.username, 1, 1)
+        
+        layout.addWidget(QLabel("DMS Password:"), 2, 0)
+        self.password = QLineEdit()
+        self.password.setEchoMode(QLineEdit.EchoMode.Password)
+        self._add_password_toggle(self.password)
+        self.password.setPlaceholderText("Enter your DMS password")
+        layout.addWidget(self.password, 2, 1)
+        
+        help_text = QLabel("These credentials are used to automatically log in to the DMS portal for vehicle detail entry.")
+        help_text.setWordWrap(True)
+        help_text.setStyleSheet("color: #7f8c8d; font-size: 12px; font-weight: normal; margin-top: 10px;")
+        layout.addWidget(help_text, 3, 0, 1, 2)
+        
+        self.content_layout.addLayout(layout)
+
+    def _load_data(self):
+        cfg = settings_service.get_app_config()
+        self.portal_url.setText(cfg.get("dms_portal_url", "https://dms.ahlportal.com/login"))
+        self.username.setText(cfg.get("dms_username", ""))
+        self.password.setText(cfg.get("dms_password", ""))
+
+    def save_settings(self):
+        url = self.portal_url.text().strip()
+        user = self.username.text().strip()
+        pwd = self.password.text().strip()
+        
+        if not url:
+            self._show_error("Validation Error", "Portal URL is required.")
+            return
+
+        try:
+            settings_service.save_dms_config(url=url, user=user, password=pwd)
+            self._show_success("Saved", "DMS Portal settings updated successfully.")
+            self.accept()
+        except Exception as e:
+            self._show_error("Error", f"Failed to save DMS settings: {str(e)}")

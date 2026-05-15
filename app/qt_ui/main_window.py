@@ -102,7 +102,8 @@ from app.qt_ui.settings_modals import (
     SMSConfigDialog,
     AddressShortcodeDialog,
     UrduFontDialog,
-    FontCustomizationDialog
+    FontCustomizationDialog,
+    DMSSettingsDialog
 )
 from app.core.signals import booking_signals
 from app.core.logger import logger
@@ -3100,6 +3101,7 @@ class MainWindow(QMainWindow):
             ("Address Shortcodes", "⌨️", "Manage address shortcuts for faster data entry.", self._open_address_shortcodes),
             ("Urdu Font", "ا", "Enable Urdu Noori Nastaleeq font for Urdu text entry.", self._open_urdu_font_settings),
             ("Font Customization", "🔤", "Customize fonts and sizes for UI and sidebar (accessibility).", self._open_font_customization),
+            ("DMS Portal Automation", "🤖", "Configure DMS portal credentials and site URL for automation.", self._open_dms_settings),
         ]
 
         for i, (title, icon, desc, callback) in enumerate(categories):
@@ -3186,6 +3188,10 @@ class MainWindow(QMainWindow):
 
     def _open_font_customization(self):
         dialog = FontCustomizationDialog(self)
+        dialog.exec()
+
+    def _open_dms_settings(self):
+        dialog = DMSSettingsDialog(self)
         dialog.exec()
 
     def _update_app_branding(self, business_name: str) -> None:
