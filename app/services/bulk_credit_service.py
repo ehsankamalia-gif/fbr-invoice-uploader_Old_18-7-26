@@ -7,6 +7,7 @@ from app.db.models import (
 from typing import List, Optional, Dict, Any
 import datetime as dt
 from app.core.logger import logger
+from app.services.customer_portal_service import customer_portal_service
 
 class BulkCreditService:
     def _get_db(self) -> Session:
@@ -63,6 +64,14 @@ class BulkCreditService:
                     )
                     db.add(schedule)
 
+            # Create portal account if it doesn't exist
+            try:
+                customer_portal_service.create_account_for_credit_sale(
+                    customer_id=header_data.get('customer_id')
+                )
+            except Exception as e:
+                logger.error(f"Error creating portal account during bulk purchase: {e}", exc_info=True)
+            
             db.commit()
             db.refresh(purchase)
             logger.info(f"Bulk credit purchase {purchase.id} created for {purchase.customer_name}")

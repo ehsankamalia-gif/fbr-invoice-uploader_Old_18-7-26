@@ -1,0 +1,59 @@
+
+{% extends "portal/custom_admin/base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="mb-8">
+    <h1 class="text-3xl font-bold text-gray-800 mb-2">
+        <i class="fas fa-history mr-3"></i>{{ title }}
+    </h1>
+    <p class="text-gray-600">Complete audit trail of all financial transactions</p>
+</div>
+
+<div class="bg-white rounded-xl p-6 card-shadow">
+    <div class="overflow-x-auto">
+        <table class="w-full">
+            <thead>
+                <tr class="border-b border-gray-200">
+                    <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">ID</th>
+                    <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Ledger ID</th>
+                    <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Customer</th>
+                    <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Entry Type</th>
+                    <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Debit</th>
+                    <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Credit</th>
+                    <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Balance</th>
+                    <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Date</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in ledger_entries %}
+                <tr class="border-b border-gray-100 hover:bg-gray-50">
+                    <td class="py-4 px-4 text-sm text-gray-800">{{ entry.id }}</td>
+                    <td class="py-4 px-4 text-sm font-semibold text-gray-800">{{ entry.ledger_id }}</td>
+                    <td class="py-4 px-4 text-sm text-gray-800">{{ entry.customer.name }}</td>
+                    <td class="py-4 px-4">
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {% if entry.entry_type == 'DEBIT' %}bg-yellow-100 text-yellow-800{% else %}bg-green-100 text-green-800{% endif %}">
+                            {{ entry.entry_type }}
+                        </span>
+                    </td>
+                    <td class="py-4 px-4 text-sm font-bold {% if entry.debit > 0 %}text-red-600{% else %}text-gray-400{% endif %}">
+                        {% if entry.debit > 0 %}Rs. {{ entry.debit }}{% else %}-{% endif %}
+                    </td>
+                    <td class="py-4 px-4 text-sm font-bold {% if entry.credit > 0 %}text-green-600{% else %}text-gray-400{% endif %}">
+                        {% if entry.credit > 0 %}Rs. {{ entry.credit }}{% else %}-{% endif %}
+                    </td>
+                    <td class="py-4 px-4 text-sm font-bold text-gray-800">Rs. {{ entry.balance }}</td>
+                    <td class="py-4 px-4 text-sm text-gray-600">{{ entry.entry_date|date:"Y-m-d H:i" }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="8" class="py-12 text-center text-gray-500">
+                    <i class="fas fa-history fa-3x mb-3 text-gray-300"></i>
+                    <p class="text-lg">No transactions found</p>
+                </td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,24 @@
+
+{% extends "admin/index.html" %}
+
+{% block content %}
+<div id="content-main">
+    <div class="app-portal module">
+        <table>
+            <caption>
+                <a href="/admin/portal/" class="section" title="Portal">Portal</a>
+            </caption>
+            <tbody>
+                <tr>
+                    <th scope="row">
+                        <a href="/credit-customers/">Credit Customers</a>
+                    </th>
+                    <td>&nbsp;</td>
+                    <td><a href="/credit-customers/" class="changelink">View</a></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    {{ block.super }}
+</div>
+{% endblock %}

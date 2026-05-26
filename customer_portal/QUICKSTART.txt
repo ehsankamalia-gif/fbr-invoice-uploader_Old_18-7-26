@@ -1,0 +1,75 @@
+
+============================================================
+             CUSTOMER PORTAL - 4 EASY STEPS (MySQL ONLY)
+============================================================
+
+WHAT'S FIXED:
+- Now using MySQL ONLY (matches your main FBR app!)
+- Make sure your MySQL server is running first!
+
+IMPORTANT PRE-REQUISITE:
+- Make sure your MySQL server is running on localhost:3306
+- Make sure the database "fbr_invoice_uploader" exists
+
+STEP 1: INSTALL DEPENDENCIES (including MySQL)
+-------------------------------------------------
+Double-click this file:
+   install_and_start.bat
+
+Wait for it to finish installing everything (including pymysql/mysqlclient).
+
+
+STEP 2: INITIALIZE DJANGO (One-time only!)
+--------------------------------------------
+Double-click this file:
+   initialize_django.bat
+
+This sets up Django's own tables (admin, auth, etc.)
+
+
+STEP 3: CREATE ADMIN ACCOUNT
+-----------------------------
+After Step 2 finishes, run this in Command Prompt:
+   python manage.py createsuperuser
+
+Enter:
+   Username: admin
+   Password: admin123
+   (Press Enter for email - you can skip it)
+
+
+STEP 4: START THE SERVER
+--------------------------
+Double-click this file:
+   start_server.bat
+
+
+THAT'S IT!
+-----------
+Now open your browser:
+   Customer Login: http://127.0.0.1:8000
+   Admin Panel:   http://127.0.0.1:8000/admin
+
+
+TO ACTIVATE A CUSTOMER:
+------------------------
+1. Go to http://127.0.0.1:8000/admin
+2. Log in with admin / admin123
+3. Click "Customers"
+4. Select any customer
+5. Set username and check "Is Portal Active"
+6. Save
+7. Then run this to set password:
+   python manage.py shell
+   
+   Then paste this (replace with actual customer ID):
+   from django.contrib.auth.hashers import make_password
+   from portal.models import Customer
+   c = Customer.objects.get(id=1)  # Change 1 to actual customer ID
+   c.password_hash = make_password("theirpassword")
+   c.save()
+   print("Password set!")
+   exit()
+
+
+============================================================

@@ -1,0 +1,76 @@
+
+{% extends "portal/custom_admin/base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div>
+        <h1 class="text-3xl font-bold text-gray-800 mb-2">
+            <i class="fas fa-shopping-cart mr-3"></i>{{ title }}
+        </h1>
+        <p class="text-gray-600">All credit sales records</p>
+    </div>
+    <div class="flex gap-3">
+        <a href="{% url 'export_sales_csv' %}" 
+           class="inline-flex items-center px-4 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 transition">
+            <i class="fas fa-download mr-2"></i>
+            Export CSV
+        </a>
+        <a href="/admin/portal/financecreditsale/add/" 
+           class="inline-flex items-center px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white font-medium rounded-lg hover:shadow-lg transition">
+            <i class="fas fa-plus mr-2"></i>
+            Add Sale
+        </a>
+    </div>
+</div>
+
+<div class="bg-white rounded-xl p-6 card-shadow">
+    <div class="overflow-x-auto">
+        <table class="w-full">
+            <thead>
+                <tr class="border-b border-gray-200">
+                    <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">ID</th>
+                    <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Sale ID</th>
+                    <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Customer</th>
+                    <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Chassis No</th>
+                    <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Status</th>
+                    <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Remaining</th>
+                    <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Date</th>
+                    <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for sale in sales %}
+                <tr class="border-b border-gray-100 hover:bg-gray-50">
+                    <td class="py-4 px-4 text-sm text-gray-800">{{ sale.id }}</td>
+                    <td class="py-4 px-4 text-sm font-semibold text-gray-800">{{ sale.sale_id }}</td>
+                    <td class="py-4 px-4 text-sm text-gray-800">{{ sale.customer_name }}</td>
+                    <td class="py-4 px-4 text-sm text-gray-600">{{ sale.chassis_no }}</td>
+                    <td class="py-4 px-4">
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {% if sale.status == 'ACTIVE' %}bg-green-100 text-green-800{% elif sale.status == 'OVERDUE' %}bg-yellow-100 text-yellow-800{% else %}bg-gray-100 text-gray-800{% endif %}">
+                            {{ sale.status }}
+                        </span>
+                    </td>
+                    <td class="py-4 px-4 text-sm font-bold {% if sale.remaining_balance > 0 %}text-red-600{% else %}text-green-600{% endif %}">
+                        Rs. {{ sale.remaining_balance }}
+                    </td>
+                    <td class="py-4 px-4 text-sm text-gray-600">{{ sale.sale_date|date:"Y-m-d" }}</td>
+                    <td class="py-4 px-4">
+                        <a href="/admin/portal/financecreditsale/{{ sale.id }}/change/" 
+                           class="text-blue-600 hover:text-blue-800 transition">
+                            <i class="fas fa-edit"></i>
+                        </a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="8" class="py-12 text-center text-gray-500">
+                    <i class="fas fa-shopping-cart fa-3x mb-3 text-gray-300"></i>
+                    <p class="text-lg">No sales found</p>
+                </td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

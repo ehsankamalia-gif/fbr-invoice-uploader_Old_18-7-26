@@ -10,6 +10,7 @@ from typing import List, Optional, Dict, Any
 import datetime as dt
 from app.core.logger import logger
 from app.utils.duration_utils import format_duration
+from app.services.customer_portal_service import customer_portal_service
 
 class CreditLedgerService:
     def _get_db(self) -> Session:
@@ -224,6 +225,15 @@ class CreditLedgerService:
                 )
                 db.add(advance_entry)
 
+            # Create portal account if it doesn't exist
+            try:
+                customer_portal_service.create_account_for_credit_sale(
+                    customer_id=sale.buyer_id,
+                    phone_number=sale_data.get('buyer_phone')
+                )
+            except Exception as e:
+                logger.error(f"Error creating portal account during credit sale: {e}", exc_info=True)
+            
             db.commit()
             db.refresh(sale)
             return sale
@@ -408,6 +418,15 @@ class CreditLedgerService:
                 db.add(down_payment_entry)
                 finance_sale.remaining_balance = current_balance
 
+            # Create portal account if it doesn't exist
+            try:
+                customer_portal_service.create_account_for_credit_sale(
+                    customer_id=finance_sale.customer_id,
+                    phone_number=sale_data.get('customer_phone')
+                )
+            except Exception as e:
+                logger.error(f"Error creating portal account during finance sale: {e}", exc_info=True)
+            
             db.commit()
             db.refresh(finance_sale)
             return finance_sale

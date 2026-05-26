@@ -1,0 +1,24 @@
+=== CustomerPortalAuth Records ===
+ID: 1
+  Customer: JAVED IQBAL (ID: 81)
+  Phone Number: '03437780080'
+  Is Active: True
+  Created At: 2026-05-25 16:52:41+00:00
+---
+
+=== Customers with Credit Sales ===
+ID: 8
+  Name: MUHAMMAD MUNIR
+  Phone: '03437799668'
+  CNIC: 33302-4949292-7
+---
+ID: 24
+  Name: TAHSEEN KHAN
+  Phone: '03452758215'
+  CNIC: 33302-4010259-9
+---
+ID: 81
+  Name: JAVED IQBAL
+  Phone: '03437780080'
+  CNIC: 33302-0441371-9
+---

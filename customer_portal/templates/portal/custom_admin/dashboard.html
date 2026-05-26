@@ -1,0 +1,137 @@
+
+{% extends "portal/custom_admin/base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="mb-8">
+    <h1 class="text-3xl font-bold text-gray-800 mb-2">
+        <i class="fas fa-tachometer-alt mr-3"></i>{{ title }}
+    </h1>
+    <p class="text-gray-600">Overview of your motorcycle credit business</p>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+    <div class="bg-white rounded-xl p-6 card-shadow card-hover">
+        <div class="flex items-center justify-between">
+            <div>
+                <p class="text-sm text-gray-500 mb-1">Total Customers</p>
+                <h3 class="text-3xl font-bold text-gray-800">{{ total_customers }}</h3>
+            </div>
+            <div class="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center">
+                <i class="fas fa-users text-white text-2xl"></i>
+            </div>
+        </div>
+    </div>
+    
+    <div class="bg-white rounded-xl p-6 card-shadow card-hover">
+        <div class="flex items-center justify-between">
+            <div>
+                <p class="text-sm text-gray-500 mb-1">Credit Customers</p>
+                <h3 class="text-3xl font-bold text-gray-800">{{ total_credit_customers }}</h3>
+            </div>
+            <div class="w-14 h-14 rounded-xl bg-gradient-to-br from-green-500 to-green-600 flex items-center justify-center">
+                <i class="fas fa-hand-holding-usd text-white text-2xl"></i>
+            </div>
+        </div>
+    </div>
+    
+    <div class="bg-white rounded-xl p-6 card-shadow card-hover">
+        <div class="flex items-center justify-between">
+            <div>
+                <p class="text-sm text-gray-500 mb-1">Total Sales</p>
+                <h3 class="text-3xl font-bold text-gray-800">{{ total_sales }}</h3>
+            </div>
+            <div class="w-14 h-14 rounded-xl bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center">
+                <i class="fas fa-shopping-cart text-white text-2xl"></i>
+            </div>
+        </div>
+    </div>
+    
+    <div class="bg-white rounded-xl p-6 card-shadow card-hover">
+        <div class="flex items-center justify-between">
+            <div>
+                <p class="text-sm text-gray-500 mb-1">Total Outstanding</p>
+                <h3 class="text-3xl font-bold text-red-600">Rs. {{ total_outstanding|default:0 }}</h3>
+            </div>
+            <div class="w-14 h-14 rounded-xl bg-gradient-to-br from-red-500 to-red-600 flex items-center justify-center">
+                <i class="fas fa-money-bill-wave text-white text-2xl"></i>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="bg-white rounded-xl p-6 card-shadow">
+        <h5 class="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+            <i class="fas fa-clock mr-2 text-blue-500"></i>
+            Recent Sales
+        </h5>
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead>
+                    <tr class="border-b border-gray-200">
+                        <th class="text-left py-3 px-2 text-sm font-semibold text-gray-600">ID</th>
+                        <th class="text-left py-3 px-2 text-sm font-semibold text-gray-600">Customer</th>
+                        <th class="text-left py-3 px-2 text-sm font-semibold text-gray-600">Status</th>
+                        <th class="text-left py-3 px-2 text-sm font-semibold text-gray-600">Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for sale in recent_sales %}
+                    <tr class="border-b border-gray-100 hover:bg-gray-50">
+                        <td class="py-3 px-2 text-sm text-gray-800">{{ sale.id }}</td>
+                        <td class="py-3 px-2 text-sm font-medium text-gray-800">{{ sale.customer_name }}</td>
+                        <td class="py-3 px-2">
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {% if sale.status == 'ACTIVE' %}bg-green-100 text-green-800{% elif sale.status == 'OVERDUE' %}bg-yellow-100 text-yellow-800{% else %}bg-gray-100 text-gray-800{% endif %}">
+                                {{ sale.status }}
+                            </span>
+                        </td>
+                        <td class="py-3 px-2 text-sm text-gray-600">{{ sale.sale_date|date:"Y-m-d" }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="4" class="py-8 text-center text-gray-500">
+                        <i class="fas fa-inbox fa-2x mb-2"></i>
+                        <p>No recent sales</p>
+                    </td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <div class="bg-white rounded-xl p-6 card-shadow">
+        <h5 class="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+            <i class="fas fa-credit-card mr-2 text-green-500"></i>
+            Recent Payments
+        </h5>
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead>
+                    <tr class="border-b border-gray-200">
+                        <th class="text-left py-3 px-2 text-sm font-semibold text-gray-600">ID</th>
+                        <th class="text-left py-3 px-2 text-sm font-semibold text-gray-600">Customer</th>
+                        <th class="text-left py-3 px-2 text-sm font-semibold text-gray-600">Amount</th>
+                        <th class="text-left py-3 px-2 text-sm font-semibold text-gray-600">Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for payment in recent_payments %}
+                    <tr class="border-b border-gray-100 hover:bg-gray-50">
+                        <td class="py-3 px-2 text-sm text-gray-800">{{ payment.id }}</td>
+                        <td class="py-3 px-2 text-sm font-medium text-gray-800">{{ payment.customer.name }}</td>
+                        <td class="py-3 px-2 text-sm font-semibold text-green-600">Rs. {{ payment.paid_total }}</td>
+                        <td class="py-3 px-2 text-sm text-gray-600">{{ payment.payment_date|date:"Y-m-d" }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="4" class="py-8 text-center text-gray-500">
+                        <i class="fas fa-inbox fa-2x mb-2"></i>
+                        <p>No recent payments</p>
+                    </td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

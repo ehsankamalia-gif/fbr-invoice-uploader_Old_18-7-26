@@ -1,0 +1,9 @@
+=== Testing LoginForm ===
+Testing with Phone: 03437780080, Password: 123456789
+ERROR: Form is invalid!
+  Errors: <ul class="errorlist"><li>__all__<ul class="errorlist nonfield"><li>Invalid password</li></ul></li></ul>
+  Non-field errors: <ul class="errorlist nonfield"><li>Invalid password</li></ul>
+
+=== Checking Password Hash Directly ===
+Password hash: 123456789
+Check password '123456789': False

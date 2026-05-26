@@ -1,0 +1,61 @@
+
+{% extends "portal/custom_admin/base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="mb-8">
+    <a href="{% url 'custom_admin_portal_auths' %}" class="text-blue-500 hover:text-blue-600 mb-4 inline-flex items-center">
+        <i class="fas fa-arrow-left mr-2"></i>Back to Portal Accounts
+    </a>
+    <h1 class="text-3xl font-bold text-gray-800 mb-2">
+        <i class="fas fa-user-plus mr-3"></i>{{ title }}
+    </h1>
+    <p class="text-gray-600">Create a new customer portal account</p>
+</div>
+
+<div class="bg-white rounded-xl p-8 card-shadow max-w-2xl">
+    <form method="post">
+        {% csrf_token %}
+        
+        <div class="mb-6">
+            <label class="block text-sm font-semibold text-gray-700 mb-2">
+                <i class="fas fa-user mr-2 text-gray-500"></i>Select Customer
+            </label>
+            <select name="customer_id" required
+                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition">
+                <option value="">-- Select a credit customer --</option>
+                {% for customer in credit_customers %}
+                <option value="{{ customer.id }}">{{ customer.name }} - {{ customer.phone|default:"No phone" }}</option>
+                {% endfor %}
+            </select>
+            <p class="text-sm text-gray-500 mt-2">
+                <i class="fas fa-info-circle mr-1"></i>
+                Only customers with credit sales are shown here
+            </p>
+        </div>
+        
+        <div class="bg-blue-50 rounded-lg p-4 mb-6">
+            <h5 class="font-semibold text-blue-800 mb-2">
+                <i class="fas fa-info-circle mr-2"></i>Account Details
+            </h5>
+            <ul class="text-sm text-blue-700 space-y-1">
+                <li><i class="fas fa-check mr-2"></i>Username: Customer's phone number</li>
+                <li><i class="fas fa-check mr-2"></i>Default password: <span class="font-mono bg-blue-100 px-2 py-0.5 rounded">123456789</span></li>
+                <li><i class="fas fa-check mr-2"></i>Account will be active by default</li>
+            </ul>
+        </div>
+        
+        <div class="flex justify-end space-x-4">
+            <a href="{% url 'custom_admin_portal_auths' %}" 
+               class="px-6 py-3 bg-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-300 transition">
+                Cancel
+            </a>
+            <button type="submit" 
+                    class="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white font-semibold rounded-lg hover:shadow-lg transition-all">
+                <i class="fas fa-check mr-2"></i>Create Account
+            </button>
+        </div>
+    </form>
+</div>
+{% endblock %}

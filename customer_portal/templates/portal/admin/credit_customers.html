@@ -1,0 +1,37 @@
+
+{% extends "admin/base_site.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div id="content-main">
+    <h1>{{ title }}</h1>
+    
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Phone</th>
+                <th>Credit Sales</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for customer in customers %}
+            <tr>
+                <td>{{ customer.id }}</td>
+                <td>{{ customer.name }}</td>
+                <td>{{ customer.type }}</td>
+                <td>{{ customer.phone_number }}</td>
+                <td>{{ customer.total_credit_sales }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="5">No credit customers found.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

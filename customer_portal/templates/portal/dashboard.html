@@ -1,0 +1,160 @@
+
+{% extends 'base.html' %}
+{% block title %}Dashboard - Customer Portal{% endblock %}
+
+{% block content %}
+<div class="mb-8">
+    <h1 class="text-3xl font-bold text-gray-800 mb-2">
+        <i class="fas fa-tachometer-alt mr-3 text-primary-600"></i>My Dashboard
+    </h1>
+    <p class="text-gray-600">Overview of your motorcycle loans and payments</p>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+    <div class="bg-white rounded-xl p-6 card-shadow card-hover">
+        <div class="flex items-center justify-between">
+            <div>
+                <p class="text-sm text-gray-500 mb-1">Active Loans</p>
+                <h3 class="text-3xl font-bold text-gray-800">{{ active_loans.count }}</h3>
+            </div>
+            <div class="w-14 h-14 rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center">
+                <i class="fas fa-motorcycle text-white text-2xl"></i>
+            </div>
+        </div>
+    </div>
+    
+    <div class="bg-white rounded-xl p-6 card-shadow card-hover">
+        <div class="flex items-center justify-between">
+            <div>
+                <p class="text-sm text-gray-500 mb-1">Outstanding Balance</p>
+                <h3 class="text-3xl font-bold text-red-600">Rs. {{ total_outstanding|floatformat:2 }}</h3>
+            </div>
+            <div class="w-14 h-14 rounded-xl bg-gradient-to-br from-red-500 to-red-600 flex items-center justify-center">
+                <i class="fas fa-wallet text-white text-2xl"></i>
+            </div>
+        </div>
+    </div>
+    
+    <div class="bg-white rounded-xl p-6 card-shadow card-hover">
+        <div class="flex items-center justify-between">
+            <div>
+                <p class="text-sm text-gray-500 mb-1">Total Paid</p>
+                <h3 class="text-3xl font-bold text-green-600">Rs. {{ total_paid|floatformat:2 }}</h3>
+            </div>
+            <div class="w-14 h-14 rounded-xl bg-gradient-to-br from-green-500 to-green-600 flex items-center justify-center">
+                <i class="fas fa-check-circle text-white text-2xl"></i>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if active_loans %}
+<div class="bg-white rounded-xl card-shadow mb-8">
+    <div class="p-6 border-b border-gray-200">
+        <h5 class="text-lg font-semibold text-gray-800 flex items-center">
+            <i class="fas fa-motorcycle mr-3 text-primary-500"></i>Active Loans
+        </h5>
+    </div>
+    <div class="overflow-x-auto">
+        <table class="w-full">
+            <thead>
+                <tr class="bg-gray-50">
+                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Bike Model</th>
+                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Chassis No.</th>
+                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Total Amount</th>
+                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Down Payment</th>
+                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Remaining</th>
+                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Status</th>
+                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Action</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+                {% for loan in active_loans %}
+                <tr class="hover:bg-gray-50">
+                    <td class="py-4 px-6">
+                        <strong class="text-gray-800">{{ loan.model }}</strong>
+                    </td>
+                    <td class="py-4 px-6">
+                        <code class="text-primary-600 bg-primary-50 px-2 py-1 rounded">{{ loan.chassis_no }}</code>
+                    </td>
+                    <td class="py-4 px-6 text-gray-800">Rs. {{ loan.credit_price|floatformat:2 }}</td>
+                    <td class="py-4 px-6 text-gray-800">Rs. {{ loan.down_payment|floatformat:2 }}</td>
+                    <td class="py-4 px-6">
+                        <strong class="text-red-600">Rs. {{ loan.remaining_balance|floatformat:2 }}</strong>
+                    </td>
+                    <td class="py-4 px-6">
+                        {% if loan.status == 'ACTIVE' %}
+                            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                <i class="fas fa-check-circle mr-1"></i>Active
+                            </span>
+                        {% elif loan.status == 'OVERDUE' %}
+                            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                <i class="fas fa-exclamation-circle mr-1"></i>Overdue
+                            </span>
+                        {% else %}
+                            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                                {{ loan.status }}
+                            </span>
+                        {% endif %}
+                    </td>
+                    <td class="py-4 px-6">
+                        <a href="{% url 'loan_detail' loan.id %}" class="inline-flex items-center px-4 py-2 bg-gradient-to-r from-primary-500 to-primary-600 text-white text-sm font-medium rounded-lg hover:shadow-lg transition">
+                            <i class="fas fa-eye mr-2"></i>View
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% if closed_loans %}
+<div class="bg-white rounded-xl card-shadow">
+    <div class="p-6 border-b border-gray-200">
+        <h5 class="text-lg font-semibold text-gray-800 flex items-center">
+            <i class="fas fa-history mr-3 text-gray-500"></i>Recently Closed Loans
+        </h5>
+    </div>
+    <div class="overflow-x-auto">
+        <table class="w-full">
+            <thead>
+                <tr class="bg-gray-50">
+                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Bike Model</th>
+                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Chassis No.</th>
+                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Sale Date</th>
+                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Total Amount</th>
+                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Action</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+                {% for loan in closed_loans %}
+                <tr class="hover:bg-gray-50">
+                    <td class="py-4 px-6"><strong class="text-gray-800">{{ loan.model }}</strong></td>
+                    <td class="py-4 px-6"><code class="text-gray-500 bg-gray-100 px-2 py-1 rounded">{{ loan.chassis_no }}</code></td>
+                    <td class="py-4 px-6 text-gray-600">{{ loan.sale_date|date:"d M Y" }}</td>
+                    <td class="py-4 px-6 text-gray-800">Rs. {{ loan.credit_price|floatformat:2 }}</td>
+                    <td class="py-4 px-6">
+                        <a href="{% url 'loan_detail' loan.id %}" class="inline-flex items-center px-4 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition">
+                            <i class="fas fa-eye mr-2"></i>View
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% if not active_loans and not closed_loans %}
+<div class="bg-white rounded-xl card-shadow">
+    <div class="p-12 text-center">
+        <i class="fas fa-inbox fa-4x text-gray-300 mb-4"></i>
+        <h4 class="text-xl font-semibold text-gray-500 mb-2">No Loans Found</h4>
+        <p class="text-gray-400">You don't have any active or closed loans at the moment.</p>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

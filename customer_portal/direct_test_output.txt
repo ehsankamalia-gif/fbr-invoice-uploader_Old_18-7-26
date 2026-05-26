@@ -1,0 +1,10 @@
+=== Direct Test ===
+Auth ID: 1
+Customer: JAVED IQBAL
+Phone: '03437780080'
+Password hash: 123456789...
+Is Active: True
+Check password '123456789': False
+Re-hashing password to 123456789...
+Password re-hashed!
+---
