@@ -95,8 +95,20 @@ def dashboard_view(request):
 def loan_detail_view(request, loan_id):
     customer_id = request.session.get('customer_id')
     loan = FinanceCreditSale.objects.get(id=loan_id, customer_id=customer_id)
-    installments = FinanceInstallment.objects.filter(sale=loan).order_by('installment_no', 'due_date')
-    ledger = FinanceLedger.objects.filter(sale=loan).order_by('-entry_date')
+    ledger_entries = FinanceLedger.objects.filter(sale=loan).order_by('entry_date', 'id')
+    
+    # Get payment_entries = FinanceLedger.objects.filter(sale=loan, credit__gt=0).order_by('-entry_date', '-id')
+    payment_entries = FinanceLedger.objects.filter(sale=loan, credit__gt=0).order_by('-entry_date', '-id')
+    
+    # Calculate running balance for loan ledger
+    balance = 0.0
+    ledger_with_balance = []
+    for entry in ledger_entries:
+        balance += entry.debit - entry.credit
+        ledger_with_balance.append({
+            'entry': entry,
+            'running_balance': balance
+        })
     
     # Try to get motorcycle color and engine number from Motorcycle table using chassis_no
     motorcycle_color = None
@@ -111,8 +123,8 @@ def loan_detail_view(request, loan_id):
     context = {
         'customer': Customer.objects.get(id=customer_id),
         'loan': loan,
-        'installments': installments,
-        'ledger': ledger,
+        'payment_entries': payment_entries,
+        'ledger_with_balance': ledger_with_balance,
         'motorcycle_color': motorcycle_color,
         'motorcycle_engine_no': motorcycle_engine_no,
     }
@@ -124,13 +136,21 @@ def loan_detail_view(request, loan_id):
 def payments_view(request):
     customer_id = request.session.get('customer_id')
     customer = Customer.objects.get(id=customer_id)
-    payments = FinanceInstallment.objects.filter(
-        customer_id=customer_id
-    ).order_by('-payment_date')[:50]
+    
+    # Get all credit entries (payments) from FinanceLedger
+    sales = FinanceCreditSale.objects.filter(customer_id=customer_id)
+    payment_entries = FinanceLedger.objects.filter(
+        sale__in=sales,
+        credit__gt=0
+    ).order_by('-entry_date', '-id')[:100]
+    
+    # Calculate total paid
+    total_paid = sum(entry.credit for entry in payment_entries)
     
     context = {
         'customer': customer,
-        'payments': payments,
+        'payment_entries': payment_entries,
+        'total_paid': total_paid,
     }
     
     return render(request, 'portal/payments.html', context)
@@ -142,10 +162,41 @@ def profile_view(request):
     customer = Customer.objects.get(id=customer_id)
     
     context = {
-        'customer': customer,
+        'customer': customer
     }
     
     return render(request, 'portal/profile.html', context)
+
+
+@customer_login_required
+def running_ledger_view(request):
+    customer_id = request.session.get('customer_id')
+    customer = Customer.objects.get(id=customer_id)
+    
+    # Get all ledger entries for all sales of this customer
+    sales = FinanceCreditSale.objects.filter(customer_id=customer_id)
+    running_ledger = FinanceLedger.objects.filter(sale__in=sales).order_by('entry_date', 'id')
+    
+    # Calculate running balance
+    balance = 0.0
+    ledger_with_balance = []
+    total_paid = 0.0
+    for entry in running_ledger:
+        balance += entry.debit - entry.credit
+        if entry.credit > 0:
+            total_paid += entry.credit
+        ledger_with_balance.append({
+            'entry': entry,
+            'running_balance': balance
+        })
+    
+    context = {
+        'customer': customer,
+        'ledger_with_balance': ledger_with_balance,
+        'total_paid': total_paid
+    }
+    
+    return render(request, 'portal/running_ledger.html', context)
 
 
 @staff_member_required

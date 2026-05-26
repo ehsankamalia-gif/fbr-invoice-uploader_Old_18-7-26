@@ -108,50 +108,34 @@
     </div>
 </div>
 
-<!-- Installment Schedule -->
-{% if installments %}
+<!-- Payment History for this Loan -->
+{% if payment_entries %}
 <div class="bg-white rounded-xl card-shadow mb-6">
     <div class="p-6 border-b border-gray-200">
         <h5 class="text-lg font-semibold text-gray-800 flex items-center">
-            <i class="fas fa-calendar-check mr-3 text-blue-500"></i>
-            Installment Schedule
+            <i class="fas fa-history mr-3 text-blue-500"></i>
+            Payment History
         </h5>
     </div>
     <div class="overflow-x-auto">
         <table class="w-full">
             <thead>
                 <tr class="bg-gray-50">
-                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">#</th>
-                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Due Date</th>
-                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Total Due</th>
-                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Paid Date</th>
-                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Paid Amount</th>
-                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Status</th>
+                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Date</th>
+                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Description</th>
+                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Amount Paid</th>
+                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Type</th>
                 </tr>
             </thead>
             <tbody class="divide-y divide-gray-100">
-                {% for inst in installments %}
+                {% for entry in payment_entries %}
                 <tr class="hover:bg-gray-50">
-                    <td class="py-4 px-6 text-gray-800">{{ inst.installment_no|default:"-" }}</td>
-                    <td class="py-4 px-6 text-gray-600">{{ inst.due_date|date:"d M Y"|default:"-" }}</td>
-                    <td class="py-4 px-6 text-gray-800">Rs. {{ inst.total_due|floatformat:2 }}</td>
-                    <td class="py-4 px-6 text-gray-600">{{ inst.paid_at|date:"d M Y"|default:"-" }}</td>
-                    <td class="py-4 px-6 text-gray-800">Rs. {{ inst.paid_total|floatformat:2 }}</td>
+                    <td class="py-4 px-6 text-gray-600">{{ entry.entry_date|date:"d M Y" }}</td>
+                    <td class="py-4 px-6 text-gray-800">{{ entry.description|default:"-" }}</td>
                     <td class="py-4 px-6">
-                        {% if inst.status == 'PAID' %}
-                            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                <i class="fas fa-check-circle mr-1"></i>Paid
-                            </span>
-                        {% elif inst.status == 'PARTIAL' %}
-                            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                                <i class="fas fa-exclamation-circle mr-1"></i>Partial
-                            </span>
-                        {% else %}
-                            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                                Pending
-                            </span>
-                        {% endif %}
+                        <strong class="text-green-600 text-lg">Rs. {{ entry.credit|floatformat:2 }}</strong>
                     </td>
+                    <td class="py-4 px-6 text-gray-800">{{ entry.entry_type }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -161,7 +145,7 @@
 {% endif %}
 
 <!-- Transaction Ledger -->
-{% if ledger %}
+{% if ledger_with_balance %}
 <div class="bg-white rounded-xl card-shadow">
     <div class="p-6 border-b border-gray-200">
         <h5 class="text-lg font-semibold text-gray-800 flex items-center">
@@ -182,18 +166,22 @@
                 </tr>
             </thead>
             <tbody class="divide-y divide-gray-100">
-                {% for entry in ledger %}
+                {% for item in ledger_with_balance %}
                 <tr class="hover:bg-gray-50">
-                    <td class="py-4 px-6 text-gray-600">{{ entry.entry_date|date:"d M Y" }}</td>
-                    <td class="py-4 px-6"><strong class="text-gray-800">{{ entry.entry_type }}</strong></td>
-                    <td class="py-4 px-6 text-gray-600">{{ entry.description|default:"-" }}</td>
-                    <td class="py-4 px-6 {% if entry.debit > 0 %}text-red-600{% endif %}">
-                        {% if entry.debit > 0 %}Rs. {{ entry.debit|floatformat:2 }}{% endif %}
+                    <td class="py-4 px-6 text-gray-600">{{ item.entry.entry_date|date:"d M Y" }}</td>
+                    <td class="py-4 px-6"><strong class="text-gray-800">{{ item.entry.entry_type }}</strong></td>
+                    <td class="py-4 px-6 text-gray-600">{{ item.entry.description|default:"-" }}</td>
+                    <td class="py-4 px-6 {% if item.entry.debit > 0 %}text-red-600 font-semibold{% endif %}">
+                        {% if item.entry.debit > 0 %}Rs. {{ item.entry.debit|floatformat:2 }}{% endif %}
                     </td>
-                    <td class="py-4 px-6 {% if entry.credit > 0 %}text-green-600{% endif %}">
-                        {% if entry.credit > 0 %}Rs. {{ entry.credit|floatformat:2 }}{% endif %}
+                    <td class="py-4 px-6 {% if item.entry.credit > 0 %}text-green-600 font-semibold{% endif %}">
+                        {% if item.entry.credit > 0 %}Rs. {{ item.entry.credit|floatformat:2 }}{% endif %}
                     </td>
-                    <td class="py-4 px-6"><strong class="text-gray-800">Rs. {{ entry.balance|floatformat:2 }}</strong></td>
+                    <td class="py-4 px-6">
+                        <strong class="{% if item.running_balance > 0 %}text-red-600{% elif item.running_balance < 0 %}text-green-600{% else %}text-gray-800{% endif %}">
+                            Rs. {{ item.running_balance|floatformat:2 }}
+                        </strong>
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
