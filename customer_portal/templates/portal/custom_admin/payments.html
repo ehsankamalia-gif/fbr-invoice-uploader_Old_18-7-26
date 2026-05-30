@@ -9,7 +9,7 @@
         <h1 class="text-3xl font-bold text-gray-800 mb-2">
             <i class="fas fa-credit-card mr-3"></i>{{ title }}
         </h1>
-        <p class="text-gray-600">All payment records</p>
+        <p class="text-gray-600">All payment records (advance, installments, etc)</p>
     </div>
     <a href="{% url 'export_payments_csv' %}" 
        class="inline-flex items-center px-6 py-3 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 transition">
@@ -25,7 +25,9 @@
                 <tr class="border-b border-gray-200">
                     <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">ID</th>
                     <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Payment ID</th>
+                    <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Type</th>
                     <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Customer</th>
+                    <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Description</th>
                     <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Amount</th>
                     <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Status</th>
                     <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Date</th>
@@ -37,28 +39,37 @@
                 <tr class="border-b border-gray-100 hover:bg-gray-50">
                     <td class="py-4 px-4 text-sm text-gray-800">{{ payment.id }}</td>
                     <td class="py-4 px-4 text-sm font-semibold text-gray-800">{{ payment.payment_id }}</td>
+                    <td class="py-4 px-4 text-sm text-gray-600">{{ payment.type }}</td>
                     <td class="py-4 px-4 text-sm text-gray-800">{{ payment.customer.name }}</td>
-                    <td class="py-4 px-4 text-sm font-bold text-green-600">Rs. {{ payment.paid_total }}</td>
+                    <td class="py-4 px-4 text-sm text-gray-700" style="max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="{{ payment.description }}">{{ payment.description|truncatechars:50 }}</td>
+                    <td class="py-4 px-4 text-sm font-bold text-green-600">Rs. {{ payment.amount|floatformat:2 }}</td>
                     <td class="py-4 px-4">
                         <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {% if payment.status == 'PAID' %}bg-green-100 text-green-800{% else %}bg-yellow-100 text-yellow-800{% endif %}">
                             {{ payment.status }}
                         </span>
                     </td>
-                    <td class="py-4 px-4 text-sm text-gray-600">{{ payment.payment_date|date:"Y-m-d" }}</td>
+                    <td class="py-4 px-4 text-sm text-gray-600">{{ payment.date|date:"Y-m-d" }}</td>
                     <td class="py-4 px-4">
-                        <a href="/admin/portal/financeinstallment/{{ payment.id }}/change/" 
+                        <a href="{{ payment.edit_url }}" 
                            class="text-blue-600 hover:text-blue-800 transition">
                             <i class="fas fa-edit"></i>
                         </a>
                     </td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="7" class="py-12 text-center text-gray-500">
+                <tr><td colspan="9" class="py-12 text-center text-gray-500">
                     <i class="fas fa-credit-card fa-3x mb-3 text-gray-300"></i>
                     <p class="text-lg">No payments found</p>
                 </td></tr>
                 {% endfor %}
             </tbody>
+            <tfoot>
+                <tr class="bg-gray-50 border-t-2 border-gray-200">
+                    <td colspan="5" class="py-4 px-4 text-right text-lg font-bold text-gray-800">Total:</td>
+                    <td class="py-4 px-4 text-lg font-bold text-green-600">Rs. {{ total_amount|floatformat:2 }}</td>
+                    <td colspan="3"></td>
+                </tr>
+            </tfoot>
         </table>
     </div>
 </div>

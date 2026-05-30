@@ -11,6 +11,17 @@
     </nav>
     <h1 class="text-3xl font-bold text-gray-800 mb-2">
         <i class="fas fa-info-circle mr-3 text-primary-600"></i>Loan Information
+        <span class="ml-4 text-lg">
+            {% if loan_type == 'finance' %}
+                <span class="inline-flex items-center px-4 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+                    Finance
+                </span>
+            {% else %}
+                <span class="inline-flex items-center px-4 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800">
+                    Old
+                </span>
+            {% endif %}
+        </span>
     </h1>
 </div>
 
@@ -22,52 +33,63 @@
     </h5>
     
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <div>
-            <label class="text-sm text-gray-500 block mb-1">Sale ID</label>
-            <p class="text-gray-800 font-semibold">{{ loan.sale_id }}</p>
-        </div>
+        {% if loan_type == 'finance' %}
+            <div>
+                <label class="text-sm text-gray-500 block mb-1">Sale ID</label>
+                <p class="text-gray-800 font-semibold">{{ loan.sale_id }}</p>
+            </div>
+        {% else %}
+            <div>
+                <label class="text-sm text-gray-500 block mb-1">Sale ID</label>
+                <p class="text-gray-800 font-semibold">{{ loan.id }}</p>
+            </div>
+        {% endif %}
+        
         <div>
             <label class="text-sm text-gray-500 block mb-1">Status</label>
             <p class="text-gray-800">
-                {% if loan.status == 'ACTIVE' %}
+                {% if loan_status == 'ACTIVE' %}
                     <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
                         <i class="fas fa-check-circle mr-1"></i>Active
                     </span>
-                {% elif loan.status == 'OVERDUE' %}
+                {% elif loan_status == 'OVERDUE' %}
                     <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
                         <i class="fas fa-exclamation-circle mr-1"></i>Overdue
                     </span>
                 {% else %}
                     <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                        {{ loan.status }}
+                        {{ loan_status }}
                     </span>
                 {% endif %}
             </p>
         </div>
-        <div>
-            <label class="text-sm text-gray-500 block mb-1">Bike Model</label>
-            <p class="text-gray-800 font-semibold">{{ loan.model }}</p>
-        </div>
+        
         <div>
             <label class="text-sm text-gray-500 block mb-1">Color</label>
             <p class="text-gray-800">{{ motorcycle_color|default:"N/A" }}</p>
         </div>
+        
         <div>
             <label class="text-sm text-gray-500 block mb-1">Chassis Number</label>
-            <p class="text-gray-800 font-mono">{{ loan.chassis_no }}</p>
+            <p class="text-gray-800 font-mono">{{ chassis_no|default:"N/A" }}</p>
         </div>
+        
         <div>
             <label class="text-sm text-gray-500 block mb-1">Engine Number</label>
-            <p class="text-gray-800 font-mono">{{ motorcycle_engine_no|default:loan.engine_no|default:"N/A" }}</p>
+            <p class="text-gray-800 font-mono">{{ motorcycle_engine_no|default:"N/A" }}</p>
         </div>
+        
         <div>
             <label class="text-sm text-gray-500 block mb-1">Sale Date</label>
             <p class="text-gray-800">{{ loan.sale_date|date:"d M Y" }}</p>
         </div>
-        <div>
-            <label class="text-sm text-gray-500 block mb-1">Due Date</label>
-            <p class="text-gray-800">{{ loan.due_date|date:"d M Y"|default:"N/A" }}</p>
-        </div>
+        
+        {% if loan_type == 'finance' %}
+            <div>
+                <label class="text-sm text-gray-500 block mb-1">Due Date</label>
+                <p class="text-gray-800">{{ loan.due_date|date:"d M Y"|default:"N/A" }}</p>
+            </div>
+        {% endif %}
     </div>
     
     <!-- Financial Details -->
@@ -77,22 +99,38 @@
             Financial Details
         </h6>
         
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <div class="bg-gray-50 rounded-xl p-4 text-center">
-                <label class="text-sm text-gray-500 block mb-1">Cash Price</label>
-                <h4 class="text-xl font-bold text-gray-800">Rs. {{ loan.cash_price|floatformat:2 }}</h4>
+                <label class="text-sm text-gray-500 block mb-1">Total Amount</label>
+                <h4 class="text-xl font-bold text-gray-800">Rs. {{ total_price|floatformat:2 }}</h4>
             </div>
-            <div class="bg-gray-50 rounded-xl p-4 text-center">
-                <label class="text-sm text-gray-500 block mb-1">Credit Price</label>
-                <h4 class="text-xl font-bold text-gray-800">Rs. {{ loan.credit_price|floatformat:2 }}</h4>
-            </div>
-            <div class="bg-gray-50 rounded-xl p-4 text-center">
-                <label class="text-sm text-gray-500 block mb-1">Down Payment</label>
-                <h4 class="text-xl font-bold text-gray-800">Rs. {{ loan.down_payment|floatformat:2 }}</h4>
+            
+            <div class="bg-red-50 border border-red-200 rounded-xl p-4 text-center">
+                <label class="text-sm text-red-700 block mb-1">Remaining Balance</label>
+                {% if loan_type == 'finance' %}
+                    <h4 class="text-xl font-bold text-red-800">Rs. {{ loan.remaining_balance|floatformat:2 }}</h4>
+                {% else %}
+                    <h4 class="text-xl font-bold text-red-800">Rs. {{ loan.remaining_amount|floatformat:2 }}</h4>
+                {% endif %}
             </div>
         </div>
         
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {% if loan_type == 'finance' %}
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <div class="bg-gray-50 rounded-xl p-4 text-center">
+                    <label class="text-sm text-gray-500 block mb-1">Cash Price</label>
+                    <h4 class="text-xl font-bold text-gray-800">Rs. {{ loan.cash_price|floatformat:2 }}</h4>
+                </div>
+                <div class="bg-gray-50 rounded-xl p-4 text-center">
+                    <label class="text-sm text-gray-500 block mb-1">Credit Price</label>
+                    <h4 class="text-xl font-bold text-gray-800">Rs. {{ loan.credit_price|floatformat:2 }}</h4>
+                </div>
+                <div class="bg-gray-50 rounded-xl p-4 text-center">
+                    <label class="text-sm text-gray-500 block mb-1">Down Payment</label>
+                    <h4 class="text-xl font-bold text-gray-800">Rs. {{ loan.down_payment|floatformat:2 }}</h4>
+                </div>
+            </div>
+            
             <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-4 text-center">
                 <label class="text-sm text-yellow-700 block mb-1">Installment Amount</label>
                 <h4 class="text-xl font-bold text-yellow-800">Rs. {{ loan.installment_amount|floatformat:2 }}</h4>
@@ -100,11 +138,7 @@
                     Duration: {{ loan.duration_months }} months {{ loan.duration_days }} days
                 </p>
             </div>
-            <div class="bg-red-50 border border-red-200 rounded-xl p-4 text-center">
-                <label class="text-sm text-red-700 block mb-1">Remaining Balance</label>
-                <h4 class="text-xl font-bold text-red-800">Rs. {{ loan.remaining_balance|floatformat:2 }}</h4>
-            </div>
-        </div>
+        {% endif %}
     </div>
 </div>
 
@@ -124,7 +158,6 @@
                     <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Date</th>
                     <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Description</th>
                     <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Amount Paid</th>
-                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Type</th>
                 </tr>
             </thead>
             <tbody class="divide-y divide-gray-100">
@@ -135,7 +168,6 @@
                     <td class="py-4 px-6">
                         <strong class="text-green-600 text-lg">Rs. {{ entry.credit|floatformat:2 }}</strong>
                     </td>
-                    <td class="py-4 px-6 text-gray-800">{{ entry.entry_type }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -158,7 +190,6 @@
             <thead>
                 <tr class="bg-gray-50">
                     <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Date</th>
-                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Type</th>
                     <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Description</th>
                     <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Debit</th>
                     <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Credit</th>
@@ -169,7 +200,6 @@
                 {% for item in ledger_with_balance %}
                 <tr class="hover:bg-gray-50">
                     <td class="py-4 px-6 text-gray-600">{{ item.entry.entry_date|date:"d M Y" }}</td>
-                    <td class="py-4 px-6"><strong class="text-gray-800">{{ item.entry.entry_type }}</strong></td>
                     <td class="py-4 px-6 text-gray-600">{{ item.entry.description|default:"-" }}</td>
                     <td class="py-4 px-6 {% if item.entry.debit > 0 %}text-red-600 font-semibold{% endif %}">
                         {% if item.entry.debit > 0 %}Rs. {{ item.entry.debit|floatformat:2 }}{% endif %}

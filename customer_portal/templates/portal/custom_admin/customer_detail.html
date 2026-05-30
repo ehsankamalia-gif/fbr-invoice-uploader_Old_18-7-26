@@ -1,0 +1,170 @@
+
+{% extends "portal/custom_admin/base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="mb-8">
+    <a href="{% url 'custom_admin_customer_summary' %}" class="text-blue-600 hover:text-blue-800 mb-4 inline-block">
+        <i class="fas fa-arrow-left mr-2"></i>Back to Customer Summary
+    </a>
+    <a href="{% url 'custom_admin_customer_ledger' customer.id %}" class="inline-flex items-center px-4 py-2 bg-gradient-to-r from-green-500 to-green-600 text-white font-medium rounded-lg hover:shadow-lg transition ml-4">
+        <i class="fas fa-book mr-2"></i>View Ledger
+    </a>
+    <h1 class="text-3xl font-bold text-gray-800 mb-2">
+        <i class="fas fa-user mr-3"></i>{{ customer.name }}
+    </h1>
+    <p class="text-gray-600">Customer details and transaction history</p>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+    <div class="bg-white rounded-xl p-6 card-shadow">
+        <div class="flex items-center justify-between">
+            <div>
+                <p class="text-sm text-gray-500 mb-1">Phone Number</p>
+                <h3 class="text-xl font-bold text-gray-800">{{ customer.phone|default:"-" }}</h3>
+            </div>
+            <div class="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center">
+                <i class="fas fa-phone text-blue-600 text-xl"></i>
+            </div>
+        </div>
+    </div>
+    <div class="bg-white rounded-xl p-6 card-shadow">
+        <div class="flex items-center justify-between">
+            <div>
+                <p class="text-sm text-gray-500 mb-1">CNIC</p>
+                <h3 class="text-xl font-bold text-gray-800">{{ customer.cnic|default:"-" }}</h3>
+            </div>
+            <div class="w-12 h-12 rounded-xl bg-purple-100 flex items-center justify-center">
+                <i class="fas fa-id-card text-purple-600 text-xl"></i>
+            </div>
+        </div>
+    </div>
+    <div class="bg-white rounded-xl p-6 card-shadow">
+        <div class="flex items-center justify-between">
+            <div>
+                <p class="text-sm text-gray-500 mb-1">Total Credit</p>
+                <h3 class="text-xl font-bold text-purple-600">Rs. {{ total_credit|floatformat:2 }}</h3>
+            </div>
+            <div class="w-12 h-12 rounded-xl bg-purple-100 flex items-center justify-center">
+                <i class="fas fa-chart-pie text-purple-600 text-xl"></i>
+            </div>
+        </div>
+    </div>
+    <div class="bg-white rounded-xl p-6 card-shadow">
+        <div class="flex items-center justify-between">
+            <div>
+                <p class="text-sm text-gray-500 mb-1">Total Paid</p>
+                <h3 class="text-xl font-bold text-green-600">Rs. {{ total_paid|floatformat:2 }}</h3>
+            </div>
+            <div class="w-12 h-12 rounded-xl bg-green-100 flex items-center justify-center">
+                <i class="fas fa-check-circle text-green-600 text-xl"></i>
+            </div>
+        </div>
+    </div>
+    <div class="bg-white rounded-xl p-6 card-shadow">
+        <div class="flex items-center justify-between">
+            <div>
+                <p class="text-sm text-gray-500 mb-1">Remaining</p>
+                <h3 class="text-xl font-bold text-red-600">Rs. {{ total_remaining|floatformat:2 }}</h3>
+            </div>
+            <div class="w-12 h-12 rounded-xl bg-red-100 flex items-center justify-center">
+                <i class="fas fa-exclamation-circle text-red-600 text-xl"></i>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="mb-8">
+    <h2 class="text-2xl font-bold text-gray-800 mb-4">
+        <i class="fas fa-motorcycle mr-3 text-blue-600"></i>Credit Sales
+    </h2>
+    <div class="bg-white rounded-xl p-6 card-shadow">
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead>
+                    <tr class="border-b border-gray-200">
+                        <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Type</th>
+                        <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">ID</th>
+                        <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Sale ID</th>
+                        <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Chassis No</th>
+                        <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Credit Price</th>
+                        <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Remaining</th>
+                        <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Status</th>
+                        <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Sale Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for sale in all_sales %}
+                    <tr class="border-b border-gray-100 hover:bg-gray-50">
+                        <td class="py-4 px-4 text-sm text-gray-600">{{ sale.type }}</td>
+                        <td class="py-4 px-4 text-sm text-gray-800">{{ sale.id }}</td>
+                        <td class="py-4 px-4 text-sm font-semibold text-gray-800">
+                            {{ sale.sale_id|default:"-" }}
+                        </td>
+                        <td class="py-4 px-4 text-sm text-gray-600">
+                            {{ sale.chassis_no|default:"-" }}
+                        </td>
+                        <td class="py-4 px-4 text-sm font-semibold text-purple-600">
+                            Rs. {{ sale.credit_price|floatformat:2 }}
+                        </td>
+                        <td class="py-4 px-4 text-sm font-bold {% if sale.remaining > 0 %}text-red-600{% else %}text-green-600{% endif %}">
+                            Rs. {{ sale.remaining|floatformat:2 }}
+                        </td>
+                        <td class="py-4 px-4">
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {% if sale.status == 'ACTIVE' %}bg-green-100 text-green-800{% elif sale.status == 'OVERDUE' %}bg-yellow-100 text-yellow-800{% else %}bg-gray-100 text-gray-800{% endif %}">
+                                {{ sale.status }}
+                            </span>
+                        </td>
+                        <td class="py-4 px-4 text-sm text-gray-600">{{ sale.sale_date|date:"Y-m-d" }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="8" class="py-12 text-center text-gray-500">
+                        <i class="fas fa-shopping-cart fa-3x mb-3 text-gray-300"></i>
+                        <p class="text-lg">No credit sales found</p>
+                    </td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div>
+    <h2 class="text-2xl font-bold text-gray-800 mb-4">
+        <i class="fas fa-credit-card mr-3 text-green-600"></i>Payment History
+    </h2>
+    <div class="bg-white rounded-xl p-6 card-shadow">
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead>
+                    <tr class="border-b border-gray-200">
+                        <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Type</th>
+                        <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Ledger ID</th>
+                        <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Date</th>
+                        <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Description</th>
+                        <th class="text-left py-4 px-4 text-sm font-semibold text-gray-600">Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for payment in all_payments %}
+                    <tr class="border-b border-gray-100 hover:bg-gray-50">
+                        <td class="py-4 px-4 text-sm text-gray-600">{{ payment.type }}</td>
+                        <td class="py-4 px-4 text-sm text-gray-800">{{ payment.ledger_id }}</td>
+                        <td class="py-4 px-4 text-sm text-gray-600">{{ payment.date|date:"Y-m-d" }}</td>
+                        <td class="py-4 px-4 text-sm text-gray-800">{{ payment.description|default:"-" }}</td>
+                        <td class="py-4 px-4 text-sm font-bold text-green-600">Rs. {{ payment.amount|floatformat:2 }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="5" class="py-12 text-center text-gray-500">
+                        <i class="fas fa-credit-card fa-3x mb-3 text-gray-300"></i>
+                        <p class="text-lg">No payments found</p>
+                    </td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+

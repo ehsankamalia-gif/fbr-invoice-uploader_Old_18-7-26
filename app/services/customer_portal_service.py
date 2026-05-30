@@ -5,9 +5,32 @@ from app.db.models import Customer, FinanceCreditSale, CreditSale
 from typing import Optional, Dict, Any
 import random
 import string
-from django.contrib.auth.hashers import make_password
+import hashlib
+import hmac
+import base64
+import secrets
 from app.core.logger import logger
 import datetime as dt
+
+
+def make_password(password: str) -> str:
+    """
+    Standalone password hasher that produces Django-compatible PBKDF2 hashes.
+    Uses Django's default algorithm: pbkdf2_sha256 with 600000 iterations.
+    """
+    algorithm = "pbkdf2_sha256"
+    iterations = 600000
+    salt = secrets.token_urlsafe(12)[:12]
+    
+    hash_obj = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt.encode("utf-8"),
+        iterations
+    )
+    hash_b64 = base64.b64encode(hash_obj).decode("ascii").strip()
+    
+    return f"{algorithm}${iterations}${salt}${hash_b64}"
 
 
 class CustomerPortalService:

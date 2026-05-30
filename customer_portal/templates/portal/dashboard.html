@@ -15,7 +15,7 @@
         <div class="flex items-center justify-between">
             <div>
                 <p class="text-sm text-gray-500 mb-1">Active Loans</p>
-                <h3 class="text-3xl font-bold text-gray-800">{{ active_loans.count }}</h3>
+                <h3 class="text-3xl font-bold text-gray-800">{{ active_loans|length }}</h3>
             </div>
             <div class="w-14 h-14 rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center">
                 <i class="fas fa-motorcycle text-white text-2xl"></i>
@@ -59,10 +59,10 @@
         <table class="w-full">
             <thead>
                 <tr class="bg-gray-50">
-                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Bike Model</th>
+                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Type</th>
                     <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Chassis No.</th>
                     <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Total Amount</th>
-                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Down Payment</th>
+                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Paid</th>
                     <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Remaining</th>
                     <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Status</th>
                     <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Action</th>
@@ -72,15 +72,23 @@
                 {% for loan in active_loans %}
                 <tr class="hover:bg-gray-50">
                     <td class="py-4 px-6">
-                        <strong class="text-gray-800">{{ loan.model }}</strong>
+                        {% if loan.type == 'finance' %}
+                            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                Finance
+                            </span>
+                        {% else %}
+                            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                Old
+                            </span>
+                        {% endif %}
                     </td>
                     <td class="py-4 px-6">
                         <code class="text-primary-600 bg-primary-50 px-2 py-1 rounded">{{ loan.chassis_no }}</code>
                     </td>
-                    <td class="py-4 px-6 text-gray-800">Rs. {{ loan.credit_price|floatformat:2 }}</td>
-                    <td class="py-4 px-6 text-gray-800">Rs. {{ loan.down_payment|floatformat:2 }}</td>
+                    <td class="py-4 px-6 text-gray-800">Rs. {{ loan.total_price|floatformat:2 }}</td>
+                    <td class="py-4 px-6 text-green-600">Rs. {{ loan.paid|floatformat:2 }}</td>
                     <td class="py-4 px-6">
-                        <strong class="text-red-600">Rs. {{ loan.remaining_balance|floatformat:2 }}</strong>
+                        <strong class="text-red-600">Rs. {{ loan.remaining|floatformat:2 }}</strong>
                     </td>
                     <td class="py-4 px-6">
                         {% if loan.status == 'ACTIVE' %}
@@ -98,7 +106,7 @@
                         {% endif %}
                     </td>
                     <td class="py-4 px-6">
-                        <a href="{% url 'loan_detail' loan.id %}" class="inline-flex items-center px-4 py-2 bg-gradient-to-r from-primary-500 to-primary-600 text-white text-sm font-medium rounded-lg hover:shadow-lg transition">
+                        <a href="{% url 'loan_detail' loan.type loan.id %}" class="inline-flex items-center px-4 py-2 bg-gradient-to-r from-primary-500 to-primary-600 text-white text-sm font-medium rounded-lg hover:shadow-lg transition">
                             <i class="fas fa-eye mr-2"></i>View
                         </a>
                     </td>
@@ -121,7 +129,7 @@
         <table class="w-full">
             <thead>
                 <tr class="bg-gray-50">
-                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Bike Model</th>
+                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Type</th>
                     <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Chassis No.</th>
                     <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Sale Date</th>
                     <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Total Amount</th>
@@ -131,12 +139,22 @@
             <tbody class="divide-y divide-gray-100">
                 {% for loan in closed_loans %}
                 <tr class="hover:bg-gray-50">
-                    <td class="py-4 px-6"><strong class="text-gray-800">{{ loan.model }}</strong></td>
+                    <td class="py-4 px-6">
+                        {% if loan.type == 'finance' %}
+                            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                Finance
+                            </span>
+                        {% else %}
+                            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                Old
+                            </span>
+                        {% endif %}
+                    </td>
                     <td class="py-4 px-6"><code class="text-gray-500 bg-gray-100 px-2 py-1 rounded">{{ loan.chassis_no }}</code></td>
                     <td class="py-4 px-6 text-gray-600">{{ loan.sale_date|date:"d M Y" }}</td>
-                    <td class="py-4 px-6 text-gray-800">Rs. {{ loan.credit_price|floatformat:2 }}</td>
+                    <td class="py-4 px-6 text-gray-800">Rs. {{ loan.total_price|floatformat:2 }}</td>
                     <td class="py-4 px-6">
-                        <a href="{% url 'loan_detail' loan.id %}" class="inline-flex items-center px-4 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition">
+                        <a href="{% url 'loan_detail' loan.type loan.id %}" class="inline-flex items-center px-4 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition">
                             <i class="fas fa-eye mr-2"></i>View
                         </a>
                     </td>

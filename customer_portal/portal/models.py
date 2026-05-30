@@ -196,3 +196,95 @@ class CustomerPortalAuth(models.Model):
     
     def __str__(self):
         return f"{self.customer.name} - {self.phone_number}"
+
+
+class CreditSale(models.Model):
+    ACTIVE = 'ACTIVE'
+    CLOSED = 'CLOSED'
+    OVERDUE = 'OVERDUE'
+    STATUS_CHOICES = [
+        (ACTIVE, 'Active'),
+        (CLOSED, 'Closed'),
+        (OVERDUE, 'Overdue'),
+    ]
+    
+    id = models.IntegerField(primary_key=True)
+    sale_date = models.DateTimeField()
+    customer = models.ForeignKey(Customer, on_delete=models.DO_NOTHING, db_column='buyer_id')
+    buyer_type = models.CharField(max_length=20)
+    duration_months = models.IntegerField(default=0)
+    duration_days = models.IntegerField(default=0)
+    
+    total_cash_price = models.FloatField(default=0.0)
+    total_credit_price = models.FloatField(default=0.0)
+    advance_payment = models.FloatField(default=0.0)
+    advance_payment_mode = models.CharField(max_length=50, default='Cash')
+    remaining_amount = models.FloatField(default=0.0)
+    
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=ACTIVE)
+    created_at = models.DateTimeField()
+    
+    class Meta:
+        db_table = 'credit_sales'
+        managed = False
+    
+    def __str__(self):
+        return f"Credit Sale {self.id} - {self.customer.name}"
+
+
+class CreditSaleItem(models.Model):
+    id = models.IntegerField(primary_key=True)
+    sale = models.ForeignKey(CreditSale, on_delete=models.DO_NOTHING, db_column='sale_id')
+    chassis_number = models.CharField(max_length=50, unique=True)
+    model = models.CharField(max_length=50, null=True)
+    color = models.CharField(max_length=30, null=True)
+    cash_price = models.FloatField()
+    credit_price = models.FloatField()
+    
+    class Meta:
+        db_table = 'credit_sale_items'
+        managed = False
+    
+    def __str__(self):
+        return f"{self.model} - {self.chassis_number}"
+
+
+class CreditPayment(models.Model):
+    id = models.IntegerField(primary_key=True)
+    payment_date = models.DateTimeField()
+    customer = models.ForeignKey(Customer, on_delete=models.DO_NOTHING, db_column='buyer_id')
+    amount = models.FloatField()
+    penalty_amount = models.FloatField(default=0.0)
+    discount_amount = models.FloatField(default=0.0)
+    net_amount = models.FloatField()
+    payment_mode = models.CharField(max_length=50, default='Cash')
+    invoice_reference = models.CharField(max_length=50, null=True)
+    created_at = models.DateTimeField()
+    
+    class Meta:
+        db_table = 'credit_payments'
+        managed = False
+    
+    def __str__(self):
+        return f"{self.id} - {self.customer.name}"
+
+
+class BuyerLedger(models.Model):
+    id = models.IntegerField(primary_key=True)
+    date = models.DateTimeField()
+    customer = models.ForeignKey(Customer, on_delete=models.DO_NOTHING, db_column='buyer_id')
+    chassis_number = models.CharField(max_length=50, null=True)
+    description = models.CharField(max_length=255, null=True)
+    debit = models.FloatField(default=0.0)
+    credit = models.FloatField(default=0.0)
+    balance = models.FloatField(default=0.0)
+    reference_id = models.IntegerField(null=True)
+    reference_type = models.CharField(max_length=20, null=True)
+    created_at = models.DateTimeField()
+    
+    class Meta:
+        db_table = 'buyer_ledger'
+        managed = False
+    
+    def __str__(self):
+        return f"{self.id} - {self.customer.name}"

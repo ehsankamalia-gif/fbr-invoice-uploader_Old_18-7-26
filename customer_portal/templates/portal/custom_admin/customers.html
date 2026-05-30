@@ -34,24 +34,27 @@
                 </tr>
             </thead>
             <tbody>
-                {% for customer in customers %}
+                {% for item in customers %}
                 <tr class="border-b border-gray-100 hover:bg-gray-50">
-                    <td class="py-4 px-4 text-sm text-gray-800">{{ customer.id }}</td>
-                    <td class="py-4 px-4 text-sm font-semibold text-gray-800">{{ customer.name }}</td>
+                    <td class="py-4 px-4 text-sm text-gray-800">{{ item.customer.id }}</td>
+                    <td class="py-4 px-4 text-sm font-semibold text-gray-800">{{ item.customer.name }}</td>
                     <td class="py-4 px-4">
-                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {% if customer.type == 'DEALER' %}bg-blue-100 text-blue-800{% else %}bg-green-100 text-green-800{% endif %}">
-                            {{ customer.type }}
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {% if item.customer.type == 'DEALER' %}bg-blue-100 text-blue-800{% else %}bg-green-100 text-green-800{% endif %}">
+                            {{ item.customer.type }}
                         </span>
                     </td>
-                    <td class="py-4 px-4 text-sm text-gray-600">{{ customer.phone|default:"-" }}</td>
-                    <td class="py-4 px-4 text-sm text-gray-500">{{ customer.cnic|default:"-" }}</td>
-                    <td class="py-4 px-4 text-sm font-medium text-gray-800">{{ customer.credit_sales_count }}</td>
-                    <td class="py-4 px-4 text-sm font-bold {% if customer.total_outstanding > 0 %}text-red-600{% else %}text-green-600{% endif %}">
-                        Rs. {{ customer.total_outstanding|default:0 }}
+                    <td class="py-4 px-4 text-sm text-gray-600">{{ item.customer.phone|default:"-" }}</td>
+                    <td class="py-4 px-4 text-sm text-gray-500">{{ item.customer.cnic|default:"-" }}</td>
+                    <td class="py-4 px-4 text-sm font-medium text-gray-800">{{ item.credit_sales_count }}</td>
+                    <td class="py-4 px-4 text-sm font-bold {% if item.total_outstanding > 0 %}text-red-600{% else %}text-green-600{% endif %}">
+                        Rs. {{ item.total_outstanding|default:0 }}
                     </td>
                     <td class="py-4 px-4">
-                        <a href="/admin/portal/customer/{{ customer.id }}/change/" 
-                           class="text-blue-600 hover:text-blue-800 transition mr-3">
+                        <a href="{% url 'custom_admin_customer_ledger' item.customer.id %}" class="text-green-600 hover:text-green-800 mr-3">
+                            <i class="fas fa-book"></i>
+                        </a>
+                        <a href="/admin/portal/customer/{{ item.customer.id }}/change/" 
+                           class="text-blue-600 hover:text-blue-800 transition">
                             <i class="fas fa-edit"></i>
                         </a>
                     </td>

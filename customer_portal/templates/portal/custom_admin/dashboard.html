@@ -120,7 +120,7 @@
                     <tr class="border-b border-gray-100 hover:bg-gray-50">
                         <td class="py-3 px-2 text-sm text-gray-800">{{ payment.id }}</td>
                         <td class="py-3 px-2 text-sm font-medium text-gray-800">{{ payment.customer.name }}</td>
-                        <td class="py-3 px-2 text-sm font-semibold text-green-600">Rs. {{ payment.paid_total }}</td>
+                        <td class="py-3 px-2 text-sm font-semibold text-green-600">Rs. {{ payment.paid_amount|floatformat:2 }}</td>
                         <td class="py-3 px-2 text-sm text-gray-600">{{ payment.payment_date|date:"Y-m-d" }}</td>
                     </tr>
                     {% empty %}
@@ -132,6 +132,43 @@
                 </tbody>
             </table>
         </div>
+    </div>
+</div>
+
+<div class="mb-8">
+    <h2 class="text-2xl font-bold text-gray-800 mb-4">
+        <i class="fas fa-motorcycle mr-3"></i>Motorcycle Models (Sold on Credit)
+    </h2>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        {% for model in motorcycles_by_model %}
+        <div class="bg-white rounded-xl p-6 card-shadow card-hover">
+            <div class="flex items-center justify-between mb-4">
+                <h5 class="text-lg font-semibold text-gray-800">{{ model.product_model__model_name }}</h5>
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center">
+                    <i class="fas fa-motorcycle text-white"></i>
+                </div>
+            </div>
+            <div class="space-y-3">
+                <div class="flex items-center justify-between">
+                    <p class="text-sm text-gray-500">Total</p>
+                    <p class="text-xl font-bold text-gray-800">{{ model.count }}</p>
+                </div>
+                <div class="flex items-center justify-between">
+                    <p class="text-sm text-gray-500">In Stock</p>
+                    <p class="text-xl font-bold text-green-600">{{ model.in_stock }}</p>
+                </div>
+                <div class="flex items-center justify-between">
+                    <p class="text-sm text-gray-500">Sold</p>
+                    <p class="text-xl font-bold text-purple-600">{{ model.sold }}</p>
+                </div>
+            </div>
+        </div>
+        {% empty %}
+        <div class="col-span-full py-12 text-center text-gray-500">
+            <i class="fas fa-motorcycle fa-3x mb-3 text-gray-300"></i>
+            <p class="text-lg">No motorcycle models found</p>
+        </div>
+        {% endfor %}
     </div>
 </div>
 {% endblock %}

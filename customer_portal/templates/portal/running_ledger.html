@@ -17,7 +17,6 @@
             <thead>
                 <tr class="bg-gray-50">
                     <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Date</th>
-                    <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Sale ID</th>
                     <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Type</th>
                     <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Description</th>
                     <th class="text-left py-4 px-6 text-sm font-semibold text-gray-600">Debit</th>
@@ -30,9 +29,16 @@
                 <tr class="hover:bg-gray-50">
                     <td class="py-4 px-6 text-gray-600">{{ item.entry.entry_date|date:"d M Y" }}</td>
                     <td class="py-4 px-6">
-                        <code class="text-primary-600 bg-primary-50 px-2 py-1 rounded">{{ item.entry.sale.sale_id }}</code>
+                        {% if item.type == 'finance' %}
+                            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                Finance
+                            </span>
+                        {% else %}
+                            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                Old
+                            </span>
+                        {% endif %}
                     </td>
-                    <td class="py-4 px-6"><strong class="text-gray-800">{{ item.entry.entry_type }}</strong></td>
                     <td class="py-4 px-6 text-gray-600">{{ item.entry.description|default:"-" }}</td>
                     <td class="py-4 px-6 {% if item.entry.debit > 0 %}text-red-600 font-semibold{% endif %}">
                         {% if item.entry.debit > 0 %}Rs. {{ item.entry.debit|floatformat:2 }}{% endif %}
@@ -50,7 +56,7 @@
             </tbody>
             <tfoot class="bg-gray-50 border-t-2 border-gray-200">
                 <tr>
-                    <td colspan="5" class="py-4 px-6 text-right text-lg font-bold text-gray-800">Total Paid:</td>
+                    <td colspan="4" class="py-4 px-6 text-right text-lg font-bold text-gray-800">Total Paid:</td>
                     <td class="py-4 px-6 text-lg font-bold text-green-600">Rs. {{ total_paid|floatformat:2 }}</td>
                     <td></td>
                 </tr>

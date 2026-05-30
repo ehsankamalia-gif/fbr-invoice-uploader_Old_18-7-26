@@ -307,6 +307,28 @@ class CreditLedgerService:
                 )
                 db.add(payment_entry)
 
+            # 4. Update CreditSale remaining amounts
+            # Get all active credit sales for this buyer
+            active_sales = db.query(CreditSale).filter(
+                CreditSale.buyer_id == payment.buyer_id,
+                CreditSale.remaining_amount > 0
+            ).order_by(CreditSale.sale_date.asc()).all()
+            
+            remaining_payment = payment.net_amount
+            
+            for sale in active_sales:
+                if remaining_payment <= 0:
+                    break
+                    
+                # Calculate how much we can apply to this sale
+                apply_amount = min(sale.remaining_amount, remaining_payment)
+                sale.remaining_amount -= apply_amount
+                remaining_payment -= apply_amount
+                
+                # Update status if fully paid
+                if sale.remaining_amount <= 0:
+                    sale.status = "CLOSED"
+            
             db.commit()
             db.refresh(payment)
             return payment
@@ -641,8 +663,9 @@ class CreditLedgerService:
             total_sales = old_sales + adv_sales
             
             # 2. Total Received (Old + Advanced)
-            old_received = db.query(func.sum(CreditPayment.amount)).scalar() or 0.0
-            adv_received = db.query(func.sum(FinanceInstallment.paid_amount)).scalar() or 0.0
+            # Use ledger credits as the most comprehensive source of payment data
+            old_received = db.query(func.sum(BuyerLedger.credit)).scalar() or 0.0
+            adv_received = db.query(func.sum(FinanceLedger.credit)).scalar() or 0.0
             total_received = old_received + adv_received
             
             # 3. Buyer-wise aggregates
@@ -656,7 +679,15 @@ class CreditLedgerService:
                 old_subquery, BuyerLedger.id == old_subquery.c.max_id
             ).all()
             
-            # B. Advanced System Balances (Sum of remaining_balance from FinanceCreditSale)
+            # B. Old System Units (Count of CreditSaleItem per customer)
+            old_units = db.query(
+                CreditSale.buyer_id,
+                func.count(CreditSaleItem.id).label('total_units')
+            ).join(
+                CreditSaleItem, CreditSale.id == CreditSaleItem.sale_id
+            ).group_by(CreditSale.buyer_id).all()
+            
+            # C. Advanced System Balances (Sum of remaining_balance from FinanceCreditSale)
             adv_balances = db.query(
                 FinanceCreditSale.customer_id,
                 func.sum(FinanceCreditSale.remaining_balance).label('total_remaining'),
@@ -669,15 +700,35 @@ class CreditLedgerService:
             
             # Add Old System data
             for b in old_balances:
-                if b.balance != 0:
-                    name = b.buyer.name if b.buyer else f"Unknown (ID: {b.buyer_id})"
-                    consolidated[b.buyer_id] = {
-                        "id": b.buyer_id,
+                name = b.buyer.name if b.buyer else f"Unknown (ID: {b.buyer_id})"
+                consolidated[b.buyer_id] = {
+                    "id": b.buyer_id,
+                    "name": name,
+                    "balance": float(b.balance),
+                    "total_units": 0, # To be incremented
+                    "last_payment_date": "N/A"
+                }
+            
+            # Add Old System Units
+            for buyer_id, units in old_units:
+                if buyer_id not in consolidated:
+                    # Need to fetch name if not in old system (shouldn't happen but just in case)
+                    cust = db.query(Customer).filter(Customer.id == buyer_id).first()
+                    name = cust.name if cust else f"Customer {buyer_id}"
+                    # Get balance from old system if exists
+                    balance = 0.0
+                    for b in old_balances:
+                        if b.buyer_id == buyer_id:
+                            balance = float(b.balance)
+                            break
+                    consolidated[buyer_id] = {
+                        "id": buyer_id,
                         "name": name,
-                        "balance": float(b.balance),
-                        "total_units": 0, # To be incremented
+                        "balance": balance,
+                        "total_units": 0,
                         "last_payment_date": "N/A"
                     }
+                consolidated[buyer_id]["total_units"] += int(units)
             
             # Add/Update with Advanced System data
             for customer_id, remaining, units, last_sale in adv_balances:
