@@ -12,5 +12,15 @@ echo Press CTRL+C to stop the server.
 echo.
 echo ========================================
 echo.
-python manage.py runserver
+
+IF EXIST "..\venv\Scripts\python.exe" (
+    echo [INFO] Using virtual environment found in root...
+    "..\venv\Scripts\python.exe" manage.py runserver
+) ELSE IF EXIST "venv\Scripts\python.exe" (
+    echo [INFO] Using local virtual environment...
+    "venv\Scripts\python.exe" manage.py runserver
+) ELSE (
+    echo [WARNING] Virtual environment not found. Using system python...
+    python manage.py runserver
+)
 pause
