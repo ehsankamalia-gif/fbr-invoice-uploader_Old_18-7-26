@@ -7,9 +7,32 @@ from PyQt6.QtWidgets import (
     QRadioButton, QButtonGroup, QGroupBox, QDialog,
     QGraphicsDropShadowEffect
 )
-from PyQt6.QtCore import Qt, QDate, QStringListModel, QModelIndex, QTimer, QEvent, QRegularExpression
-from PyQt6.QtGui import QStandardItemModel, QStandardItem, QFont, QShortcut, QKeySequence, QKeyEvent, QRegularExpressionValidator
+from PyQt6.QtCore import Qt, QDate, QStringListModel, QModelIndex, QTimer, QEvent, QRegularExpression, QPoint
+from PyQt6.QtGui import QStandardItemModel, QStandardItem, QFont, QShortcut, QKeySequence, QKeyEvent, QRegularExpressionValidator, QCursor
+from app.qt_ui.auto_scroll_manager import AutoScrollManager
 from app.services.credit_ledger_service import credit_ledger_service
+
+
+class PanScrollArea(QScrollArea):
+    """
+    Custom QScrollArea with professional Auto Scroll feature (like web browsers)
+    Features:
+    - Middle mouse button activates auto-scroll
+    - Cursor changes to auto-scroll indicator
+    - Scrolling speed depends on distance from activation point
+    - Vertical and horizontal scrolling
+    - Second click or key press deactivates
+    """
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        # Initialize auto scroll manager
+        self.auto_scroll = AutoScrollManager(self)
+        # Install on self (since it's a QAbstractScrollArea, AutoScrollManager will handle the viewport)
+        self.auto_scroll.install_on_widget(self)
+        
+    def __del__(self):
+        """Cleanup auto scroll manager when scroll area is destroyed"""
+        self.auto_scroll.uninstall_from_widget()
 from app.services.print_service_v2 import PrintServiceV2
 import datetime as dt
 from app.core.logger import logger
@@ -82,6 +105,9 @@ class CustomerFinancialSummaryDialog(QDialog):
             "Sale ID", "Motorcycle Model", "Chassis Number", "Credit Type",
             "Credit Amount", "Paid Amount", "Remaining", "Due Date", "Status"
         ])
+        # Install Auto Scroll Manager
+        self.accounts_table_auto_scroll = AutoScrollManager(self)
+        self.accounts_table_auto_scroll.install_on_widget(self.accounts_table)
         
         # Workable Column Resizing & Responsive Layout
         header = self.accounts_table.horizontalHeader()
@@ -621,6 +647,9 @@ class CreditLedgerSystemPage(QWidget):
         ])
         
         self.buyer_table.setShowGrid(False)
+        # Install Auto Scroll Manager
+        self.buyer_table_auto_scroll = AutoScrollManager(self)
+        self.buyer_table_auto_scroll.install_on_widget(self.buyer_table)
         self.buyer_table.setAlternatingRowColors(True)
         self.buyer_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.buyer_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -650,6 +679,9 @@ class CreditLedgerSystemPage(QWidget):
         
         self.recent_payments_list = QTableWidget(0, 2)
         self.recent_payments_list.setHorizontalHeaderLabels(["Customer", "Amount"])
+        # Install Auto Scroll Manager
+        self.recent_payments_list_auto_scroll = AutoScrollManager(self)
+        self.recent_payments_list_auto_scroll.install_on_widget(self.recent_payments_list)
         
         # Workable Column Resizing & Responsive Layout
         rh = self.recent_payments_list.horizontalHeader()
@@ -804,7 +836,7 @@ class CreditLedgerSystemPage(QWidget):
     # --- TAB: SALE ENTRY ---
     def _setup_sale_tab(self):
         layout = QVBoxLayout(self.sale_tab)
-        scroll = QScrollArea()
+        scroll = PanScrollArea()
         scroll.setWidgetResizable(True)
         container = QWidget()
         grid = QGridLayout(container)

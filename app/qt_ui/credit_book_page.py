@@ -4,9 +4,32 @@ from PyQt6.QtWidgets import (
     QFrame, QCompleter, QTableView, QHeaderView, QMessageBox,
     QScrollArea, QSizePolicy, QAbstractItemView, QGridLayout
 )
-from PyQt6.QtCore import Qt, QDate, pyqtSignal, QStringListModel, QTimer
-from PyQt6.QtGui import QFont, QStandardItemModel, QStandardItem
+from PyQt6.QtCore import Qt, QDate, pyqtSignal, QStringListModel, QTimer, QPoint
+from PyQt6.QtGui import QFont, QStandardItemModel, QStandardItem, QCursor
+from app.qt_ui.auto_scroll_manager import AutoScrollManager
 from app.services.credit_book_service import credit_book_service
+
+
+class PanScrollArea(QScrollArea):
+    """
+    Custom QScrollArea with professional Auto Scroll feature (like web browsers)
+    Features:
+    - Middle mouse button activates auto-scroll
+    - Cursor changes to auto-scroll indicator
+    - Scrolling speed depends on distance from activation point
+    - Vertical and horizontal scrolling
+    - Second click or key press deactivates
+    """
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        # Initialize auto scroll manager
+        self.auto_scroll = AutoScrollManager(self)
+        # Install on self (since it's a QAbstractScrollArea, AutoScrollManager will handle the viewport)
+        self.auto_scroll.install_on_widget(self)
+        
+    def __del__(self):
+        """Cleanup auto scroll manager when scroll area is destroyed"""
+        self.auto_scroll.uninstall_from_widget()
 import datetime as dt
 from app.core.logger import logger
 
@@ -29,7 +52,7 @@ class CreditBookPage(QWidget):
         main_layout.addWidget(header_label)
 
         # Scrollable Area for Form
-        scroll = QScrollArea()
+        scroll = PanScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         

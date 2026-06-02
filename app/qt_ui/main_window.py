@@ -27,9 +27,10 @@ from PyQt6.QtCore import (
     pyqtSignal, 
     QObject, 
     QEvent,
-    QThread
+    QThread,
+    QPoint
 )
-from PyQt6.QtGui import QPixmap, QKeySequence, QShortcut
+from PyQt6.QtGui import QPixmap, QKeySequence, QShortcut, QCursor
 from PyQt6.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -105,6 +106,7 @@ from app.qt_ui.settings_modals import (
     FontCustomizationDialog,
     DMSSettingsDialog
 )
+from app.qt_ui.auto_scroll_manager import AutoScrollManager
 from app.core.signals import booking_signals
 from app.core.logger import logger
 from app.core.version_manager import VersionManager
@@ -162,6 +164,28 @@ class MySQLRestoreWorker(QObject):
         except Exception as e:
             logger.error(f"MySQLRestoreWorker failed: {e}", exc_info=True)
             self.error.emit(str(e))
+
+
+class PanScrollArea(QScrollArea):
+    """
+    Custom QScrollArea with professional Auto Scroll feature (like web browsers)
+    Features:
+    - Middle mouse button activates auto-scroll
+    - Cursor changes to auto-scroll indicator
+    - Scrolling speed depends on distance from activation point
+    - Vertical and horizontal scrolling
+    - Second click or key press deactivates
+    """
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        # Initialize auto scroll manager
+        self.auto_scroll = AutoScrollManager(self)
+        # Install on self (since it's a QAbstractScrollArea, AutoScrollManager will handle the viewport)
+        self.auto_scroll.install_on_widget(self)
+        
+    def __del__(self):
+        """Cleanup auto scroll manager when scroll area is destroyed"""
+        self.auto_scroll.uninstall_from_widget()
 
 
 class ClearableDateEdit(QDateEdit):
@@ -491,7 +515,6 @@ class BookingCard(QFrame):
             QLabel#countLabel {{
                 color: #95a5a6;
                 font-size: 12px;
-                margin-top: -5px;
             }}
         """)
         
@@ -1598,6 +1621,9 @@ class MainWindow(QMainWindow):
         self.dash_table_view.verticalHeader().setVisible(False)
         self.dash_table_view.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
         self.dash_table_view.doubleClicked.connect(self._on_dash_row_double_clicked)
+        # Install Auto Scroll Manager
+        self.dash_table_auto_scroll = AutoScrollManager(self)
+        self.dash_table_auto_scroll.install_on_widget(self.dash_table_view)
         
         layout.addWidget(self.dash_table_view, 1)
 
@@ -2252,6 +2278,9 @@ class MainWindow(QMainWindow):
         self.sales_table_view.setShowGrid(False)
         self.sales_table_view.setMouseTracking(True)
         self.sales_table_view.doubleClicked.connect(self._on_sales_row_double_clicked)
+        # Install Auto Scroll Manager
+        self.sales_table_auto_scroll = AutoScrollManager(self)
+        self.sales_table_auto_scroll.install_on_widget(self.sales_table_view)
         
         # Adjust column widths
         self.sales_table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
@@ -2363,7 +2392,7 @@ class MainWindow(QMainWindow):
             main_layout.addLayout(header_layout)
 
             # Scroll Area for content
-            scroll = QScrollArea()
+            scroll = PanScrollArea()
             scroll.setWidgetResizable(True)
             scroll.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
             content_widget = QWidget()
@@ -2597,7 +2626,7 @@ class MainWindow(QMainWindow):
 
         root_layout.addWidget(header_widget)
 
-        self.invoice_scroll_area = QScrollArea(page)
+        self.invoice_scroll_area = PanScrollArea(page)
         self.invoice_scroll_area.setWidgetResizable(True)
         root_layout.addWidget(self.invoice_scroll_area, 1)
 
@@ -3208,7 +3237,7 @@ class MainWindow(QMainWindow):
         main_layout = QVBoxLayout(page)
         main_layout.setContentsMargins(0, 0, 0, 0)
 
-        scroll = QScrollArea()
+        scroll = PanScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
         
@@ -3493,7 +3522,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(20)
         
         # Main Content Scroll Area
-        scroll = QScrollArea()
+        scroll = PanScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
         
@@ -4693,6 +4722,9 @@ class MainWindow(QMainWindow):
         self.inventory_table_view.verticalHeader().setVisible(False)
         self.inventory_table_view.setShowGrid(False)
         self.inventory_table_view.doubleClicked.connect(self._on_inventory_row_double_clicked)
+        # Install Auto Scroll Manager
+        self.inventory_table_auto_scroll = AutoScrollManager(self)
+        self.inventory_table_auto_scroll.install_on_widget(self.inventory_table_view)
         
         table_layout.addWidget(self.inventory_table_view)
         layout.addWidget(table_container, 1)
@@ -4824,6 +4856,9 @@ class MainWindow(QMainWindow):
                 font-weight: bold;
             }
         """)
+        # Install Auto Scroll Manager
+        self.captured_table_auto_scroll = AutoScrollManager(self)
+        self.captured_table_auto_scroll.install_on_widget(self.captured_table_view)
         
         layout.addWidget(self.captured_table_view, 1)
 
@@ -6479,6 +6514,9 @@ class MainWindow(QMainWindow):
         self.customers_table_view.setAlternatingRowColors(True)
         self.customers_table_view.setShowGrid(False)
         self.customers_table_view.doubleClicked.connect(self._on_customer_row_double_clicked)
+        # Install Auto Scroll Manager
+        self.customers_table_auto_scroll = AutoScrollManager(self)
+        self.customers_table_auto_scroll.install_on_widget(self.customers_table_view)
         
         # Responsive Columns
         self.customers_table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -6629,6 +6667,9 @@ class MainWindow(QMainWindow):
         self.dealers_table_view.setAlternatingRowColors(True)
         self.dealers_table_view.setShowGrid(False)
         self.dealers_table_view.doubleClicked.connect(self._on_dealer_row_double_clicked)
+        # Install Auto Scroll Manager
+        self.dealers_table_auto_scroll = AutoScrollManager(self)
+        self.dealers_table_auto_scroll.install_on_widget(self.dealers_table_view)
 
         # Responsive Columns
         self.dealers_table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -6668,7 +6709,7 @@ class MainWindow(QMainWindow):
         return page
 
     def _create_advance_booking_page(self) -> QWidget:
-        page = QScrollArea(self)
+        page = PanScrollArea(self)
         page.setWidgetResizable(True)
         page.setFrameShape(QFrame.Shape.NoFrame)
         page.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -6890,6 +6931,13 @@ class MainWindow(QMainWindow):
         refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         refresh_btn.clicked.connect(self._refresh_advance_booking_page)
 
+        cancel_btn = QPushButton("❌ Cancel Booking")
+        cancel_btn.setObjectName("resetButton")
+        cancel_btn.setStyleSheet("""QPushButton#resetButton { background-color: #e74c3c; color: white; } 
+                                   QPushButton#resetButton:hover { background-color: #c0392b; }""")
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.clicked.connect(self._cancel_selected_booking)
+
         print_btn = QPushButton("🖨️ Print Selected")
         print_btn.setObjectName("resetButton")
         print_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -6898,6 +6946,7 @@ class MainWindow(QMainWindow):
         btn_bar.addWidget(print_btn)
         btn_bar.addWidget(delivered_btn)
         btn_bar.addWidget(active_btn)
+        btn_bar.addWidget(cancel_btn)
         btn_bar.addWidget(refresh_btn)
         btn_bar.addWidget(save_btn)
 
@@ -6915,7 +6964,7 @@ class MainWindow(QMainWindow):
         self.ab_search_input.textChanged.connect(self._reload_advance_bookings)
 
         self.ab_status_filter = QComboBox()
-        self.ab_status_filter.addItems(["ALL", "ACTIVE", "DELIVERED"])
+        self.ab_status_filter.addItems(["ALL", "ACTIVE", "DELIVERED", "CANCELLED"])
         self.ab_status_filter.currentTextChanged.connect(self._reload_advance_bookings)  # type: ignore[arg-type]
 
         filter_layout.addWidget(QLabel("Filter:"))
@@ -6964,6 +7013,9 @@ class MainWindow(QMainWindow):
         self.ab_table_view.setAlternatingRowColors(True)
         self.ab_table_view.setShowGrid(False)
         self.ab_table_view.doubleClicked.connect(self._on_advance_booking_double_clicked)
+        # Install Auto Scroll Manager
+        self.ab_table_auto_scroll = AutoScrollManager(self)
+        self.ab_table_auto_scroll.install_on_widget(self.ab_table_view)
         self.ab_table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.ab_table_view.horizontalHeader().setStretchLastSection(True)
         self.ab_table_view.verticalHeader().setVisible(False)
@@ -7588,6 +7640,80 @@ class MainWindow(QMainWindow):
         finally:
             db.close()
 
+    def _cancel_selected_booking(self) -> None:
+        booking_number = self._get_selected_advance_booking_number()
+        if not booking_number:
+            self._show_error("Selection Required", "Please select a booking to cancel.")
+            return
+        
+        db = SessionLocal()
+        try:
+            booking = advance_booking_service.get_by_booking_number(db, booking_number)
+            if not booking:
+                self._show_error("Error", "Booking not found.")
+                return
+            
+            # Create a dialog to get refund amount and note
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Cancel Booking")
+            dialog.setMinimumWidth(400)
+            layout = QVBoxLayout(dialog)
+            
+            # Info label
+            info_label = QLabel(f"Customer: {booking.customer_name}\n"
+                               f"Total Price: Rs. {booking.total_price:,.0f}\n"
+                               f"Advance Remaining: Rs. {booking.advance_remaining:,.0f}")
+            info_label.setStyleSheet("padding: 10px; background-color: #f8f9fa; border-radius: 8px;")
+            layout.addWidget(info_label)
+            
+            # Refund amount input
+            refund_layout = QHBoxLayout()
+            refund_layout.addWidget(QLabel("Refund Amount:"))
+            refund_spin = QDoubleSpinBox()
+            refund_spin.setMaximum(1000000000)
+            refund_spin.setDecimals(0)
+            refund_spin.setPrefix("Rs. ")
+            refund_spin.setValue(booking.advance_remaining)
+            refund_layout.addWidget(refund_spin)
+            layout.addLayout(refund_layout)
+            
+            # Note input
+            note_layout = QHBoxLayout()
+            note_layout.addWidget(QLabel("Note (optional):"))
+            note_input = QLineEdit()
+            note_layout.addWidget(note_input)
+            layout.addLayout(note_layout)
+            
+            # Buttons
+            btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+            btn_box.accepted.connect(dialog.accept)
+            btn_box.rejected.connect(dialog.reject)
+            layout.addWidget(btn_box)
+            
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                model = booking.motorcycle_model
+                advance_booking_service.cancel_booking(
+                    db, 
+                    booking_number, 
+                    refund_amount=refund_spin.value(), 
+                    note=note_input.text()
+                )
+                
+                # Update real-time model count
+                active_count = db.query(AdvanceBooking).filter(
+                    AdvanceBooking.motorcycle_model == model,
+                    AdvanceBooking.status == "ACTIVE"
+                ).count()
+                booking_signals.booking_updated.emit(model, active_count)
+                
+                self._reload_advance_bookings()
+                
+        except Exception as e:
+            logger.error(f"Advance booking cancel failed: {e}", exc_info=True)
+            self._show_error("Error", f"Failed to cancel booking: {e}")
+        finally:
+            db.close()
+
     def _create_credit_ledger_page(self) -> QWidget:
         from app.qt_ui.credit_ledger_system_page import CreditLedgerSystemPage
 
@@ -7681,6 +7807,9 @@ class MainWindow(QMainWindow):
         self.ledger_table_view.verticalHeader().setVisible(False)
         self.ledger_table_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.ledger_table_view.customContextMenuRequested.connect(self._show_ledger_context_menu)
+        # Install Auto Scroll Manager
+        self.ledger_table_auto_scroll = AutoScrollManager(self)
+        self.ledger_table_auto_scroll.install_on_widget(self.ledger_table_view)
         
         layout.addWidget(self.ledger_table_view, 1)
 

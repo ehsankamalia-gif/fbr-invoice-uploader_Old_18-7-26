@@ -6,8 +6,8 @@ import subprocess
 import base64
 import asyncio
 from pathlib import Path
-from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QThread, QTimer
-from PyQt6.QtGui import QPixmap, QImage, QAction, QIcon, QFont, QFontDatabase
+from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QThread, QTimer, QPoint
+from PyQt6.QtGui import QPixmap, QImage, QAction, QIcon, QFont, QFontDatabase, QCursor
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
     QPushButton, QComboBox, QDoubleSpinBox, QSpinBox, 
@@ -15,7 +15,30 @@ from PyQt6.QtWidgets import (
     QMessageBox, QApplication, QTableWidget, QTableWidgetItem, QHeaderView, QInputDialog,
     QProgressDialog, QWidget, QTextEdit, QTabWidget, QFileDialog, QSlider
 )
+from app.qt_ui.auto_scroll_manager import AutoScrollManager
 import logging
+
+
+class PanScrollArea(QScrollArea):
+    """
+    Custom QScrollArea with professional Auto Scroll feature (like web browsers)
+    Features:
+    - Middle mouse button activates auto-scroll
+    - Cursor changes to auto-scroll indicator
+    - Scrolling speed depends on distance from activation point
+    - Vertical and horizontal scrolling
+    - Second click or key press deactivates
+    """
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        # Initialize auto scroll manager
+        self.auto_scroll = AutoScrollManager(self)
+        # Install on self (since it's a QAbstractScrollArea, AutoScrollManager will handle the viewport)
+        self.auto_scroll.install_on_widget(self)
+        
+    def __del__(self):
+        """Cleanup auto scroll manager when scroll area is destroyed"""
+        self.auto_scroll.uninstall_from_widget()
 import datetime as dt
 
 from app.services.settings_service import settings_service
@@ -450,7 +473,7 @@ class SMSConfigDialog(BaseSettingsDialog):
 
     def _init_ui(self):
         # Using a scroll area for better layout
-        scroll = QScrollArea()
+        scroll = PanScrollArea()
         scroll.setWidgetResizable(True)
         scroll_content = QWidget()
         layout = QVBoxLayout(scroll_content)

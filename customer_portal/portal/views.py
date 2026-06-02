@@ -1140,58 +1140,46 @@ def custom_admin_combined_credit_ledger_view(request):
 
 @staff_member_required
 def custom_admin_customer_ledger_view(request, customer_id):
-    """Custom admin view for a specific customer's ledger."""
+    """Custom admin view for a specific customer's ledger - combines both Finance and Old ledgers."""
     customer = get_object_or_404(Customer, id=customer_id, is_deleted=False)
     
-    finance_sales = FinanceCreditSale.objects.filter(customer=customer).order_by('sale_date')
-    old_sales = CreditSale.objects.filter(customer=customer).order_by('sale_date')
-    finance_payments = FinanceLedger.objects.filter(customer=customer, credit__gt=0).order_by('entry_date')
-    old_payments = BuyerLedger.objects.filter(customer=customer, credit__gt=0).order_by('date')
+    # Get all ledger entries
+    finance_entries = FinanceLedger.objects.filter(customer=customer).order_by('entry_date')
+    old_entries = BuyerLedger.objects.filter(customer=customer).order_by('date')
     
     all_transactions = []
     
-    for sale in finance_sales:
+    # Add Finance Ledger entries
+    for entry in finance_entries:
         all_transactions.append({
-            'type': 'Finance Sale',
-            'date': sale.sale_date,
-            'description': f'Credit Sale - {sale.chassis_no}',
-            'debit': sale.credit_price,
-            'credit': 0,
-        })
-    for sale in old_sales:
-        all_transactions.append({
-            'type': 'Old Sale',
-            'date': sale.sale_date,
-            'description': f'Credit Sale',
-            'debit': sale.total_credit_price,
-            'credit': 0,
-        })
-    for payment in finance_payments:
-        all_transactions.append({
-            'type': 'Finance Payment',
-            'date': payment.entry_date,
-            'description': payment.description or 'Payment',
-            'debit': 0,
-            'credit': payment.credit,
-        })
-    for payment in old_payments:
-        all_transactions.append({
-            'type': 'Old Payment',
-            'date': payment.date,
-            'description': payment.description or 'Payment',
-            'debit': 0,
-            'credit': payment.credit,
+            'type': 'Finance Ledger',
+            'date': entry.entry_date,
+            'description': entry.description or 'Transaction',
+            'debit': entry.debit or 0,
+            'credit': entry.credit or 0,
         })
     
+    # Add Old Buyer Ledger entries
+    for entry in old_entries:
+        all_transactions.append({
+            'type': 'Old Ledger',
+            'date': entry.date,
+            'description': entry.description or 'Transaction',
+            'debit': entry.debit or 0,
+            'credit': entry.credit or 0,
+        })
+    
+    # Sort all transactions by date
     all_transactions.sort(key=lambda x: x['date'])
     
+    # Calculate running balance
     balance = 0
     for transaction in all_transactions:
         balance += transaction['debit'] - transaction['credit']
         transaction['balance'] = balance
     
     context = {
-        'title': f'Customer Ledger - {customer.name}',
+        'title': f'Combined Ledger - {customer.name}',
         'customer': customer,
         'transactions': all_transactions,
     }

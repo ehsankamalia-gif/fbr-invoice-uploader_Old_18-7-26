@@ -1,5 +1,5 @@
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QPoint
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -15,7 +15,30 @@ from PyQt6.QtWidgets import (
     QDialog,
     QFormLayout,
 )
+from app.qt_ui.auto_scroll_manager import AutoScrollManager
 from app.qt_ui.settings_modals import DMSSettingsDialog
+
+
+class PanScrollArea(QScrollArea):
+    """
+    Custom QScrollArea with professional Auto Scroll feature (like web browsers)
+    Features:
+    - Middle mouse button activates auto-scroll
+    - Cursor changes to auto-scroll indicator
+    - Scrolling speed depends on distance from activation point
+    - Vertical and horizontal scrolling
+    - Second click or key press deactivates
+    """
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        # Initialize auto scroll manager
+        self.auto_scroll = AutoScrollManager(self)
+        # Install on self (since it's a QAbstractScrollArea, AutoScrollManager will handle the viewport)
+        self.auto_scroll.install_on_widget(self)
+        
+    def __del__(self):
+        """Cleanup auto scroll manager when scroll area is destroyed"""
+        self.auto_scroll.uninstall_from_widget()
 import os
 import sys
 import json
@@ -30,7 +53,7 @@ class DMSAutomationPage(QWidget):
         self._init_ui()
 
     def _init_ui(self):
-        scroll = QScrollArea()
+        scroll = PanScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
         

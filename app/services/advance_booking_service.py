@@ -493,6 +493,77 @@ class AdvanceBookingService:
             raise
         return booking
 
+    def cancel_booking(self, db: Session, booking_number: str, refund_amount: Optional[float] = None, note: str = "") -> AdvanceBooking:
+        """
+        Cancel an advance booking.
+        
+        Args:
+            db: Database session
+            booking_number: Booking to cancel
+            refund_amount: Amount to refund (optional - if not provided, will refund remaining advance)
+            note: Note for audit trail
+            
+        Returns:
+            The cancelled booking
+        """
+        booking = self.get_by_booking_number(db, booking_number)
+        if not booking:
+            raise ValueError("Booking not found.")
+        
+        if (booking.status or "").upper() == "CANCELLED":
+            raise ValueError("Booking is already cancelled.")
+        
+        if (booking.status or "").upper() == "DELIVERED":
+            raise ValueError("Cannot cancel a delivered booking.")
+
+        before_remaining = float(getattr(booking, "advance_remaining", 0.0) or 0.0)
+        if refund_amount is None:
+            refund_amount = before_remaining
+        else:
+            refund_amount = float(refund_amount)
+            if refund_amount < 0:
+                raise ValueError("Refund amount cannot be negative.")
+            if refund_amount > before_remaining:
+                raise ValueError("Refund amount cannot be greater than available advance.")
+
+        booking.status = "CANCELLED"
+        booking.advance_remaining = 0.0  # After cancellation, no advance remains
+        
+        try:
+            if refund_amount > 0:
+                db.add(
+                    AdvanceBookingAudit(
+                        booking_number=booking.booking_number,
+                        action="BOOKING_CANCELLED",
+                        amount=refund_amount,
+                        before_advance_remaining=before_remaining,
+                        after_advance_remaining=0.0,
+                        before_balance_amount=float(getattr(booking, "balance_amount", 0.0) or 0.0),
+                        after_balance_amount=0.0,
+                        note=(note or "").strip() or f"Booking cancelled. Refunded: Rs. {refund_amount:,.0f}",
+                    )
+                )
+            else:
+                db.add(
+                    AdvanceBookingAudit(
+                        booking_number=booking.booking_number,
+                        action="BOOKING_CANCELLED",
+                        amount=0.0,
+                        before_advance_remaining=before_remaining,
+                        after_advance_remaining=0.0,
+                        before_balance_amount=float(getattr(booking, "balance_amount", 0.0) or 0.0),
+                        after_balance_amount=0.0,
+                        note=(note or "").strip() or "Booking cancelled with no refund.",
+                    )
+                )
+            db.commit()
+            db.refresh(booking)
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Advance booking cancel failed: {e}", exc_info=True)
+            raise
+        return booking
+
     def get_summary(self, db: Session) -> dict:
         # Active Bookings (Held)
         outstanding_advance = (
