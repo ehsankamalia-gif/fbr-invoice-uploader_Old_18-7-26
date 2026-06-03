@@ -822,6 +822,7 @@ class MainWindow(QMainWindow):
         self._dealer_completer_map: Dict[str, int] = {}
         self._is_dealer_selected: bool = False
         self._is_sidebar_collapsed: bool = False # Track sidebar state
+        self._ab_last_width = 0  # Track last width for advance booking page responsive layouts
 
         # SMS Signal connection
         self.sms_result_signal.connect(self._handle_sms_result)
@@ -891,6 +892,19 @@ class MainWindow(QMainWindow):
             logger.info(f"FBR settings event applied: type={event_type} revision={revision} changed={changed_keys}")
         except Exception as e:
             logger.error(f"Failed to apply settings event: {e}", exc_info=True)
+
+    def resizeEvent(self, event) -> None:
+        """Handle window resize for responsive layouts."""
+        super().resizeEvent(event)
+        
+        # Update advance booking page layouts if width changed significantly
+        current_width = event.size().width()
+        if abs(current_width - self._ab_last_width) > 100:  # Only update if change > 100px
+            self._ab_last_width = current_width
+            # Update advance booking page layouts if we have them
+            self._update_stats_layout()
+            self._update_model_cards_layout()
+            self._update_form_layout()
 
     def _sync_invoice_page_with_fbr_settings(self, before: dict, after: dict, changed_keys: list[str]) -> None:
         try:
@@ -6778,8 +6792,8 @@ class MainWindow(QMainWindow):
         header_layout.addStretch(1)
         container_layout.addWidget(header_widget)
 
-        stats_layout = QHBoxLayout()
-        stats_layout.setSpacing(15)
+        self.ab_stats_layout = QGridLayout()
+        self.ab_stats_layout.setSpacing(15)
         
         # Active Stats
         self.ab_active_count_card = self._create_stat_card("ACTIVE BOOKINGS", "0", "#e67e22")
@@ -6791,14 +6805,17 @@ class MainWindow(QMainWindow):
         self.ab_delivered_value_card = self._create_stat_card("TOTAL DELIVERED VALUE", "Rs. 0", "#2c3e50")
         self.ab_realized_advance_card = self._create_stat_card("REALIZED (ADV+BAL)", "Rs. 0", "#27ae60")
         
-        stats_layout.addWidget(self.ab_active_count_card, 1)
-        stats_layout.addWidget(self.ab_net_advance_card, 1)
-        stats_layout.addWidget(self.ab_outstanding_balance_card, 1)
-        stats_layout.addWidget(self.ab_delivered_count_card, 1)
-        stats_layout.addWidget(self.ab_delivered_value_card, 1)
-        stats_layout.addWidget(self.ab_realized_advance_card, 1)
+        self.ab_stats_cards = [
+            self.ab_active_count_card,
+            self.ab_net_advance_card,
+            self.ab_outstanding_balance_card,
+            self.ab_delivered_count_card,
+            self.ab_delivered_value_card,
+            self.ab_realized_advance_card
+        ]
+        self._update_stats_layout()
         stats_widget = QWidget()
-        stats_widget.setLayout(stats_layout)
+        stats_widget.setLayout(self.ab_stats_layout)
         container_layout.addWidget(stats_widget)
 
         model_cards_frame = QFrame()
@@ -6822,10 +6839,10 @@ class MainWindow(QMainWindow):
 
         form_card = QFrame()
         form_card.setObjectName("card")
-        form_layout = QGridLayout(form_card)
-        form_layout.setContentsMargins(25, 20, 25, 20)
-        form_layout.setHorizontalSpacing(20)
-        form_layout.setVerticalSpacing(14)
+        self.ab_form_layout = QGridLayout(form_card)
+        self.ab_form_layout.setContentsMargins(25, 20, 25, 20)
+        self.ab_form_layout.setHorizontalSpacing(20)
+        self.ab_form_layout.setVerticalSpacing(14)
 
         def make_label(text: str) -> QLabel:
             lbl = QLabel(text)
@@ -6833,19 +6850,22 @@ class MainWindow(QMainWindow):
             lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             return lbl
 
-        form_layout.setColumnStretch(0, 0)
-        form_layout.setColumnStretch(1, 1)
-        form_layout.setColumnStretch(2, 0)
-        form_layout.setColumnStretch(3, 1)
+        self.ab_form_layout.setColumnStretch(0, 0)
+        self.ab_form_layout.setColumnStretch(1, 1)
+        self.ab_form_layout.setColumnStretch(2, 0)
+        self.ab_form_layout.setColumnStretch(3, 1)
 
         self.ab_customer_name = QLineEdit()
         self.ab_customer_name.setPlaceholderText("Customer Name")
+        self.ab_customer_name_label = make_label("Customer Name")
         self.ab_model_combo = QComboBox()
         self.ab_model_combo.setEditable(False)
         self.ab_model_combo.setPlaceholderText("Select model")
+        self.ab_model_label = make_label("Motorcycle Model")
         self.ab_color_combo = QComboBox()
         self.ab_color_combo.setEditable(False)
         self.ab_color_combo.setPlaceholderText("Select color")
+        self.ab_color_label = make_label("Color")
 
         def force_upper(le: QLineEdit) -> None:
             t = le.text()
@@ -6867,16 +6887,19 @@ class MainWindow(QMainWindow):
         self.ab_total_price.setPrefix("Rs. ")
         self.ab_total_price.setValue(0)
         self.ab_total_price.setEnabled(False)
+        self.ab_total_price_label = make_label("Total Price")
 
         self.ab_advance_paid = QDoubleSpinBox()
         self.ab_advance_paid.setMaximum(1000000000)
         self.ab_advance_paid.setDecimals(0)
         self.ab_advance_paid.setPrefix("Rs. ")
         self.ab_advance_paid.setValue(0)
+        self.ab_advance_paid_label = make_label("Advance Paid")
 
         self.ab_balance = QLineEdit()
         self.ab_balance.setReadOnly(True)
         self.ab_balance.setPlaceholderText("Balance Amount")
+        self.ab_balance_label = make_label("Balance")
 
         def update_balance() -> None:
             total = float(self.ab_total_price.value())
@@ -6888,28 +6911,44 @@ class MainWindow(QMainWindow):
         self.ab_advance_paid.valueChanged.connect(update_balance)
         update_balance()
 
-        form_layout.addWidget(make_label("Customer Name"), 0, 0)
-        form_layout.addWidget(self.ab_customer_name, 0, 1)
-        form_layout.addWidget(make_label("Customer Phone"), 0, 2)
+        self.ab_form_layout.addWidget(self.ab_customer_name_label, 0, 0)
+        self.ab_form_layout.addWidget(self.ab_customer_name, 0, 1)
         self.ab_customer_phone = QLineEdit()
         self.ab_customer_phone.setPlaceholderText("03xxxxxxxxx")
-        form_layout.addWidget(self.ab_customer_phone, 0, 3)
+        
+        # Auto-format Phone Number as user types (only digits, max 11)
+        def format_ab_phone_input():
+            text = self.ab_customer_phone.text()
+            digits = "".join(c for c in text if c.isdigit())
+            if len(digits) > 11:
+                digits = digits[:11]
+            if digits != text:
+                pos = self.ab_customer_phone.cursorPosition()
+                self.ab_customer_phone.setText(digits)
+                # Adjust cursor position
+                self.ab_customer_phone.setCursorPosition(min(pos, len(digits)))
+        
+        self.ab_customer_phone.textChanged.connect(format_ab_phone_input)
+        
+        self.ab_customer_phone_label = make_label("Customer Phone")
+        self.ab_form_layout.addWidget(self.ab_customer_phone_label, 0, 2)
+        self.ab_form_layout.addWidget(self.ab_customer_phone, 0, 3)
 
-        form_layout.addWidget(make_label("Motorcycle Model"), 1, 0)
-        form_layout.addWidget(self.ab_model_combo, 1, 1)
-        form_layout.addWidget(make_label("Color"), 1, 2)
-        form_layout.addWidget(self.ab_color_combo, 1, 3)
+        self.ab_form_layout.addWidget(self.ab_model_label, 1, 0)
+        self.ab_form_layout.addWidget(self.ab_model_combo, 1, 1)
+        self.ab_form_layout.addWidget(self.ab_color_label, 1, 2)
+        self.ab_form_layout.addWidget(self.ab_color_combo, 1, 3)
 
-        form_layout.addWidget(make_label("Total Price"), 2, 0)
-        form_layout.addWidget(self.ab_total_price, 2, 1)
-        form_layout.addWidget(make_label("Advance Paid"), 2, 2)
-        form_layout.addWidget(self.ab_advance_paid, 2, 3)
+        self.ab_form_layout.addWidget(self.ab_total_price_label, 2, 0)
+        self.ab_form_layout.addWidget(self.ab_total_price, 2, 1)
+        self.ab_form_layout.addWidget(self.ab_advance_paid_label, 2, 2)
+        self.ab_form_layout.addWidget(self.ab_advance_paid, 2, 3)
 
-        form_layout.addWidget(make_label("Balance Amount"), 3, 0)
-        form_layout.addWidget(self.ab_balance, 3, 1)
+        self.ab_form_layout.addWidget(self.ab_balance_label, 3, 0)
+        self.ab_form_layout.addWidget(self.ab_balance, 3, 1)
 
-        btn_bar = QHBoxLayout()
-        btn_bar.addStretch(1)
+        self.ab_btn_bar = QHBoxLayout()
+        self.ab_btn_bar.addStretch(1)
 
         save_btn = QPushButton("💾 Save Booking & Print")
         save_btn.setObjectName("primaryButton")
@@ -6943,15 +6982,16 @@ class MainWindow(QMainWindow):
         print_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         print_btn.clicked.connect(self._print_selected_advance_booking)
 
-        btn_bar.addWidget(print_btn)
-        btn_bar.addWidget(delivered_btn)
-        btn_bar.addWidget(active_btn)
-        btn_bar.addWidget(cancel_btn)
-        btn_bar.addWidget(refresh_btn)
-        btn_bar.addWidget(save_btn)
-
-        form_layout.addLayout(btn_bar, 4, 0, 1, 4)
+        self.ab_btn_bar.addWidget(print_btn)
+        self.ab_btn_bar.addWidget(delivered_btn)
+        self.ab_btn_bar.addWidget(active_btn)
+        self.ab_btn_bar.addWidget(cancel_btn)
+        self.ab_btn_bar.addWidget(refresh_btn)
+        self.ab_btn_bar.addWidget(save_btn)
         container_layout.addWidget(form_card)
+        
+        # Call to set initial layout
+        self._update_form_layout()
 
         filter_card = QFrame()
         filter_card.setObjectName("card")
@@ -7105,7 +7145,7 @@ class MainWindow(QMainWindow):
                             w.setParent(None)
                     self._ab_model_card_widgets.clear()
                     
-                    cols = 4
+                    cols = self._get_ab_dynamic_cols(self.width())
                     for i, (model_name, count) in enumerate(counts):
                         card = BookingCard(model_name or "-", count, "#3498db")
                         self.ab_model_cards_grid.addWidget(card, i // cols, i % cols)
@@ -7115,8 +7155,126 @@ class MainWindow(QMainWindow):
                     for model_name, count in counts:
                         if model_name in self._ab_model_card_widgets:
                             self._ab_model_card_widgets[model_name].update_quantity(count)
+                    self._update_model_cards_layout()
         except Exception as e:
             logger.error(f"Advance booking stats update failed: {e}", exc_info=True)
+
+    def _get_ab_dynamic_cols(self, width: int) -> int:
+        """Get number of columns based on available width for advance booking page."""
+        if width < 800:
+            return 2
+        elif width < 1200:
+            return 3
+        else:
+            return 4
+
+    def _update_stats_layout(self) -> None:
+        """Update stats cards grid layout based on current width."""
+        if not hasattr(self, "ab_stats_layout") or not hasattr(self, "ab_stats_cards"):
+            return
+        
+        # Clear existing layout
+        while self.ab_stats_layout.count():
+            item = self.ab_stats_layout.takeAt(0)
+        
+        # Calculate columns
+        width = self.width()
+        cols = 3 if width < 1200 else 6
+        
+        # Re-add cards
+        for i, card in enumerate(self.ab_stats_cards):
+            self.ab_stats_layout.addWidget(card, i // cols, i % cols, 1, 1)
+            self.ab_stats_layout.setColumnStretch(i % cols, 1)
+
+    def _update_model_cards_layout(self) -> None:
+        """Update model cards grid layout based on current width."""
+        if not hasattr(self, "ab_model_cards_grid") or not hasattr(self, "_ab_model_card_widgets"):
+            return
+        
+        # Calculate columns
+        width = self.width()
+        cols = self._get_ab_dynamic_cols(width)
+        
+        # Get current widgets in order
+        card_list = list(self._ab_model_card_widgets.values())
+        
+        # Clear and re-add with new columns
+        while self.ab_model_cards_grid.count():
+            self.ab_model_cards_grid.takeAt(0)
+        
+        # Re-add widgets
+        for i, card in enumerate(card_list):
+            self.ab_model_cards_grid.addWidget(card, i // cols, i % cols, 1, 1)
+
+    def _update_form_layout(self) -> None:
+        """Update form layout based on current width."""
+        if not hasattr(self, "ab_form_layout") or not hasattr(self, "ab_btn_bar"):
+            return
+        
+        # Clear existing form layout
+        while self.ab_form_layout.count():
+            item = self.ab_form_layout.takeAt(0)
+        
+        width = self.width()
+        
+        # Calculate number of columns (2 for small screens, 4 for large)
+        cols = 2 if width < 900 else 4
+        
+        # Reset column stretches
+        self.ab_form_layout.setColumnStretch(0, 0)
+        self.ab_form_layout.setColumnStretch(1, 1)
+        if cols == 4:
+            self.ab_form_layout.setColumnStretch(2, 0)
+            self.ab_form_layout.setColumnStretch(3, 1)
+        
+        # Arrange widgets based on columns
+        btn_row = 0
+        if cols == 4:
+            # 2 columns of fields (4 columns total: label, field, label, field)
+            self.ab_form_layout.addWidget(self.ab_customer_name_label, 0, 0)
+            self.ab_form_layout.addWidget(self.ab_customer_name, 0, 1)
+            self.ab_form_layout.addWidget(self.ab_customer_phone_label, 0, 2)
+            self.ab_form_layout.addWidget(self.ab_customer_phone, 0, 3)
+            
+            self.ab_form_layout.addWidget(self.ab_model_label, 1, 0)
+            self.ab_form_layout.addWidget(self.ab_model_combo, 1, 1)
+            self.ab_form_layout.addWidget(self.ab_color_label, 1, 2)
+            self.ab_form_layout.addWidget(self.ab_color_combo, 1, 3)
+            
+            self.ab_form_layout.addWidget(self.ab_total_price_label, 2, 0)
+            self.ab_form_layout.addWidget(self.ab_total_price, 2, 1)
+            self.ab_form_layout.addWidget(self.ab_advance_paid_label, 2, 2)
+            self.ab_form_layout.addWidget(self.ab_advance_paid, 2, 3)
+            
+            self.ab_form_layout.addWidget(self.ab_balance_label, 3, 0)
+            self.ab_form_layout.addWidget(self.ab_balance, 3, 1)
+            btn_row = 4
+        else:
+            # 1 column of fields (2 columns total: label, field)
+            self.ab_form_layout.addWidget(self.ab_customer_name_label, 0, 0)
+            self.ab_form_layout.addWidget(self.ab_customer_name, 0, 1)
+            
+            self.ab_form_layout.addWidget(self.ab_customer_phone_label, 1, 0)
+            self.ab_form_layout.addWidget(self.ab_customer_phone, 1, 1)
+            
+            self.ab_form_layout.addWidget(self.ab_model_label, 2, 0)
+            self.ab_form_layout.addWidget(self.ab_model_combo, 2, 1)
+            
+            self.ab_form_layout.addWidget(self.ab_color_label, 3, 0)
+            self.ab_form_layout.addWidget(self.ab_color_combo, 3, 1)
+            
+            self.ab_form_layout.addWidget(self.ab_total_price_label, 4, 0)
+            self.ab_form_layout.addWidget(self.ab_total_price, 4, 1)
+            
+            self.ab_form_layout.addWidget(self.ab_advance_paid_label, 5, 0)
+            self.ab_form_layout.addWidget(self.ab_advance_paid, 5, 1)
+            
+            self.ab_form_layout.addWidget(self.ab_balance_label, 6, 0)
+            self.ab_form_layout.addWidget(self.ab_balance, 6, 1)
+            btn_row = 7
+        
+        # Add the button bar
+        self.ab_form_layout.addLayout(self.ab_btn_bar, btn_row, 0, 1, cols)
 
     def _refresh_advance_booking_page(self) -> None:
         self._load_ab_models()
@@ -7607,26 +7765,41 @@ class MainWindow(QMainWindow):
         if not booking_number:
             self._show_error("Selection Required", "Please select a booking to mark as active.")
             return
-        reply = QMessageBox.question(
-            self,
-            "Confirm",
-            f"Mark booking {booking_number} as ACTIVE?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
         db = SessionLocal()
         try:
             booking = advance_booking_service.get_by_booking_number(db, booking_number)
             if not booking:
                 self._show_error("Error", "Booking not found.")
                 return
+            
+            if booking.status.upper() == "DELIVERED":
+                # If it was DELIVERED, use mark_active to reverse delivery
+                reply = QMessageBox.question(
+                    self,
+                    "Confirm",
+                    f"Reverse delivery of booking {booking_number} and mark as ACTIVE?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
+                advance_booking_service.mark_active(db, booking_number)
+            elif booking.status.upper() == "CANCELLED":
+                # If it was CANCELLED, reactivate it
+                reply = QMessageBox.question(
+                    self,
+                    "Confirm",
+                    f"Reactivate cancelled booking {booking_number} and restore all advance/balance?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
+                advance_booking_service.reactivate_booking(db, booking_number)
+            else:
+                self._show_error("Error", "Only DELIVERED or CANCELLED bookings can be made ACTIVE.")
+                return
+            
             model = booking.motorcycle_model
-            
-            advance_booking_service.mark_active(db, booking_number)
-            
-            # Real-time state management: Notify all listeners about the restoration update
-            # Increment the count for this specific model
+            # Update real-time model count
             active_count = db.query(AdvanceBooking).filter(
                 AdvanceBooking.motorcycle_model == model,
                 AdvanceBooking.status == "ACTIVE"

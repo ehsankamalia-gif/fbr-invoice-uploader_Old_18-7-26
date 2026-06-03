@@ -1447,7 +1447,7 @@ class PrintServiceV2:
             <style>
               @page {{
                 size: Letter portrait;
-                margin: 2.25in 0.25in 0.25in 0.25in;
+                margin: 0.3in 0.25in 0.25in 0.25in;
               }}
               * {{ box-sizing: border-box; }}
               body {{
@@ -1461,7 +1461,7 @@ class PrintServiceV2:
               .sheet {{
                 width: 8in;
                 height: 3in;
-                margin: 1.5in auto 0 auto;
+                margin: 0.3in auto 0 auto;
                 overflow: hidden;
               }}
               .top-copies {{

@@ -564,6 +564,58 @@ class AdvanceBookingService:
             raise
         return booking
 
+    def reactivate_booking(self, db: Session, booking_number: str, note: str = "") -> AdvanceBooking:
+        """
+        Reactivate a cancelled advance booking, restoring all advance and balance information.
+        
+        Args:
+            db: Database session
+            booking_number: Booking to reactivate
+            note: Note for audit trail
+            
+        Returns:
+            The reactivated booking
+        """
+        booking = self.get_by_booking_number(db, booking_number)
+        if not booking:
+            raise ValueError("Booking not found.")
+        
+        if (booking.status or "").upper() != "CANCELLED":
+            raise ValueError("Only cancelled bookings can be reactivated.")
+
+        # Restore advance remaining to original advance paid minus any applied amount
+        original_advance_paid = float(getattr(booking, "advance_paid", 0.0) or 0.0)
+        advance_applied = float(getattr(booking, "advance_applied", 0.0) or 0.0)
+        restored_advance_remaining = original_advance_paid - advance_applied
+        restored_balance = float(getattr(booking, "total_price", 0.0) or 0.0) - original_advance_paid
+        
+        booking.status = "ACTIVE"
+        booking.advance_remaining = restored_advance_remaining
+        booking.balance_amount = restored_balance
+        booking.delivery_paid = 0.0
+        booking.delivered_at = None
+        
+        try:
+            db.add(
+                AdvanceBookingAudit(
+                    booking_number=booking.booking_number,
+                    action="BOOKING_REACTIVATED",
+                    amount=restored_advance_remaining,
+                    before_advance_remaining=0.0,
+                    after_advance_remaining=restored_advance_remaining,
+                    before_balance_amount=0.0,
+                    after_balance_amount=restored_balance,
+                    note=(note or "").strip() or "Booking reactivated, all advance/balance restored.",
+                )
+            )
+            db.commit()
+            db.refresh(booking)
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Advance booking reactivate failed: {e}", exc_info=True)
+            raise
+        return booking
+
     def get_summary(self, db: Session) -> dict:
         # Active Bookings (Held)
         outstanding_advance = (
