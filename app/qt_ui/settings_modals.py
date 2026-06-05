@@ -524,6 +524,11 @@ class SMSConfigDialog(BaseSettingsDialog):
         self.sms_test_btn.clicked.connect(self._on_test_sms)
         sms_layout.addWidget(self.sms_test_btn, 8, 0, 1, 2)
         
+        sms_layout.addWidget(QLabel("Owner's Phone Number:"), 9, 0)
+        self.owner_phone = QLineEdit()
+        self.owner_phone.setPlaceholderText("e.g. 03001234567")
+        sms_layout.addWidget(self.owner_phone, 9, 1)
+        
         layout.addWidget(sms_group)
 
         # 2. WhatsApp Section (Evolution API)
@@ -563,6 +568,33 @@ class SMSConfigDialog(BaseSettingsDialog):
         booking_help_text.setStyleSheet("font-size: 11px; color: #7f8c8d; border: none;")
         tmpl_layout.addWidget(booking_help_text)
         
+        # Spare Ledger Templates
+        tmpl_layout.addSpacing(10)
+        spare_credit_tmpl_title = QLabel("SPARE LEDGER CREDIT MESSAGE TEMPLATE")
+        spare_credit_tmpl_title.setStyleSheet("color: #9b59b6; font-size: 14px; border: none; font-weight: bold;")
+        tmpl_layout.addWidget(spare_credit_tmpl_title)
+        
+        self.spare_credit_template_text = QTextEdit()
+        self.spare_credit_template_text.setFixedHeight(80)
+        tmpl_layout.addWidget(self.spare_credit_template_text)
+        
+        spare_credit_help_text = QLabel("Variables: {amount}, {source}, {reference}, {description}")
+        spare_credit_help_text.setStyleSheet("font-size: 11px; color: #7f8c8d; border: none;")
+        tmpl_layout.addWidget(spare_credit_help_text)
+        
+        tmpl_layout.addSpacing(10)
+        spare_debit_tmpl_title = QLabel("SPARE LEDGER DEBIT/ORDER MESSAGE TEMPLATE")
+        spare_debit_tmpl_title.setStyleSheet("color: #e74c3c; font-size: 14px; border: none; font-weight: bold;")
+        tmpl_layout.addWidget(spare_debit_tmpl_title)
+        
+        self.spare_debit_template_text = QTextEdit()
+        self.spare_debit_template_text.setFixedHeight(80)
+        tmpl_layout.addWidget(self.spare_debit_template_text)
+        
+        spare_debit_help_text = QLabel("Variables: {amount}, {source}, {reference}, {description}")
+        spare_debit_help_text.setStyleSheet("font-size: 11px; color: #7f8c8d; border: none;")
+        tmpl_layout.addWidget(spare_debit_help_text)
+        
         layout.addWidget(tmpl_group)
         
         scroll.setWidget(scroll_content)
@@ -580,6 +612,9 @@ class SMSConfigDialog(BaseSettingsDialog):
         
         self.template_text.setPlainText(config.get("invoice_template", ""))
         self.booking_template_text.setPlainText(config.get("booking_template", ""))
+        self.owner_phone.setText(config.get("owner_phone_number", ""))
+        self.spare_credit_template_text.setPlainText(config.get("spare_ledger_credit_template", ""))
+        self.spare_debit_template_text.setPlainText(config.get("spare_ledger_debit_template", ""))
 
     def _on_test_sms(self):
         ip = self.sms_ip.text().strip()
@@ -644,7 +679,10 @@ class SMSConfigDialog(BaseSettingsDialog):
                 use_https=self.sms_https.isChecked(),
                 api_key=self.sms_api_key.text().strip(),
                 invoice_template=self.template_text.toPlainText().strip(),
-                booking_template=self.booking_template_text.toPlainText().strip()
+                booking_template=self.booking_template_text.toPlainText().strip(),
+                owner_phone_number=self.owner_phone.text().strip(),
+                spare_ledger_credit_template=self.spare_credit_template_text.toPlainText().strip(),
+                spare_ledger_debit_template=self.spare_debit_template_text.toPlainText().strip()
             )
             self._show_success("Saved", "Configuration updated.")
             self.accept()

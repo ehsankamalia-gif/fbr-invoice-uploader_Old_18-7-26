@@ -465,6 +465,9 @@ class SMSConfiguration(Base):
     invoice_template = Column(String(500), default="Dear {customer}, your invoice {invoice_no} for Rs. {amount} has been generated. FBR ID: {fbr_id}")
     booking_template = Column(String(500), default="Dear {customer}, your booking for {model} ({color}) is confirmed. Booking #: {booking_no}. Paid: Rs. {paid}. Balance: Rs. {balance}.")
     otp_template = Column(String(500), default="Your verification code is {code}")
+    owner_phone_number = Column(String(20), nullable=True)
+    spare_ledger_credit_template = Column(String(500), default="Spare Ledger: Credit received of Rs. {amount} via {source}. Reference: {reference}. Description: {description}")
+    spare_ledger_debit_template = Column(String(500), default="Spare Ledger: Debit/Order of Rs. {amount} via {source}. Reference: {reference}. Description: {description}")
     
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
 

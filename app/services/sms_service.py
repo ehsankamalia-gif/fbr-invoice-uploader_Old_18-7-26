@@ -386,6 +386,53 @@ class SMSService:
             
         db.commit()
 
+    def queue_spare_ledger_sms(self, db, transaction):
+        """Queues SMS for a new spare ledger transaction."""
+        config = db.query(SMSConfiguration).first()
+        if not config:
+            return
+
+        owner_phone = config.owner_phone_number
+        if not owner_phone:
+            logger.warning("No owner phone number configured in SMS settings")
+            return
+
+        # Determine if it's credit or debit
+        is_credit = transaction.trans_type == "CREDIT"
+        amount = transaction.amount
+        source = "Hard Cash" if transaction.cash_type == "HARD_CASH" else "Bank"
+        if not is_credit:
+            source = "SP Order"
+
+        if is_credit:
+            template = config.spare_ledger_credit_template
+        else:
+            template = config.spare_ledger_debit_template
+
+        if not template:
+            if is_credit:
+                template = "Spare Ledger: Credit received of Rs. {amount} via {source}. Reference: {reference}. Description: {description}"
+            else:
+                template = "Spare Ledger: Debit/Order of Rs. {amount} via {source}. Reference: {reference}. Description: {description}"
+
+        message = template.format(
+            amount=amount,
+            source=source,
+            reference=transaction.reference_number or "N/A",
+            description=transaction.description or "N/A"
+        )
+
+        # Queue SMS if enabled
+        if config.is_enabled:
+            new_sms = SMSQueue(
+                phone_number=owner_phone,
+                message=message,
+                channel="SMS"
+            )
+            db.add(new_sms)
+            
+        db.commit()
+
     def start_scheduler(self) -> None:
         if self._scheduler_thread and self._scheduler_thread.is_alive():
             return

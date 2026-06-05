@@ -1665,12 +1665,17 @@ class MainWindow(QMainWindow):
         val_lbl.setObjectName("statValue")
         val_lbl.setStyleSheet(f"color: {color}; font-size: 28px; font-weight: bold;")
         
+        subtitle_lbl = QLabel("")
+        subtitle_lbl.setStyleSheet("color: #7f8c8d; font-size: 11px;")
+        
         layout.addWidget(title_lbl)
         layout.addWidget(val_lbl)
+        layout.addWidget(subtitle_lbl)
         layout.addStretch(1)
         
-        # Store label reference on the card object for easy updating
+        # Store label references on the card object for easy updating
         card.value_label = val_lbl
+        card.subtitle_label = subtitle_lbl
         return card
 
     def _refresh_dashboard(self) -> None:
@@ -7926,7 +7931,21 @@ class MainWindow(QMainWindow):
         stats_layout.setSpacing(15)
 
         self.ledger_total_credit_card = self._create_stat_card("TOTAL CREDITS (IN)", "0.00", "#2ecc71")
-        self.ledger_total_debit_card = self._create_stat_card("TOTAL DEBITS (OUT)", "0.00", "#e74c3c")
+        self.ledger_total_credit_card.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Make the card clickable using event filter
+        class CreditCardClickFilter(QObject):
+            def __init__(self, callback):
+                super().__init__()
+                self.callback = callback
+            def eventFilter(self, obj, event):
+                if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+                    self.callback()
+                    return True
+                return super().eventFilter(obj, event)
+        self._credit_card_click_filter = CreditCardClickFilter(self._open_credit_summary_dialog)
+        self.ledger_total_credit_card.installEventFilter(self._credit_card_click_filter)
+        
+        self.ledger_total_debit_card = self._create_stat_card("SPARE PART ORDER", "0.00", "#e74c3c")
         self.ledger_balance_card = self._create_stat_card("CURRENT BALANCE", "0.00", "#3498db")
 
         stats_layout.addWidget(self.ledger_total_credit_card)
@@ -8069,9 +8088,22 @@ class MainWindow(QMainWindow):
 
         cash_type_combo = QComboBox()
         cash_type_combo.addItems(["Hard Cash (Daily Ledger)", "Bank Deposited"])
-        cash_type_combo.setCurrentIndex(0 if row_data.cash_type == "HARD_CASH" else 1)
         form.addWidget(QLabel("Cash Source"), 1, 0)
         form.addWidget(cash_type_combo, 1, 1)
+        
+        def update_cash_source_options(index):
+            cash_type_combo.clear()
+            if index == 0:  # CREDIT
+                cash_type_combo.addItems(["Hard Cash (Daily Ledger)", "Bank Deposited"])
+                # Set index based on original row_data
+                cash_type_combo.setCurrentIndex(0 if row_data.cash_type == "HARD_CASH" else 1)
+            else:  # DEBIT
+                cash_type_combo.addItem("Spare Part Order")
+        
+        # Connect type_combo change to update cash_type_combo
+        type_combo.currentIndexChanged.connect(update_cash_source_options)
+        # Initial update
+        update_cash_source_options(type_combo.currentIndex())
 
         date_edit = ClearableDateEdit()
         if row_data.timestamp:
@@ -8113,7 +8145,10 @@ class MainWindow(QMainWindow):
                 txn = db.query(SpareLedgerTransaction).filter(SpareLedgerTransaction.id == row_data.id).first()
                 if txn:
                     txn.trans_type = "CREDIT" if type_combo.currentIndex() == 0 else "DEBIT"
-                    txn.cash_type = "HARD_CASH" if cash_type_combo.currentIndex() == 0 else "BANK"
+                    if txn.trans_type == "CREDIT":
+                        txn.cash_type = "HARD_CASH" if cash_type_combo.currentIndex() == 0 else "BANK"
+                    else:  # DEBIT
+                        txn.cash_type = "HARD_CASH"  # Doesn't matter for DEBIT
                     txn.amount = float(amount_spin.value())
                     txn.reference_number = ref_input.text().strip()
                     txn.description = desc_input.text().strip()
@@ -8131,6 +8166,9 @@ class MainWindow(QMainWindow):
                         txn.month_key = cycle_date.strftime("%Y-%m")
                     else:
                         txn.month_key = selected_dt.strftime("%Y-%m")
+                    
+                    from app.services.sms_service import sms_service
+                    sms_service.queue_spare_ledger_sms(db, txn)
                     
                     db.commit()
                     self._show_success("Updated", "Transaction updated successfully.")
@@ -8239,6 +8277,18 @@ class MainWindow(QMainWindow):
         cash_type_combo.addItems(["Hard Cash (Daily Ledger)", "Bank Deposited"])
         form.addWidget(QLabel("Cash Source"), 1, 0)
         form.addWidget(cash_type_combo, 1, 1)
+        
+        def update_cash_source_options(index):
+            cash_type_combo.clear()
+            if index == 0:  # CREDIT
+                cash_type_combo.addItems(["Hard Cash (Daily Ledger)", "Bank Deposited"])
+            else:  # DEBIT
+                cash_type_combo.addItem("Spare Part Order")
+        
+        # Connect type_combo change to update cash_type_combo
+        type_combo.currentIndexChanged.connect(update_cash_source_options)
+        # Initial update
+        update_cash_source_options(type_combo.currentIndex())
 
         date_edit = ClearableDateEdit()
         date_edit.setDate(QDate.currentDate())
@@ -8304,7 +8354,10 @@ class MainWindow(QMainWindow):
             db = SessionLocal()
             try:
                 txn_type = "CREDIT" if type_combo.currentIndex() == 0 else "DEBIT"
-                cash_type = "HARD_CASH" if cash_type_combo.currentIndex() == 0 else "BANK"
+                if txn_type == "CREDIT":
+                    cash_type = "HARD_CASH" if cash_type_combo.currentIndex() == 0 else "BANK"
+                else:  # DEBIT
+                    cash_type = "HARD_CASH"  # Doesn't matter for DEBIT
                 amount = float(amount_spin.value())
                 if amount <= 0:
                     raise ValueError("Amount must be greater than zero.")
@@ -8334,6 +8387,11 @@ class MainWindow(QMainWindow):
                     timestamp=selected_dt
                 )
                 db.add(new_txn)
+                db.flush()  # Flush to get the ID
+                
+                from app.services.sms_service import sms_service
+                sms_service.queue_spare_ledger_sms(db, new_txn)
+                
                 db.commit()
                 self._show_success("Transaction Added", f"Successfully recorded {txn_type} of {amount:,.2f}")
                 self._reload_spare_ledger()
@@ -9934,7 +9992,8 @@ class MainWindow(QMainWindow):
             # Brought Forward (B/F) tracking
             bf_balance = 0.0
             
-            temp_data: List[SpareLedgerRow] = []
+            # First collect all transactions that match the filters (to calculate correct running balance)
+            filtered_txns = []
             for tx in all_rows:
                 amt = float(tx.amount or 0)
                 credit = amt if tx.trans_type == "CREDIT" else 0.0
@@ -9957,19 +10016,11 @@ class MainWindow(QMainWindow):
                 matches_month = month_filter == "All Months" or tx.month_key == month_filter
                 
                 if matches_search and matches_type and matches_month:
-                    temp_data.append(
-                        SpareLedgerRow(
-                            id=tx.id,
-                            timestamp=tx.timestamp,
-                            credit=credit,
-                            debit=debit,
-                            balance=running_balance,
-                            reference=tx.reference_number or "",
-                            description=tx.description or "",
-                            month_key=tx.month_key or "",
-                            cash_type=tx.cash_type or "HARD_CASH",
-                        )
-                    )
+                    filtered_txns.append((tx, credit, debit))
+            
+            # Now build the temp_data with recalculated running balance for filtered transactions
+            temp_data: List[SpareLedgerRow] = []
+            filtered_running_balance = 0.0
             
             # Add a "Brought Forward" row if a month is selected
             if month_filter != "All Months" and not search and txn_type_filter == "All":
@@ -9985,7 +10036,24 @@ class MainWindow(QMainWindow):
                     month_key=month_filter
                 )
                 # For Ascending order (oldest first), B/F must be the first row (index 0)
-                temp_data.insert(0, bf_row)
+                temp_data.append(bf_row)
+                filtered_running_balance = bf_balance
+            
+            for tx, credit, debit in filtered_txns:
+                filtered_running_balance += (credit - debit)
+                temp_data.append(
+                    SpareLedgerRow(
+                        id=tx.id,
+                        timestamp=tx.timestamp,
+                        credit=credit,
+                        debit=debit,
+                        balance=filtered_running_balance,
+                        reference=tx.reference_number or "",
+                        description=tx.description or "",
+                        month_key=tx.month_key or "",
+                        cash_type=tx.cash_type or "HARD_CASH",
+                    )
+                )
 
             # Use Ascending order (oldest first) as requested
             data = temp_data
@@ -9998,18 +10066,104 @@ class MainWindow(QMainWindow):
                     # We can show B/F in the credit/debit or just focus on current month's activity
                     self.ledger_total_credit_card.value_label.setText(f"{filtered_credit:,.2f}")
                     self.ledger_total_debit_card.value_label.setText(f"{filtered_debit:,.2f}")
+                # Use filtered values for balance subtitle
+                credit_to_check = filtered_credit
+                debit_to_check = filtered_debit
             else:
                 if hasattr(self, "ledger_total_credit_card"):
                     self.ledger_total_credit_card.value_label.setText(f"{total_credit:,.2f}")
                     self.ledger_total_debit_card.value_label.setText(f"{total_debit:,.2f}")
+                credit_to_check = total_credit
+                debit_to_check = total_debit
             
             if hasattr(self, "ledger_balance_card"):
                 self.ledger_balance_card.value_label.setText(f"{running_balance:,.2f}")
+                # Set the subtitle based on which is greater
+                if credit_to_check > debit_to_check:
+                    self.ledger_balance_card.subtitle_label.setText("Take from Ehsan Traders")
+                elif debit_to_check > credit_to_check:
+                    self.ledger_balance_card.subtitle_label.setText("Take from Danish Autos")
+                else:
+                    self.ledger_balance_card.subtitle_label.setText("")
 
         finally:
             db.close()
 
         self.ledger_table_model.update_rows(data)
+
+    def _open_credit_summary_dialog(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Credit Summary - Spare Parts Ledger")
+        dialog.setFixedWidth(450)
+        
+        dialog.setStyleSheet(self.invoice_submit_btn.window().styleSheet() + """
+            QDialog { background-color: white; }
+            QLabel { font-size: 13px; color: #2c3e50; font-weight: 500; }
+        """)
+
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(20)
+        layout.setContentsMargins(30, 30, 30, 30)
+
+        # Calculate totals
+        db = SessionLocal()
+        total_bank = 0.0
+        total_hard_cash = 0.0
+        try:
+            query = (
+                db.query(SpareLedgerTransaction)
+                .filter(
+                    SpareLedgerTransaction.trans_type == "CREDIT",
+                    (SpareLedgerTransaction.description.is_(None))
+                    | (~SpareLedgerTransaction.description.like("Advance Booking -%"))
+                )
+            )
+            for tx in query.all():
+                amt = float(tx.amount or 0)
+                if tx.cash_type == "BANK":
+                    total_bank += amt
+                else:
+                    total_hard_cash += amt
+        finally:
+            db.close()
+
+        # Create summary cards
+        def create_summary_card(title: str, value: float, color: str) -> QFrame:
+            card = QFrame()
+            card.setObjectName("formGroup")
+            card.setMinimumHeight(100)
+            card.setStyleSheet(f"""
+                QFrame#formGroup {{
+                    border-top: 4px solid {color};
+                    background-color: white;
+                    border: 1px solid #dee2e6;
+                    border-radius: 8px;
+                }}
+            """)
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(20, 15, 20, 15)
+            card_layout.setSpacing(5)
+            title_lbl = QLabel(title)
+            title_lbl.setStyleSheet("color: #7f8c8d; font-size: 12px; font-weight: bold;")
+            val_lbl = QLabel(f"Rs. {value:,.2f}")
+            val_lbl.setStyleSheet(f"color: {color}; font-size: 24px; font-weight: bold;")
+            card_layout.addWidget(title_lbl)
+            card_layout.addWidget(val_lbl)
+            card_layout.addStretch(1)
+            return card
+
+        # Add cards to layout
+        layout.addWidget(create_summary_card("Total Cash Received through Bank", total_bank, "#2ecc71"))
+        layout.addWidget(create_summary_card("Total Cash Received through Hard Cash", total_hard_cash, "#3498db"))
+
+        # Add close button
+        close_btn = QPushButton("Close")
+        close_btn.setObjectName("primaryButton")
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+
+        dialog.exec()
 
     def closeEvent(self, event) -> None:
         """Ensure background services are stopped when the application closes."""
@@ -10572,7 +10726,7 @@ class PricesTableModel(QAbstractTableModel):
 
 
 class SpareLedgerTableModel(QAbstractTableModel):
-    headers = ["Date/Time", "Source", "Reference", "Description", "Credit (In)", "Debit (Out)", "Balance", "Month"]
+    headers = ["Date/Time", "Source", "Reference", "Description", "Credit (In)", "SP Order", "Balance", "Month"]
 
     def __init__(self) -> None:
         super().__init__()
@@ -10594,6 +10748,8 @@ class SpareLedgerTableModel(QAbstractTableModel):
             if col == 0:
                 return row.timestamp.strftime("%Y-%m-%d %H:%M") if row.timestamp else "OPENING"
             if col == 1:
+                if row.debit > 0:
+                    return "SP Order"
                 return "Hard Cash" if row.cash_type == "HARD_CASH" else "Bank"
             if col == 2:
                 return row.reference
@@ -10634,7 +10790,7 @@ class SpareLedgerReportTableModel(QAbstractTableModel):
     headers = [
         "Date", "Previous Month Balance", 
         "Bank Credit", "Cash Credit", 
-        "Bank Debit", "Cash Debit", 
+        "SP Order", 
         "Monthly Balance"
     ]
 
@@ -10669,10 +10825,8 @@ class SpareLedgerReportTableModel(QAbstractTableModel):
             if col == 3:
                 return f"{row.hard_cash_credit:,.2f}"
             if col == 4:
-                return f"{row.bank_debit:,.2f}"
+                return f"{row.bank_debit + row.hard_cash_debit:,.2f}"
             if col == 5:
-                return f"{row.hard_cash_debit:,.2f}"
-            if col == 6:
                 return f"{row.balance:,.2f}"
         
         if role == Qt.ItemDataRole.TextAlignmentRole:
