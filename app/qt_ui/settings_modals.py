@@ -524,11 +524,6 @@ class SMSConfigDialog(BaseSettingsDialog):
         self.sms_test_btn.clicked.connect(self._on_test_sms)
         sms_layout.addWidget(self.sms_test_btn, 8, 0, 1, 2)
         
-        sms_layout.addWidget(QLabel("Owner's Phone Number:"), 9, 0)
-        self.owner_phone = QLineEdit()
-        self.owner_phone.setPlaceholderText("e.g. 03001234567")
-        sms_layout.addWidget(self.owner_phone, 9, 1)
-        
         layout.addWidget(sms_group)
 
         # 2. WhatsApp Section (Evolution API)
@@ -567,6 +562,19 @@ class SMSConfigDialog(BaseSettingsDialog):
         booking_help_text = QLabel("Variables: {customer}, {model}, {color}, {booking_no}, {paid}, {balance}")
         booking_help_text.setStyleSheet("font-size: 11px; color: #7f8c8d; border: none;")
         tmpl_layout.addWidget(booking_help_text)
+        
+        # Owner's Phone Number for Spare Ledger SMS
+        tmpl_layout.addSpacing(10)
+        owner_phone_title = QLabel("OWNER'S PHONE NUMBER FOR SPARE LEDGER SMS")
+        owner_phone_title.setStyleSheet("color: #138496; font-size: 14px; border: none; font-weight: bold;")
+        tmpl_layout.addWidget(owner_phone_title)
+        
+        owner_phone_layout = QHBoxLayout()
+        owner_phone_layout.addWidget(QLabel("Phone Number:"))
+        self.owner_phone = QLineEdit()
+        self.owner_phone.setPlaceholderText("e.g. 03001234567")
+        owner_phone_layout.addWidget(self.owner_phone)
+        tmpl_layout.addLayout(owner_phone_layout)
         
         # Spare Ledger Templates
         tmpl_layout.addSpacing(10)
