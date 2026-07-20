@@ -1,8 +1,8 @@
 @echo off
 setlocal enabledelayedexpansion
 for /f "tokens=*" %%b in ('git branch --show-current') do set CUR_BRANCH=%%b
-if /i not "!CUR_BRANCH!"=="main" (
-    echo Current branch is "!CUR_BRANCH!". Please switch to "main" before running.
+if /i not "!CUR_BRANCH!"=="master" (
+    echo Current branch is "!CUR_BRANCH!". Please switch to "master" before running.
     pause
     exit /b 1
 )

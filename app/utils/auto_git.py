@@ -59,7 +59,7 @@ class GitAutoPushHandler(FileSystemEventHandler):
             subprocess.run(['git', 'commit', '-m', commit_msg], check=True, capture_output=True)
             
             # 4. Push to Bitbucket (origin)
-            result = subprocess.run(['git', 'push', 'origin', 'main'], capture_output=True, text=True)
+            result = subprocess.run(['git', 'push', 'origin', 'master'], capture_output=True, text=True)
             
             if result.returncode == 0:
                 logger.info("Successfully pushed to Bitbucket.")
