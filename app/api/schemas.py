@@ -2,6 +2,32 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime as dt
 
+
+class MotorcycleResponse(BaseModel):
+    id: int
+    chassis_number: str
+    engine_number: str
+    color: Optional[str] = None
+    model: Optional[str] = None
+    year: int
+    status: str
+
+    model_config = {
+        "from_attributes": True
+    }
+
+
+class InvoiceWithDetailsResponse(BaseModel):
+    id: int
+    invoice_number: str
+    fbr_invoice_number: Optional[str] = None
+    is_fiscalized: bool
+    datetime: dt
+
+    model_config = {
+        "from_attributes": True
+    }
+
 class InvoiceItemCreate(BaseModel):
     item_code: str
     item_name: str

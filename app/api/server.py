@@ -8,7 +8,8 @@ import os
 
 from app.db.session import SessionLocal
 from app.services.price_service import price_service
-from app.api.schemas import PriceResponse, PriceCreate
+from app.api.schemas import PriceResponse, PriceCreate, MotorcycleResponse, InvoiceWithDetailsResponse
+from app.db.models import Motorcycle, Invoice
 
 app = FastAPI(title="FBR Invoice Uploader API", version="1.0.0")
 
@@ -97,6 +98,75 @@ def check_chassis_duplication(chassis_number: str, db: Session = Depends(get_db)
             "message": f"Invoice with chassis number {chassis_number} has already been posted"
         }
     return {"exists": False, "message": "Chassis number is available"}
+
+
+# --- Motorcycle Endpoints ---
+@app.get("/motorcycles", response_model=List[MotorcycleResponse])
+def get_all_motorcycles(db: Session = Depends(get_db), status: Optional[str] = None):
+    """
+    Get all motorcycles, optionally filtered by status (IN_STOCK, etc.)
+    """
+    query = db.query(Motorcycle)
+    if status:
+        query = query.filter(Motorcycle.status == status)
+    return query.all()
+
+
+@app.get("/motorcycles/chassis/{chassis_number}", response_model=MotorcycleResponse)
+def get_motorcycle_by_chassis(chassis_number: str, db: Session = Depends(get_db)):
+    """
+    Get motorcycle details by chassis number
+    """
+    motorcycle = db.query(Motorcycle).filter(Motorcycle.chassis_number == chassis_number).first()
+    if not motorcycle:
+        raise HTTPException(status_code=404, detail=f"Motorcycle with chassis number {chassis_number} not found")
+    return motorcycle
+
+
+@app.get("/motorcycles/engine/{engine_number}", response_model=MotorcycleResponse)
+def get_motorcycle_by_engine(engine_number: str, db: Session = Depends(get_db)):
+    """
+    Get motorcycle details by engine number
+    """
+    motorcycle = db.query(Motorcycle).filter(Motorcycle.engine_number == engine_number).first()
+    if not motorcycle:
+        raise HTTPException(status_code=404, detail=f"Motorcycle with engine number {engine_number} not found")
+    return motorcycle
+
+
+# --- Invoice Endpoints ---
+@app.get("/invoices", response_model=List[InvoiceWithDetailsResponse])
+def get_all_invoices(db: Session = Depends(get_db), is_fiscalized: Optional[bool] = None):
+    """
+    Get all invoices, optionally filtered by fiscalization status
+    """
+    query = db.query(Invoice)
+    if is_fiscalized is not None:
+        query = query.filter(Invoice.is_fiscalized == is_fiscalized)
+    return query.all()
+
+
+@app.get("/invoices/fbr/{fbr_invoice_number}", response_model=InvoiceWithDetailsResponse)
+def get_invoice_by_fbr_number(fbr_invoice_number: str, db: Session = Depends(get_db)):
+    """
+    Get invoice details by FBR invoice number
+    """
+    invoice = db.query(Invoice).filter(Invoice.fbr_invoice_number == fbr_invoice_number).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail=f"Invoice with FBR number {fbr_invoice_number} not found")
+    return invoice
+
+
+@app.get("/invoices/{invoice_number}", response_model=InvoiceWithDetailsResponse)
+def get_invoice_by_number(invoice_number: str, db: Session = Depends(get_db)):
+    """
+    Get invoice details by local invoice number
+    """
+    invoice = db.query(Invoice).filter(Invoice.invoice_number == invoice_number).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail=f"Invoice with number {invoice_number} not found")
+    return invoice
+
 
 if __name__ == "__main__":
     import uvicorn
