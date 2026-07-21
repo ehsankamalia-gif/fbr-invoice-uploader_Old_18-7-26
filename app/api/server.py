@@ -3,13 +3,21 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from typing import List, Optional
 from datetime import datetime
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 import os
+import logging
 
-from app.db.session import SessionLocal
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+from app.db.session import SessionLocal, init_db
 from app.services.price_service import price_service
 from app.api.schemas import PriceResponse, PriceCreate, MotorcycleResponse, InvoiceWithDetailsResponse
-from app.db.models import Motorcycle, Invoice
+from app.db.models import Motorcycle, Invoice, Price, ProductModel
+
+# Initialize database when server starts
+init_db()
 
 app = FastAPI(title="FBR Invoice Uploader API", version="1.0.0")
 
@@ -35,17 +43,30 @@ def get_active_prices(db: Session = Depends(get_db)):
     """
     Get all currently active prices.
     """
-    return price_service.get_all_active_prices(db)
+    try:
+        prices = price_service.get_all_active_prices(db)
+        return prices
+    except Exception as e:
+        logger.exception("Error getting active prices")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
 
 @app.get("/prices/{model}/active", response_model=PriceResponse)
 def get_active_price_for_model(model: str, db: Session = Depends(get_db)):
     """
     Get active price for a specific model.
     """
-    price = price_service.get_active_price(model, db)
-    if not price:
-        raise HTTPException(status_code=404, detail=f"No active price found for model {model}")
-    return price
+    try:
+        price = price_service.get_active_price(model, db)
+        if not price:
+            raise HTTPException(status_code=404, detail=f"No active price found for model {model}")
+        return price
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error getting active price for model {model}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
 
 @app.get("/prices/{model}/history", response_model=List[PriceResponse])
 def get_price_history(
@@ -56,13 +77,16 @@ def get_price_history(
     """
     Get price history for a specific model (including expired ones).
     """
-    # This requires a new method in PriceService or direct DB query
-    # Implementing direct query here for now as Service didn't have history method explicitly
-    from app.db.models import Price, ProductModel
-    prices = db.query(Price).join(ProductModel).filter(ProductModel.model_name == model).order_by(Price.effective_date.desc()).limit(limit).all()
-    if not prices:
-         raise HTTPException(status_code=404, detail=f"No price history found for model {model}")
-    return prices
+    try:
+        prices = db.query(Price).options(joinedload(Price.product_model)).join(ProductModel).filter(ProductModel.model_name == model).order_by(Price.effective_date.desc()).limit(limit).all()
+        if not prices:
+             raise HTTPException(status_code=404, detail=f"No price history found for model {model}")
+        return prices
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error getting price history for model {model}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @app.post("/prices", response_model=PriceResponse)
 def create_price(price: PriceCreate, db: Session = Depends(get_db)):
@@ -106,10 +130,14 @@ def get_all_motorcycles(db: Session = Depends(get_db), status: Optional[str] = N
     """
     Get all motorcycles, optionally filtered by status (IN_STOCK, etc.)
     """
-    query = db.query(Motorcycle)
-    if status:
-        query = query.filter(Motorcycle.status == status)
-    return query.all()
+    try:
+        query = db.query(Motorcycle).options(joinedload(Motorcycle.product_model))
+        if status:
+            query = query.filter(Motorcycle.status == status)
+        return query.all()
+    except Exception as e:
+        logger.exception("Error getting motorcycles")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @app.get("/motorcycles/chassis/{chassis_number}", response_model=MotorcycleResponse)
@@ -117,10 +145,16 @@ def get_motorcycle_by_chassis(chassis_number: str, db: Session = Depends(get_db)
     """
     Get motorcycle details by chassis number
     """
-    motorcycle = db.query(Motorcycle).filter(Motorcycle.chassis_number == chassis_number).first()
-    if not motorcycle:
-        raise HTTPException(status_code=404, detail=f"Motorcycle with chassis number {chassis_number} not found")
-    return motorcycle
+    try:
+        motorcycle = db.query(Motorcycle).options(joinedload(Motorcycle.product_model)).filter(Motorcycle.chassis_number == chassis_number).first()
+        if not motorcycle:
+            raise HTTPException(status_code=404, detail=f"Motorcycle with chassis number {chassis_number} not found")
+        return motorcycle
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error getting motorcycle by chassis {chassis_number}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @app.get("/motorcycles/engine/{engine_number}", response_model=MotorcycleResponse)
@@ -128,10 +162,16 @@ def get_motorcycle_by_engine(engine_number: str, db: Session = Depends(get_db)):
     """
     Get motorcycle details by engine number
     """
-    motorcycle = db.query(Motorcycle).filter(Motorcycle.engine_number == engine_number).first()
-    if not motorcycle:
-        raise HTTPException(status_code=404, detail=f"Motorcycle with engine number {engine_number} not found")
-    return motorcycle
+    try:
+        motorcycle = db.query(Motorcycle).options(joinedload(Motorcycle.product_model)).filter(Motorcycle.engine_number == engine_number).first()
+        if not motorcycle:
+            raise HTTPException(status_code=404, detail=f"Motorcycle with engine number {engine_number} not found")
+        return motorcycle
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error getting motorcycle by engine {engine_number}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 # --- Invoice Endpoints ---
@@ -140,10 +180,14 @@ def get_all_invoices(db: Session = Depends(get_db), is_fiscalized: Optional[bool
     """
     Get all invoices, optionally filtered by fiscalization status
     """
-    query = db.query(Invoice)
-    if is_fiscalized is not None:
-        query = query.filter(Invoice.is_fiscalized == is_fiscalized)
-    return query.all()
+    try:
+        query = db.query(Invoice)
+        if is_fiscalized is not None:
+            query = query.filter(Invoice.is_fiscalized == is_fiscalized)
+        return query.all()
+    except Exception as e:
+        logger.exception("Error getting invoices")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @app.get("/invoices/fbr/{fbr_invoice_number}", response_model=InvoiceWithDetailsResponse)
@@ -151,10 +195,16 @@ def get_invoice_by_fbr_number(fbr_invoice_number: str, db: Session = Depends(get
     """
     Get invoice details by FBR invoice number
     """
-    invoice = db.query(Invoice).filter(Invoice.fbr_invoice_number == fbr_invoice_number).first()
-    if not invoice:
-        raise HTTPException(status_code=404, detail=f"Invoice with FBR number {fbr_invoice_number} not found")
-    return invoice
+    try:
+        invoice = db.query(Invoice).filter(Invoice.fbr_invoice_number == fbr_invoice_number).first()
+        if not invoice:
+            raise HTTPException(status_code=404, detail=f"Invoice with FBR number {fbr_invoice_number} not found")
+        return invoice
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error getting invoice by FBR number {fbr_invoice_number}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @app.get("/invoices/{invoice_number}", response_model=InvoiceWithDetailsResponse)
@@ -162,10 +212,16 @@ def get_invoice_by_number(invoice_number: str, db: Session = Depends(get_db)):
     """
     Get invoice details by local invoice number
     """
-    invoice = db.query(Invoice).filter(Invoice.invoice_number == invoice_number).first()
-    if not invoice:
-        raise HTTPException(status_code=404, detail=f"Invoice with number {invoice_number} not found")
-    return invoice
+    try:
+        invoice = db.query(Invoice).filter(Invoice.invoice_number == invoice_number).first()
+        if not invoice:
+            raise HTTPException(status_code=404, detail=f"Invoice with number {invoice_number} not found")
+        return invoice
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error getting invoice by number {invoice_number}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 if __name__ == "__main__":

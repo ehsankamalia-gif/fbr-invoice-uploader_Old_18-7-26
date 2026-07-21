@@ -48,7 +48,7 @@ class PriceService:
             close_db = True
 
         try:
-            price = db.query(Price).join(ProductModel).filter(
+            price = db.query(Price).options(joinedload(Price.product_model)).join(ProductModel).filter(
                 ProductModel.model_name == model_name,
                 Price.expiration_date.is_(None)
             ).first()
