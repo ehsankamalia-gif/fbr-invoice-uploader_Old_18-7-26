@@ -94,3 +94,27 @@ class PriceResponse(PriceBase):
     model_config = {
         "from_attributes": True
     }
+
+
+class MotorcycleSaleInfoResponse(BaseModel):
+    id: int
+    invoice_number: str
+    fbr_invoice_number: Optional[str] = None
+    is_fiscalized: bool
+    invoice_datetime: dt
+    customer_name: Optional[str] = None
+    customer_father_name: Optional[str] = None
+    customer_cnic: Optional[str] = None
+    customer_phone: Optional[str] = None
+    customer_address: Optional[str] = None
+    chassis_number: Optional[str] = None
+    engine_number: Optional[str] = None
+    motorcycle_color: Optional[str] = None
+    motorcycle_model: Optional[str] = None
+    motorcycle_year: Optional[int] = None
+    total_amount: float
+    payment_mode: str
+
+    model_config = {
+        "from_attributes": True
+    }

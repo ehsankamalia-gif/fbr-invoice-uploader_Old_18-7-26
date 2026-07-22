@@ -13,8 +13,8 @@ logger = logging.getLogger(__name__)
 
 from app.db.session import SessionLocal, init_db
 from app.services.price_service import price_service
-from app.api.schemas import PriceResponse, PriceCreate, MotorcycleResponse, InvoiceWithDetailsResponse
-from app.db.models import Motorcycle, Invoice, Price, ProductModel
+from app.api.schemas import PriceResponse, PriceCreate, MotorcycleResponse, InvoiceWithDetailsResponse, MotorcycleSaleInfoResponse
+from app.db.models import Motorcycle, Invoice, Price, ProductModel, InvoiceItem, Customer
 
 # Initialize database when server starts
 init_db()
@@ -221,6 +221,113 @@ def get_invoice_by_number(invoice_number: str, db: Session = Depends(get_db)):
         raise
     except Exception as e:
         logger.exception(f"Error getting invoice by number {invoice_number}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+# --- Motorcycle Sale Info Endpoints ---
+def build_motorcycle_sale_info(invoice: Invoice, invoice_item: Optional[InvoiceItem] = None, motorcycle: Optional[Motorcycle] = None, customer: Optional[Customer] = None):
+    """Helper to build the MotorcycleSaleInfoResponse from database objects"""
+    return MotorcycleSaleInfoResponse(
+        id=invoice.id,
+        invoice_number=invoice.invoice_number,
+        fbr_invoice_number=invoice.fbr_invoice_number,
+        is_fiscalized=invoice.is_fiscalized,
+        invoice_datetime=invoice.datetime,
+        customer_name=customer.name if customer else None,
+        customer_father_name=customer.father_name if customer else None,
+        customer_cnic=customer.cnic if customer else None,
+        customer_phone=customer.phone if customer else None,
+        customer_address=customer.address if customer else None,
+        chassis_number=motorcycle.chassis_number if motorcycle else None,
+        engine_number=motorcycle.engine_number if motorcycle else None,
+        motorcycle_color=motorcycle.color if motorcycle else None,
+        motorcycle_model=motorcycle.model if motorcycle else None,
+        motorcycle_year=motorcycle.year if motorcycle else None,
+        total_amount=invoice.total_amount,
+        payment_mode=invoice.payment_mode
+    )
+
+
+@app.get("/motorcycle-sales/search", response_model=List[MotorcycleSaleInfoResponse])
+def search_motorcycle_sales(
+    chassis_number: Optional[str] = Query(None),
+    engine_number: Optional[str] = Query(None),
+    invoice_number: Optional[str] = Query(None),
+    fbr_invoice_number: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Search motorcycle sales by chassis number, engine number, invoice number, or FBR invoice number.
+    """
+    try:
+        from sqlalchemy.orm import contains_eager
+        
+        # Start with invoice query
+        query = db.query(Invoice)
+        
+        # Always eager load customer
+        query = query.options(joinedload(Invoice.customer))
+        
+        # Apply filters
+        if invoice_number:
+            query = query.filter(Invoice.invoice_number == invoice_number)
+        if fbr_invoice_number:
+            query = query.filter(Invoice.fbr_invoice_number == fbr_invoice_number)
+        
+        # If filtering by motorcycle fields, join and eager load items + motorcycle
+        if chassis_number or engine_number:
+            query = query.join(Invoice.items).join(InvoiceItem.motorcycle)
+            query = query.options(
+                contains_eager(Invoice.items).contains_eager(InvoiceItem.motorcycle).contains_eager(Motorcycle.product_model)
+            )
+            if chassis_number:
+                query = query.filter(Motorcycle.chassis_number == chassis_number)
+            if engine_number:
+                query = query.filter(Motorcycle.engine_number == engine_number)
+        else:
+            # Just eager load items and motorcycle
+            query = query.options(
+                joinedload(Invoice.items).joinedload(InvoiceItem.motorcycle).joinedload(Motorcycle.product_model)
+            )
+        
+        # Execute query
+        invoices = query.all()
+        
+        # Build response
+        results = []
+        for invoice in invoices:
+            customer = invoice.customer
+            for item in invoice.items:
+                motorcycle = item.motorcycle
+                results.append(build_motorcycle_sale_info(invoice, item, motorcycle, customer))
+        
+        return results
+    except Exception as e:
+        logger.exception("Error searching motorcycle sales")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/motorcycle-sales", response_model=List[MotorcycleSaleInfoResponse])
+def get_all_motorcycle_sales(db: Session = Depends(get_db)):
+    """
+    Get all motorcycle sales.
+    """
+    try:
+        invoices = db.query(Invoice).options(
+            joinedload(Invoice.customer),
+            joinedload(Invoice.items).joinedload(InvoiceItem.motorcycle).joinedload(Motorcycle.product_model)
+        ).all()
+        
+        results = []
+        for invoice in invoices:
+            customer = invoice.customer
+            for item in invoice.items:
+                motorcycle = item.motorcycle
+                results.append(build_motorcycle_sale_info(invoice, item, motorcycle, customer))
+        
+        return results
+    except Exception as e:
+        logger.exception("Error getting all motorcycle sales")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
