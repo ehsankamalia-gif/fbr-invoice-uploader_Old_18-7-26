@@ -140,8 +140,18 @@ class FBRClient:
         if payload["TotalBillAmount"] <= 0:
             raise ValueError(f"TotalBillAmount must be positive, got {payload['TotalBillAmount']}")
         
-        if payload["PaymentMode"] not in [1, 2, 3, 4, 5]:
-             raise ValueError(f"Invalid PaymentMode: {payload['PaymentMode']}. Must be 1-5.")
+        if payload["PaymentMode"] not in [1, 2, 3, 4, 5, 6]:
+             raise ValueError(f"Invalid PaymentMode: {payload['PaymentMode']}. Must be 1-6.")
+
+        # Validate Buyer NTN length (max 9 chars with hyphen, e.g. 1234567-8)
+        if payload.get("BuyerNTN"):
+            if len(payload["BuyerNTN"]) > 9:
+                raise ValueError(f"BuyerNTN exceeds 9 character limit: {payload['BuyerNTN']}")
+
+        # Validate Buyer CNIC length (max 13 digits, stripped of hyphens)
+        if payload.get("BuyerCNIC"):
+            if len(payload["BuyerCNIC"]) > 13:
+                raise ValueError(f"BuyerCNIC exceeds 13 character limit: {payload['BuyerCNIC']}")
 
         # Validate items
         for i, item in enumerate(payload["Items"]):
@@ -155,6 +165,8 @@ class FBRClient:
                  raise ValueError(f"Item {i} Invalid PCTCode: {item.get('PCTCode')}")
             if item.get("TaxRate") is None:
                  raise ValueError(f"Item {i} missing TaxRate")
+            if item.get("InvoiceType") not in [1, 2, 3, 11, 12]:
+                 raise ValueError(f"Item {i} Invalid InvoiceType: {item.get('InvoiceType')}. Must be 1,2,3,11,12.")
 
     def _validate_pct_code(self, pct_code: str) -> str:
         """
@@ -183,28 +195,45 @@ class FBRClient:
         Transforms internal invoice data to FBR compliant JSON.
         """
         # Map Invoice Type string to Integer for FBR
+        # FBR Spec: 1=New, 2=Debit, 3=Credit, 11=3rd Schedule New, 12=3rd Schedule Credit
         invoice_type_map = {
             "Standard": 1,
+            "New": 1,
             "Debit Note": 2,
-            "Credit Note": 3
+            "Debit": 2,
+            "Credit Note": 3,
+            "Credit": 3,
+            "3rd Schedule New": 11,
+            "3rd Schedule Credit": 12,
         }
         
-        # Get default invoice type from settings or fall back to Standard (1)
+        # Get default invoice type from settings or fall back to Standard/New (1)
         setting_invoice_type = settings.get("invoice_type", "Standard")
         default_invoice_type_int = invoice_type_map.get(setting_invoice_type, 1)
 
+        total_header_discount = 0.0
+        total_further = 0.0
+        total_additional = 0.0
+        total_other = 0.0
         items = []
         for item in data.get("items", []):
-            # Prioritize item-level PCT, then settings-level if available
             raw_pct = item.get("pct_code")
             if not raw_pct and settings.get("pct_code"):
                 raw_pct = settings.get("pct_code")
                 
             pct_code = self._validate_pct_code(raw_pct)
             
-            # Use item discount if provided, otherwise default to settings discount
             discount = float(item.get("discount", settings.get("discount", 0.0)))
-            
+            total_header_discount += discount
+
+            item_invoice_type_str = item.get("invoice_type") or setting_invoice_type
+            item_invoice_type_int = invoice_type_map.get(item_invoice_type_str, default_invoice_type_int)
+
+            item_ref_usin = item.get("ref_usin") or None
+
+            ft = round(float(item.get("further_tax", 0.0)), 2)
+            total_further += ft
+
             items.append({
                 "ItemCode": str(item.get("item_code")),
                 "ItemName": str(item.get("item_name")),
@@ -215,22 +244,28 @@ class FBRClient:
                 "TotalAmount": round(float(item.get("total_amount", 0.0)), 2),
                 "TaxCharged": round(float(item.get("tax_charged", 0.0)), 2),
                 "Discount": round(discount, 2),
-                "FurtherTax": round(float(item.get("further_tax", 0.0)), 2),
-                "FurtherTaxCharged": round(float(item.get("further_tax", 0.0)), 2), # Alias
-                "FurtherTaxAmount": round(float(item.get("further_tax", 0.0)), 2), # Alias
-                "AdditionalTax": round(float(item.get("further_tax", 0.0)), 2), # Explicit Additional Tax field
-                "AdditionalTaxCharged": round(float(item.get("further_tax", 0.0)), 2), # Alias
-                "OtherTax": round(float(item.get("further_tax", 0.0)), 2), # Alias for compatibility
-                "InvoiceType": default_invoice_type_int
+                "FurtherTax": ft,
+                "FurtherTaxCharged": ft,
+                "FurtherTaxAmount": ft,
+                "AdditionalTax": ft,
+                "AdditionalTaxCharged": ft,
+                "OtherTax": ft,
+                "InvoiceType": item_invoice_type_int,
+                "RefUSIN": item_ref_usin,
             })
 
-        # Map Payment Mode string to Integer
+        # Map Payment Mode string to Integer - MATCHES FBR OFFICIAL TABLE 1
+        # 1. Cash, 2. Card, 3. Gift Voucher, 4. Loyalty Card, 5. Mixed, 6. Cheque
         payment_mode_map = {
             "Cash": 1,
             "Card": 2,
-            "Cheque": 3,
-            "Pay Order": 4,
-            "Online": 5
+            "Gift Voucher": 3,
+            "Loyalty Card": 4,
+            "Mixed": 5,
+            "Cheque": 6,
+            # Common aliases used in existing code (backward compat):
+            "Pay Order": 6,  # Map Pay Order to Cheque (6) as closest match
+            "Online": 5,     # Map Online to Mixed (5) as closest match since not in FBR list
         }
         
         mode_str = data.get("payment_mode", "1")
@@ -240,12 +275,31 @@ class FBRClient:
         elif isinstance(mode_str, str) and mode_str.isdigit():
              mode_int = int(mode_str)
         else:
-             mode_int = payment_mode_map.get(mode_str, 1) # Default to 1
+             mode_int = payment_mode_map.get(mode_str, 1) # Default to 1 (Cash)
 
         # Format DateTime as YYYY-MM-DD HH:MM:SS
+        # Use Asia/Karachi timezone if available; if naive datetime provided, assume it's already PKT
         dt_str = None
-        if data.get("datetime"):
-            dt_str = data.get("datetime").strftime("%Y-%m-%d %H:%M:%S")
+        dt_obj = data.get("datetime")
+        if dt_obj:
+            try:
+                import datetime as dt_mod
+                try:
+                    from zoneinfo import ZoneInfo
+                    PKT = ZoneInfo("Asia/Karachi")
+                except Exception:
+                    PKT = dt_mod.timezone(dt_mod.timedelta(hours=5))
+
+                if dt_obj.tzinfo is None:
+                    # Naive datetime: treat as already in PKT
+                    dt_str = dt_obj.strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    # Aware datetime: convert to PKT
+                    dt_pkt = dt_obj.astimezone(PKT)
+                    dt_str = dt_pkt.strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                # Fallback to naive stringification
+                dt_str = dt_obj.strftime("%Y-%m-%d %H:%M:%S")
 
         # Handle POSID casting if numeric
         pos_id = settings.get("pos_id", "")
@@ -254,16 +308,26 @@ class FBRClient:
         except (ValueError, TypeError):
              pass
 
-        # Format CNIC (Strip dashes for FBR compliance)
+        # USIN = Unique Sales Invoice Number, must be unique per invoice.
+        # Use the actual internal invoice_number (prefix+sequence) instead of just the settings prefix.
+        # Fall back to settings prefix only if invoice_number is missing.
+        usin_value = data.get("invoice_number") or settings.get("usin", "") or ""
+
+        # Format CNIC (Strip dashes for FBR compliance, max 13 digits)
         buyer_cnic = data.get("buyer_cnic")
         if buyer_cnic:
             buyer_cnic = str(buyer_cnic).replace("-", "").strip()
+            if len(buyer_cnic) > 13:
+                buyer_cnic = buyer_cnic[:13]
         else:
             buyer_cnic = None # FBR allows null for CNIC if NTN is provided
 
         buyer_ntn = data.get("buyer_ntn")
         if buyer_ntn:
-            buyer_ntn = str(buyer_ntn).replace("-", "").strip()
+            buyer_ntn = str(buyer_ntn).strip()
+            # Keep hyphen for NTN (e.g. 1234567-8 is 9 chars with hyphen)
+            if len(buyer_ntn) > 9:
+                buyer_ntn = buyer_ntn[:9]
         else:
             buyer_ntn = None # FBR allows null for NTN if CNIC is provided
 
@@ -271,32 +335,53 @@ class FBRClient:
         # If both are missing, use a generic fallback or log warning.
         if not buyer_cnic and not buyer_ntn:
              logger.warning(f"Both BuyerCNIC and BuyerNTN are missing for invoice {data.get('invoice_number')}")
-             # Use a generic fallback CNIC if absolutely necessary, but better to let FBR fail and report it
-             # buyer_cnic = "0000000000000" 
+
+        # Optional Header-level RefUSIN (for Debit/Credit Note referencing original invoice USIN)
+        ref_usin_header = data.get("ref_usin") or None
+
+        total_further_rounded = round(float(data.get("total_further_tax", 0.0)), 2)
+        # TotalAdditionalTax = TotalFurtherTax (for unregistered buyer "Further Tax" == "Additional Tax" on FBR side)
+        total_additional_rounded = total_further_rounded
+        total_other_rounded = total_further_rounded
+
+        # TotalBillAmount: SaleValue + TaxCharged + FurtherTax - Discount
+        total_sale = round(float(data.get("total_sale_value", 0.0)), 2)
+        total_tax = round(float(data.get("total_tax_charged", 0.0)), 2)
+        total_discount = round(float(total_header_discount), 2)
+        computed_total = round(total_sale + total_tax + total_further_rounded - total_discount, 2)
+        stored_total = round(float(data.get("total_amount", 0.0)), 2)
+        if stored_total > 0 and abs(computed_total - stored_total) > 0.01:
+            final_total = stored_total
+        else:
+            final_total = computed_total
 
         return {
             "InvoiceNumber": data.get("invoice_number", ""),
             "POSID": pos_id,
-            "USIN": data.get("invoice_number", ""),
+            "USIN": usin_value,
+            "RefUSIN": ref_usin_header,
             "DateTime": dt_str,
             "BuyerNTN": buyer_ntn,
             "BuyerCNIC": buyer_cnic,
             "BuyerName": data.get("buyer_name") or "Buyer Name",
             "BuyerPhoneNumber": data.get("buyer_phone") or None,
-            "TotalBillAmount": round(float(data.get("total_amount", 0.0)), 2),
+            "TotalSaleValue": total_sale,
+            "TotalTaxCharged": total_tax,
+            "TotalFurtherTax": total_further_rounded,
+            "TotalFurtherTaxCharged": total_further_rounded,
+            "TotalFurtherTaxAmount": total_further_rounded,
+            "TotalAdditionalTax": total_additional_rounded,
+            "TotalAdditionalTaxCharged": total_additional_rounded,
+            "TotalOtherTax": total_other_rounded,
             "TotalQuantity": round(float(data.get("total_quantity", 0.0)), 2),
-            "TotalSaleValue": round(float(data.get("total_sale_value", 0.0)), 2),
-            "TotalTaxCharged": round(float(data.get("total_tax_charged", 0.0)), 2),
-            "TotalFurtherTax": round(float(data.get("total_further_tax", 0.0)), 2),
-            "TotalFurtherTaxCharged": round(float(data.get("total_further_tax", 0.0)), 2), # Alias
-            "TotalFurtherTaxAmount": round(float(data.get("total_further_tax", 0.0)), 2), # Alias
-            "FurtherTax": round(float(data.get("total_further_tax", 0.0)), 2), # Root level alias
-            "FurtherTaxCharged": round(float(data.get("total_further_tax", 0.0)), 2), # Alias
-            "TotalAdditionalTax": round(float(data.get("total_further_tax", 0.0)), 2), # Explicit Total Additional Tax field
-            "TotalAdditionalTaxCharged": round(float(data.get("total_further_tax", 0.0)), 2), # Alias
-            "TotalOtherTax": round(float(data.get("total_further_tax", 0.0)), 2), # Alias for compatibility
-            "PoSFee": 0.0,
-            "TotalPoSFee": 0.0,
+            "Discount": total_discount,
+            "FurtherTax": total_further_rounded,
+            "FurtherTaxCharged": total_further_rounded,
+            "FurtherTaxAmount": total_further_rounded,
+            "AdditionalTax": total_additional_rounded,
+            "AdditionalTaxCharged": total_additional_rounded,
+            "OtherTax": total_other_rounded,
+            "TotalBillAmount": final_total,
             "PaymentMode": mode_int,
             "InvoiceType": default_invoice_type_int,
             "Items": items

@@ -73,7 +73,7 @@ class Invoice(Base):
     invoice_number = Column(String(50), unique=True, index=True, nullable=False)
     pos_id = Column(String(20), nullable=False)
     usin = Column(String(50), nullable=False) # Updated to be Unique in context, but FBR allows multiple? USIN is unique POS ID basically.
-    datetime = Column(DateTime, default=dt.datetime.utcnow)
+    datetime = Column(DateTime, default=pk_now)
     
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True)
     customer = relationship("Customer", back_populates="invoices")
@@ -311,6 +311,7 @@ class FBRConfiguration(Base):
     tax_rate = Column(Float, default=18.0)
     invoice_type = Column(String(20), default="Standard")
     discount = Column(Float, default=0.0)
+    pos_fee = Column(Float, default=1.0)
     
     pct_code = Column(String(20), default="8711.2010")
     item_code = Column(String(50), nullable=True)
