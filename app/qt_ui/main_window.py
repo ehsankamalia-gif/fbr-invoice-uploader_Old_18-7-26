@@ -113,6 +113,7 @@ from app.core.version_manager import VersionManager
 from app.updater.updater_manager import UpdaterManager
 from app.qt_ui.whatsapp_campaign_widget import WhatsAppCampaignWidget
 from app.qt_ui.dms_automation_page import DMSAutomationPage
+from app.excise import ExciseRecordPage
 
 
 @dataclass
@@ -1204,6 +1205,7 @@ class MainWindow(QMainWindow):
         self._add_page("settings", self._create_settings_page(), "Settings")
         self._add_page("welcome", self._create_welcome_page(), "Welcome")
         self._add_page("dms_automation", self._create_dms_automation_page(), "DMS Automation")
+        self._add_page("excise", self._create_excise_page(), "Excise Records")
 
         nav_layout.addSpacing(10)
         
@@ -1225,11 +1227,12 @@ class MainWindow(QMainWindow):
             "captured_data": "📁",
             "print_document": "🖨️",
             "dms_automation": "🤖",
+            "excise": "📋",
         }
 
         self.menu_groups = {
             "GENERAL": ["dashboard", "welcome"],
-            "SALES": ["invoice", "reports", "advance_booking", "credit_ledger", "print_document"],
+            "SALES": ["invoice", "reports", "advance_booking", "credit_ledger", "print_document", "excise"],
             "INVENTORY": ["inventory", "prices", "spare_ledger", "captured_data"],
             "DIRECTORY": ["customers", "dealers"],
             "AUTOMATION": ["dms_automation"],
@@ -1787,8 +1790,15 @@ class MainWindow(QMainWindow):
 
     def _create_print_document_page(self) -> QWidget:
         """Creates a standalone page for printing existing FBR-submitted invoices by Chassis Number."""
-        page = QWidget(self)
-        layout = QVBoxLayout(page)
+        # Create a scroll area to allow scrolling
+        scroll_area = QScrollArea(self)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setStyleSheet("QScrollArea { background-color: #f4f4f4; }")
+        
+        # Create content widget that goes inside the scroll area
+        content_widget = QWidget()
+        layout = QVBoxLayout(content_widget)
         layout.setContentsMargins(40, 40, 40, 40)
         layout.setSpacing(25)
 
@@ -1813,7 +1823,19 @@ class MainWindow(QMainWindow):
         self.print_search_input = QLineEdit()
         self.print_search_input.setPlaceholderText("Enter Chassis Number...")
         self.print_search_input.setMinimumHeight(45)
-        self.print_search_input.setStyleSheet("font-size: 16px; padding: 0 15px;")
+        self.print_search_input.setStyleSheet("""
+            QLineEdit {
+                font-size: 16px;
+                padding: 0 15px;
+                border: 2px solid #e0e0e0;
+                border-radius: 8px;
+                background-color: #ffffff;
+            }
+            QLineEdit:focus {
+                border: 2px solid #3498db;
+                outline: none;
+            }
+        """)
         self.print_search_input.returnPressed.connect(self._on_print_search_clicked)
         
         search_btn = QPushButton("🔍 Search Invoice")
@@ -1844,10 +1866,28 @@ class MainWindow(QMainWindow):
 
         def add_field(row, col, label_text, widget_factory=QLineEdit):
             lbl = QLabel(label_text)
-            lbl.setStyleSheet("font-weight: bold; color: #7f8c8d;")
+            lbl.setStyleSheet("font-weight: 600; color: #555; font-size: 14px;")
             edit = widget_factory()
-            edit.setMinimumHeight(35)
-            edit.setStyleSheet("background-color: #f9f9f9; border: 1px solid #ddd; padding: 0 10px;")
+            edit.setMinimumHeight(40)
+            edit.setStyleSheet("""
+                QLineEdit, QComboBox {
+                    background-color: #f8f9fa;
+                    border: 1px solid #dee2e6;
+                    border-radius: 6px;
+                    padding: 8px 12px;
+                    font-size: 14px;
+                    color: #333;
+                }
+                QLineEdit:focus, QComboBox:focus {
+                    border: 1px solid #3498db;
+                    background-color: #ffffff;
+                    outline: none;
+                }
+                QLineEdit:disabled, QComboBox:disabled {
+                    color: #666;
+                    background-color: #e9ecef;
+                }
+            """)
             form_grid.addWidget(lbl, row, col)
             form_grid.addWidget(edit, row + 1, col)
             return edit
@@ -1858,7 +1898,7 @@ class MainWindow(QMainWindow):
         self.print_field_customer = add_field(2, 1, "Customer Name")
         self.print_field_cnic = add_field(4, 0, "Customer CNIC")
         father_lbl = QLabel("Father / Husband Name")
-        father_lbl.setStyleSheet("font-weight: bold; color: #7f8c8d;")
+        father_lbl.setStyleSheet("font-weight: 600; color: #555; font-size: 14px;")
         form_grid.addWidget(father_lbl, 4, 1)
         father_row = QWidget()
         father_row_layout = QHBoxLayout(father_row)
@@ -1866,12 +1906,51 @@ class MainWindow(QMainWindow):
         father_row_layout.setSpacing(10)
         self.print_field_relation = QComboBox()
         self.print_field_relation.addItems(["S/O", "D/O", "W/O"])
-        self.print_field_relation.setMinimumHeight(35)
-        self.print_field_relation.setFixedWidth(80)
-        self.print_field_relation.setStyleSheet("background-color: #f9f9f9; border: 1px solid #ddd; padding: 0 6px;")
+        self.print_field_relation.setMinimumHeight(40)
+        self.print_field_relation.setFixedWidth(90)
+        self.print_field_relation.setStyleSheet("""
+            QComboBox {
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 14px;
+                color: #333;
+            }
+            QComboBox:focus {
+                border: 1px solid #3498db;
+                background-color: #ffffff;
+                outline: none;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 30px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 5px solid #555;
+                margin-right: 8px;
+            }
+        """)
         self.print_field_father = QLineEdit()
-        self.print_field_father.setMinimumHeight(35)
-        self.print_field_father.setStyleSheet("background-color: #f9f9f9; border: 1px solid #ddd; padding: 0 10px;")
+        self.print_field_father.setMinimumHeight(40)
+        self.print_field_father.setStyleSheet("""
+            QLineEdit {
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 14px;
+                color: #333;
+            }
+            QLineEdit:focus {
+                border: 1px solid #3498db;
+                background-color: #ffffff;
+                outline: none;
+            }
+        """)
         father_row_layout.addWidget(self.print_field_relation)
         father_row_layout.addWidget(self.print_field_father, 1)
         form_grid.addWidget(father_row, 5, 1)
@@ -1880,13 +1959,20 @@ class MainWindow(QMainWindow):
         self.print_field_color = add_field(8, 0, "Color")
 
         qr_lbl = QLabel("FBR Generated ID QR Code")
-        qr_lbl.setStyleSheet("font-weight: bold; color: #7f8c8d;")
+        qr_lbl.setStyleSheet("font-weight: 600; color: #555; font-size: 14px;")
         self.print_field_qr = QLabel("")
         self.print_field_qr.setMinimumHeight(120)
         self.print_field_qr.setMinimumWidth(120)
-        self.print_field_qr.setFixedSize(140, 140)
+        self.print_field_qr.setFixedSize(160, 160)
         self.print_field_qr.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.print_field_qr.setStyleSheet("background-color: #ffffff; border: 1px solid #ddd;")
+        self.print_field_qr.setStyleSheet("""
+            QLabel {
+                background-color: #ffffff;
+                border: 1px solid #dee2e6;
+                border-radius: 8px;
+                padding: 10px;
+            }
+        """)
         form_grid.addWidget(qr_lbl, 8, 1)
         form_grid.addWidget(self.print_field_qr, 9, 1)
         
@@ -1899,10 +1985,44 @@ class MainWindow(QMainWindow):
         self.print_page_inv_btn = QPushButton("🖨️ Print Invoice")
         self.print_page_inv_btn.setObjectName("primaryButton")
         self.print_page_inv_btn.setMinimumHeight(50)
+        self.print_page_inv_btn.setStyleSheet("""
+            QPushButton#primaryButton {
+                background-color: #3498db;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 15px;
+                font-weight: 600;
+                padding: 10px 20px;
+            }
+            QPushButton#primaryButton:hover {
+                background-color: #2980b9;
+            }
+            QPushButton#primaryButton:pressed {
+                background-color: #1f6aa5;
+            }
+        """)
         
         self.print_page_al_btn = QPushButton("📄 Authority Letter")
         self.print_page_al_btn.setObjectName("primaryButton")
         self.print_page_al_btn.setMinimumHeight(50)
+        self.print_page_al_btn.setStyleSheet("""
+            QPushButton#primaryButton {
+                background-color: #3498db;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 15px;
+                font-weight: 600;
+                padding: 10px 20px;
+            }
+            QPushButton#primaryButton:hover {
+                background-color: #2980b9;
+            }
+            QPushButton#primaryButton:pressed {
+                background-color: #1f6aa5;
+            }
+        """)
         
         btn_layout.addWidget(self.print_page_inv_btn)
         btn_layout.addWidget(self.print_page_al_btn)
@@ -1912,7 +2032,9 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.print_results_card)
         layout.addStretch(1)
 
-        return page
+        # Set the content widget inside the scroll area and return the scroll area
+        scroll_area.setWidget(content_widget)
+        return scroll_area
 
     def _on_print_search_clicked(self) -> None:
         """Handles searching for an invoice by chassis number for printing."""
@@ -3198,6 +3320,12 @@ class MainWindow(QMainWindow):
 
     def _create_dms_automation_page(self) -> QWidget:
         return DMSAutomationPage(self)
+
+    def _create_excise_page(self) -> QWidget:
+        # Create database session for excise page
+        from app.db.session import SessionLocal
+        db_session = SessionLocal()
+        return ExciseRecordPage(db_session)
 
     def _open_fbr_security(self):
         dialog = FBRSecurityDialog(self)

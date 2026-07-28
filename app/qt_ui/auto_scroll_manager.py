@@ -49,7 +49,13 @@ class AutoScrollManager(QObject):
     def uninstall_from_widget(self):
         """Remove auto-scroll functionality from the widget"""
         if self._watched_widget:
-            self._watched_widget.removeEventFilter(self)
+            try:
+                # Check if widget is still valid before removing event filter
+                if not self._watched_widget is None:
+                    self._watched_widget.removeEventFilter(self)
+            except RuntimeError:
+                # Widget has already been deleted, ignore
+                pass
             self._watched_widget = None
             self._target_widget = None
             self._stop_auto_scroll()
@@ -97,7 +103,12 @@ class AutoScrollManager(QObject):
         
         # Change cursor to auto-scroll indicator (on the watched widget)
         if self._watched_widget:
-            self._watched_widget.setCursor(Qt.CursorShape.SizeAllCursor)
+            try:
+                self._watched_widget.setCursor(Qt.CursorShape.SizeAllCursor)
+            except RuntimeError:
+                # Widget has already been deleted, stop auto scroll
+                self._stop_auto_scroll()
+                return
         
         # Start the auto-scroll timer
         self._scroll_timer.start(16)  # ~60fps for smooth scrolling
@@ -112,7 +123,11 @@ class AutoScrollManager(QObject):
         
         # Restore cursor to normal
         if self._watched_widget:
-            self._watched_widget.unsetCursor()
+            try:
+                self._watched_widget.unsetCursor()
+            except RuntimeError:
+                # Widget has already been deleted, ignore
+                pass
             
     def _do_auto_scroll(self):
         """

@@ -13,8 +13,9 @@ logger = logging.getLogger(__name__)
 
 from app.db.session import SessionLocal, init_db
 from app.services.price_service import price_service
-from app.api.schemas import PriceResponse, PriceCreate, MotorcycleResponse, InvoiceWithDetailsResponse, MotorcycleSaleInfoResponse
-from app.db.models import Motorcycle, Invoice, Price, ProductModel, InvoiceItem, Customer
+from app.excise.services import excise_service
+from app.api.schemas import PriceResponse, PriceCreate, MotorcycleResponse, InvoiceWithDetailsResponse, MotorcycleSaleInfoResponse, ExciseRecordResponse, ExciseRecordCreate, ExciseRecordUpdate
+from app.db.models import Motorcycle, Invoice, Price, ProductModel, InvoiceItem, Customer, ExciseRecord
 
 # Initialize database when server starts
 init_db()
@@ -328,6 +329,125 @@ def get_all_motorcycle_sales(db: Session = Depends(get_db)):
         return results
     except Exception as e:
         logger.exception("Error getting all motorcycle sales")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+# --- Excise Record Endpoints ---
+
+@app.post("/excise-records", response_model=ExciseRecordResponse)
+def create_excise_record(record: ExciseRecordCreate, db: Session = Depends(get_db)):
+    """
+    Create a new excise record.
+    """
+    try:
+        logger.info(f"Creating excise record: {record.record_number}")
+        new_record = excise_service.create_excise_record(
+            db=db,
+            record_number=record.record_number,
+            chassis_number=record.chassis_number,
+            engine_number=record.engine_number,
+            motorcycle_model=record.motorcycle_model,
+            color=record.color,
+            year_of_manufacture=record.year_of_manufacture,
+            customer_name=record.customer_name,
+            customer_cnic=record.customer_cnic,
+            customer_father_name=record.customer_father_name,
+            customer_phone=record.customer_phone,
+            customer_address=record.customer_address,
+            registration_number=record.registration_number,
+            tax_amount=record.tax_amount,
+            fine_amount=record.fine_amount,
+            total_amount=record.total_amount,
+            notes=record.notes,
+            attachments=record.attachments
+        )
+        return new_record
+    except Exception as e:
+        logger.exception("Error creating excise record")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/excise-records", response_model=List[ExciseRecordResponse])
+def get_all_excise_records(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    """
+    Get all excise records.
+    """
+    try:
+        return excise_service.get_all_excise_records(db=db, skip=skip, limit=limit)
+    except Exception as e:
+        logger.exception("Error getting all excise records")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/excise-records/{record_id}", response_model=ExciseRecordResponse)
+def get_excise_record_by_id(record_id: int, db: Session = Depends(get_db)):
+    """
+    Get an excise record by ID.
+    """
+    try:
+        record = excise_service.get_excise_record_by_id(db=db, record_id=record_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Excise record not found")
+        return record
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error getting excise record by id {record_id}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/excise-records/chassis/{chassis_number}", response_model=ExciseRecordResponse)
+def get_excise_record_by_chassis(chassis_number: str, db: Session = Depends(get_db)):
+    """
+    Get an excise record by chassis number.
+    """
+    try:
+        record = excise_service.get_excise_record_by_chassis(db=db, chassis_number=chassis_number)
+        if not record:
+            raise HTTPException(status_code=404, detail="Excise record not found")
+        return record
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error getting excise record by chassis {chassis_number}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.put("/excise-records/{record_id}", response_model=ExciseRecordResponse)
+def update_excise_record(record_id: int, record_update: ExciseRecordUpdate, db: Session = Depends(get_db)):
+    """
+    Update an excise record.
+    """
+    try:
+        logger.info(f"Updating excise record {record_id}")
+        # Convert the update model to a dict, excluding None values
+        update_data = record_update.model_dump(exclude_unset=True)
+        record = excise_service.update_excise_record(db=db, record_id=record_id, **update_data)
+        if not record:
+            raise HTTPException(status_code=404, detail="Excise record not found")
+        return record
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error updating excise record {record_id}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.delete("/excise-records/{record_id}")
+def delete_excise_record(record_id: int, db: Session = Depends(get_db)):
+    """
+    Soft delete an excise record.
+    """
+    try:
+        logger.info(f"Deleting excise record {record_id}")
+        success = excise_service.delete_excise_record(db=db, record_id=record_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Excise record not found")
+        return {"message": "Excise record deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error deleting excise record {record_id}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
