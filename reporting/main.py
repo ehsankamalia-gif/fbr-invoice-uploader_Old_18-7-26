@@ -269,6 +269,7 @@ def _compute_metrics(db: Session, start_dt: Optional[datetime], end_dt: Optional
     )
     invoice_rows = []
     for inv in invoices:
+        effective_usin = inv.fbr_invoice_number or inv.usin or ""
         invoice_rows.append(
             {
                 "invoice_number": inv.invoice_number,
@@ -277,6 +278,8 @@ def _compute_metrics(db: Session, start_dt: Optional[datetime], end_dt: Optional
                 "payment_mode": inv.payment_mode or "",
                 "total_amount": float(inv.total_amount or 0),
                 "sync_status": inv.sync_status,
+                "fbr_invoice_number": inv.fbr_invoice_number or "",
+                "usin": effective_usin,
             }
         )
 
@@ -2022,10 +2025,10 @@ def _execute_schedule(db: Session, sch: ReportSchedule) -> None:
 
 def _export_csv(metrics: Dict[str, Any]) -> bytes:
     buffer = StringIO()
-    buffer.write("invoice_number,datetime,pos_id,payment_mode,total_amount,sync_status\n")
+    buffer.write("invoice_number,usin,fbr_invoice_number,datetime,pos_id,payment_mode,total_amount,sync_status\n")
     for r in metrics.get("invoices", []):
         buffer.write(
-            f"{r['invoice_number']},{r['datetime']},{r['pos_id']},{r['payment_mode']},{float(r['total_amount']):.2f},{r['sync_status']}\n"
+            f"{r['invoice_number']},{r.get('usin','')},{r.get('fbr_invoice_number','')},{r['datetime']},{r['pos_id']},{r['payment_mode']},{float(r['total_amount']):.2f},{r['sync_status']}\n"
         )
     return buffer.getvalue().encode("utf-8")
 
@@ -2036,9 +2039,9 @@ def _export_xlsx(metrics: Dict[str, Any]) -> bytes:
     wb = Workbook()
     ws = wb.active
     ws.title = "Invoices"
-    ws.append(["Invoice #", "DateTime", "POS ID", "Payment Mode", "Total Amount", "Sync Status"])
+    ws.append(["Invoice #", "USIN", "FBR Invoice #", "DateTime", "POS ID", "Payment Mode", "Total Amount", "Sync Status"])
     for r in metrics.get("invoices", []):
-        ws.append([r["invoice_number"], r["datetime"], r["pos_id"], r["payment_mode"], float(r["total_amount"]), r["sync_status"]])
+        ws.append([r["invoice_number"], r.get("usin",""), r.get("fbr_invoice_number",""), r["datetime"], r["pos_id"], r["payment_mode"], float(r["total_amount"]), r["sync_status"]])
     bio = BytesIO()
     wb.save(bio)
     return bio.getvalue()
@@ -2394,13 +2397,20 @@ def lookup_search(
         db.query(
             Invoice.datetime.label("date_value"),
             Invoice.invoice_number.label("invoice_number"),
+            Invoice.usin.label("usin"),
             Customer.name.label("customer_name"),
             Customer.father_name.label("father_name"),
             Customer.phone.label("mobile_number"),
+            Customer.cnic.label("buyer_cnic"),
+            Customer.ntn.label("buyer_ntn"),
             ProductModel.model_name.label("bike_model"),
             Motorcycle.chassis_number.label("chassis_number"),
+            Motorcycle.engine_number.label("engine_number"),
             Invoice.sync_status.label("sync_status"),
             Invoice.fbr_invoice_number.label("fbr_invoice_number"),
+            Invoice.total_sale_value.label("sale_value"),
+            Invoice.total_quantity.label("quantity"),
+            Invoice.status_updated_at.label("status_updated_at"),
         )
         .select_from(Invoice)
         .join(Customer, Invoice.customer_id == Customer.id, isouter=True)
@@ -2441,17 +2451,28 @@ def lookup_search(
     items: List[Dict[str, Any]] = []
     for r in rows:
         dt_value = getattr(r, "date_value", None)
+        submission_value = getattr(r, "status_updated_at", None)
+        raw_usin = getattr(r, "usin", None) or ""
+        raw_fbr = getattr(r, "fbr_invoice_number", None) or ""
+        effective_usin = raw_fbr or raw_usin or ""
         items.append(
             {
                 "customer_name": getattr(r, "customer_name", None) or "",
                 "father_name": getattr(r, "father_name", None) or "",
                 "mobile_number": getattr(r, "mobile_number", None) or "",
+                "buyer_cnic": getattr(r, "buyer_cnic", None) or "",
+                "buyer_ntn": getattr(r, "buyer_ntn", None) or "",
                 "invoice_number": getattr(r, "invoice_number", None) or "",
                 "bike_model": getattr(r, "bike_model", None) or "",
                 "chassis_number": getattr(r, "chassis_number", None) or "",
+                "engine_number": getattr(r, "engine_number", None) or "",
                 "date": dt_value.isoformat(sep=" ") if dt_value else "",
+                "submission_date": submission_value.isoformat(sep=" ") if submission_value else "",
                 "sync_status": getattr(r, "sync_status", None) or "",
-                "fbr_invoice_number": getattr(r, "fbr_invoice_number", None) or "",
+                "fbr_invoice_number": raw_fbr,
+                "usin": effective_usin,
+                "sale_value": float(getattr(r, "sale_value", 0) or 0),
+                "quantity": float(getattr(r, "quantity", 0) or 0),
             }
         )
 

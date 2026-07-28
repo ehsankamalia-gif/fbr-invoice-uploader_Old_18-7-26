@@ -259,6 +259,7 @@ class InvoiceService:
                 "total_quantity": invoice.total_quantity,
                 "total_amount": invoice.total_amount,
                 "payment_mode": invoice.payment_mode,
+                "ref_usin": None,
                 "items": [
                     {
                         "item_code": item.item_code,
@@ -270,7 +271,9 @@ class InvoiceService:
                         "further_tax": item.further_tax,
                         "total_amount": item.total_amount,
                         "pct_code": item.pct_code,
-                        "discount": item.discount
+                        "discount": item.discount,
+                        "invoice_type": None,
+                        "ref_usin": None,
                     } for item in invoice.items
                 ]
             }
@@ -289,23 +292,77 @@ class InvoiceService:
             response_code = str(response.get("Code")) if response and response.get("Code") else None
             is_success = response_code == "100"
             
-            # ECHO DETECTION:
-            # If FBR returns the same USIN we sent as the FBR Invoice Number, 
-            # it indicates a silent failure/echo bug in FBR.
-            returned_fbr_id = response.get("InvoiceNumber")
-            internal_usin = invoice.invoice_number # mapped to USIN in FBRClient
-            is_echo = returned_fbr_id == internal_usin
+            # Determine FBR-issued identifiers robustly.
+            # FBR returns multiple possible fields depending on portal version/state:
+            #   - InvoiceNumber: main FBR ID (16-20 char alphanumeric, or sometimes USIN echo)
+            #   - USIN:          authoritative USIN when provided
+            #   - FBRInvoiceNo / FBRUSIN: alternate spellings seen in some gateway responses
+            returned_fbr_id = (
+                response.get("InvoiceNumber")
+                or response.get("FBRInvoiceNo")
+                or None
+            )
+            returned_usin = (
+                response.get("USIN")
+                or response.get("FBRUSIN")
+                or None
+            )
+            verification_url = (
+                response.get("VerificationURL")
+                or response.get("VerificationUrl")
+                or response.get("QrCodeUrl")
+                or None
+            )
+            qr_code = (
+                response.get("QrCode")
+                or response.get("QRCode")
+                or response.get("QRCodeImage")
+                or None
+            )
+            iris_validated = response.get("IrisValidated") if response else None
+            is_verified = response.get("IsVerified") if response else None
+            if is_verified is None and iris_validated is None:
+                # A non-empty, non-echo authoritative USIN or an InvoiceNumber != our USIN implies FBR accepted
+                candidate = returned_usin or returned_fbr_id
+                internal_usin_like = invoice.invoice_number
+                if candidate and candidate != internal_usin_like and len(candidate) >= 10:
+                    is_verified = True
+
+            # ECHO DETECTION (relaxed):
+            # FBR can legally echo USIN back in InvoiceNumber field for invoices still being processed by IRIS.
+            # Only treat as echo when NO authoritative fields exist (no USIN, no VerificationURL, no IrisValidated=True)
+            # AND the returned InvoiceNumber exactly matches our internal invoice number AND is short/prefix-like.
+            internal_usin = invoice.invoice_number  # mapped to USIN in FBRClient
+            fbr_has_verification_artifacts = bool(returned_usin or verification_url or iris_validated or is_verified or qr_code)
+            looks_like_echo = (
+                (not fbr_has_verification_artifacts)
+                and returned_fbr_id is not None
+                and returned_fbr_id == internal_usin
+            )
+            is_echo = looks_like_echo
             
             if is_success and returned_fbr_id and not is_echo:
                 invoice.fbr_invoice_number = returned_fbr_id
+                # Prefer explicit USIN from FBR > returned_fbr_id > current usin
+                invoice.usin = returned_usin or returned_fbr_id or invoice.usin
                 invoice.is_fiscalized = True
                 invoice.sync_status = "SYNCED"
                 invoice.status_updated_at = datetime.utcnow()
                 invoice.fbr_response_code = response_code
-                invoice.fbr_response_message = "Success"
+                response_text = response.get("Response")
+                if isinstance(is_verified, bool) and is_verified:
+                    base_msg = "Verified & Fiscalized"
+                elif iris_validated:
+                    base_msg = "Fiscalized (IRIS Validated)"
+                else:
+                    base_msg = str(response_text) if response_text else "Success"
+                invoice.fbr_response_message = base_msg
                 invoice.fbr_full_response = response
                 
-                logger.info(f"FBR SUCCESS: Invoice {invoice.invoice_number} fiscalized as {returned_fbr_id}")
+                logger.info(
+                    f"FBR SUCCESS: Invoice {invoice.invoice_number} fiscalized as {returned_fbr_id} "
+                    f"(USIN={invoice.usin}, verified={is_verified}, iris={iris_validated})"
+                )
 
                 # Auto-delete captured data if chassis exists (Cleanup after successful FBR upload)
                 try:

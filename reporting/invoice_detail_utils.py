@@ -47,6 +47,10 @@ def invoice_to_detail_dict(invoice: Any) -> Dict[str, Any]:
     dt_value = getattr(invoice, "datetime", None)
     dt_text = dt_value.isoformat(sep=" ") if dt_value else ""
 
+    raw_usin = getattr(invoice, "usin", None) or ""
+    raw_fbr_invoice_number = getattr(invoice, "fbr_invoice_number", None)
+    effective_usin = raw_fbr_invoice_number or raw_usin or ""
+
     return {
         "invoice_number": getattr(invoice, "invoice_number", "") or "",
         "date": dt_text,
@@ -54,7 +58,8 @@ def invoice_to_detail_dict(invoice: Any) -> Dict[str, Any]:
         "payment_mode": getattr(invoice, "payment_mode", "") or "",
         "sync_status": getattr(invoice, "sync_status", "") or "",
         "is_fiscalized": bool(getattr(invoice, "is_fiscalized", False)),
-        "fbr_invoice_number": getattr(invoice, "fbr_invoice_number", None),
+        "fbr_invoice_number": raw_fbr_invoice_number,
+        "usin": effective_usin,
         "customer": {
             "name": getattr(customer, "name", "") if customer else "",
             "father_name": getattr(customer, "father_name", "") if customer else "",

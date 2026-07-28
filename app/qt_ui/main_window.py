@@ -2566,11 +2566,13 @@ class MainWindow(QMainWindow):
                 info_grid.addWidget(val, row, col + 1)
 
             add_detail("Date/Time:", invoice.datetime.strftime("%Y-%m-%d %H:%M") if invoice.datetime else "N/A", 0, 0)
-            add_detail("FBR ID:", invoice.fbr_invoice_number if invoice.fbr_invoice_number else "Not Synced", 0, 2)
-            add_detail("Buyer Name:", invoice.customer.name if invoice.customer else "N/A", 1, 0)
-            add_detail("CNIC:", invoice.customer.cnic if invoice.customer else "N/A", 1, 2)
-            add_detail("Phone:", invoice.customer.phone if invoice.customer else "N/A", 2, 0)
-            add_detail("NTN:", invoice.customer.ntn if invoice.customer else "N/A", 2, 2)
+            effective_usin = getattr(invoice, "fbr_invoice_number", None) or getattr(invoice, "usin", "") or ""
+            add_detail("USIN:", effective_usin if effective_usin else "Not Synced", 0, 2)
+            add_detail("FBR Invoice No:", invoice.fbr_invoice_number if invoice.fbr_invoice_number else "N/A", 1, 0)
+            add_detail("Buyer Name:", invoice.customer.name if invoice.customer else "N/A", 1, 2)
+            add_detail("CNIC:", invoice.customer.cnic if invoice.customer else "N/A", 2, 0)
+            add_detail("Phone:", invoice.customer.phone if invoice.customer else "N/A", 2, 2)
+            add_detail("NTN:", invoice.customer.ntn if invoice.customer else "N/A", 3, 0)
             
             info_layout.addLayout(info_grid)
             content_layout.addWidget(info_card)
@@ -3043,7 +3045,14 @@ class MainWindow(QMainWindow):
         # Payment Mode & Quantity
         group2_layout.addWidget(QLabel("Payment Mode"), 3, 0)
         self.invoice_payment_mode_combo = QComboBox()
-        self.invoice_payment_mode_combo.addItems(["Cash", "Credit", "Cheque", "Online"])
+        self.invoice_payment_mode_combo.addItems([
+            "Cash",          # 1
+            "Card",          # 2
+            "Gift Voucher",  # 3
+            "Loyalty Card",  # 4
+            "Mixed",         # 5
+            "Cheque",        # 6
+        ])
         group2_layout.addWidget(self.invoice_payment_mode_combo, 3, 1)
 
         group2_layout.addWidget(QLabel("Quantity"), 3, 2)
@@ -3053,6 +3062,38 @@ class MainWindow(QMainWindow):
         group2_layout.addWidget(self.invoice_quantity_spin, 3, 3)
 
         container_layout.addWidget(group2)
+
+        # --- Group 2.5: Advanced FBR Fields (Collapsible style) ---
+        group_fbr = QFrame()
+        group_fbr.setObjectName("formGroup")
+        group_fbr_layout = QGridLayout(group_fbr)
+        group_fbr_layout.setContentsMargins(20, 25, 20, 20)
+        group_fbr_layout.setHorizontalSpacing(20)
+        group_fbr_layout.setVerticalSpacing(15)
+
+        gfbr_title = QLabel("Advanced FBR Fields (Optional)")
+        gfbr_title.setObjectName("groupTitle")
+        group_fbr_layout.addWidget(gfbr_title, 0, 0, 1, 4)
+
+        # Invoice Type & Ref USIN
+        group_fbr_layout.addWidget(QLabel("Invoice Type"), 1, 0)
+        self.invoice_type_combo = QComboBox()
+        self.invoice_type_combo.addItems([
+            "1 - New (Standard)",
+            "2 - Debit Note",
+            "3 - Credit Note",
+            "11 - 3rd Schedule New",
+            "12 - 3rd Schedule Credit",
+        ])
+        self.invoice_type_combo.setCurrentIndex(0)
+        group_fbr_layout.addWidget(self.invoice_type_combo, 1, 1)
+
+        group_fbr_layout.addWidget(QLabel("Reference USIN (RefUSIN)"), 1, 2)
+        self.invoice_ref_usin_input = QLineEdit()
+        self.invoice_ref_usin_input.setPlaceholderText("Required for Debit/Credit notes. Leave blank for New invoices.")
+        group_fbr_layout.addWidget(self.invoice_ref_usin_input, 1, 3)
+
+        container_layout.addWidget(group_fbr)
 
         # --- Group 3: Pricing & Summary ---
         self.invoice_pricing_group = QFrame()
@@ -6250,6 +6291,28 @@ class MainWindow(QMainWindow):
         buyer_ntn_raw = self.invoice_buyer_ntn_input.text().strip()
         buyer_ntn = "-" if not buyer_ntn_raw or buyer_ntn_raw == "0" else buyer_ntn_raw
         payment_mode = self.invoice_payment_mode_combo.currentText().strip() or "Cash"
+        
+        # --- New FBR fields ---
+        # Parse invoice type label from combo: "1 - New (Standard)" -> "New"
+        invoice_type_full_label = self.invoice_type_combo.currentText().strip()
+        invoice_type_label = invoice_type_full_label
+        if " - " in invoice_type_full_label:
+            invoice_type_label = invoice_type_full_label.split(" - ", 1)[1]
+        # Map variants to match invoice_type_map in fbr_client.py
+        if "New" in invoice_type_label and "3rd" not in invoice_type_label:
+            invoice_type_label = "Standard"  # -> 1
+        elif invoice_type_label == "Debit Note":
+            invoice_type_label = "Debit Note"  # -> 2
+        elif invoice_type_label == "Credit Note":
+            invoice_type_label = "Credit Note" # -> 3
+        elif "3rd Schedule New" in invoice_type_label:
+            invoice_type_label = "3rd Schedule New"  # -> 11
+        elif "3rd Schedule Credit" in invoice_type_label:
+            invoice_type_label = "3rd Schedule Credit" # -> 12
+
+        ref_usin = self.invoice_ref_usin_input.text().strip() or None
+        # ----------------------
+        
         qty = float(self.invoice_quantity_spin.value())
         amount_excl = float(self.invoice_amount_spin.value())
         tax = float(self.invoice_tax_spin.value())
@@ -6281,6 +6344,8 @@ class MainWindow(QMainWindow):
             engine_number=engine,
             model_name=model_name,
             color=color,
+            invoice_type=invoice_type_label,
+            ref_usin=ref_usin,
         )
         
         inv_data = InvoiceCreate(
@@ -6293,6 +6358,7 @@ class MainWindow(QMainWindow):
             buyer_ntn=buyer_ntn,
             buyer_type=CustomerType.DEALER if self._is_dealer_selected else CustomerType.INDIVIDUAL,
             payment_mode=payment_mode,
+            ref_usin=ref_usin,
             items=[item],
         )
 
@@ -6388,6 +6454,11 @@ class MainWindow(QMainWindow):
         self.invoice_model_combo.setCurrentIndex(0)
         self.invoice_color_combo.clear()
         self.invoice_payment_mode_combo.setCurrentIndex(0)
+        # Reset Advanced FBR Fields
+        if hasattr(self, "invoice_type_combo"):
+            self.invoice_type_combo.setCurrentIndex(0)
+        if hasattr(self, "invoice_ref_usin_input"):
+            self.invoice_ref_usin_input.clear()
         self.invoice_chassis_input.clear()
         self.invoice_engine_input.clear()
         self.invoice_quantity_spin.setValue(1)
@@ -6412,6 +6483,11 @@ class MainWindow(QMainWindow):
         self.invoice_model_combo.setCurrentIndex(0)
         self.invoice_color_combo.clear()
         self.invoice_payment_mode_combo.setCurrentIndex(0)
+        # Reset Advanced FBR Fields
+        if hasattr(self, "invoice_type_combo"):
+            self.invoice_type_combo.setCurrentIndex(0)
+        if hasattr(self, "invoice_ref_usin_input"):
+            self.invoice_ref_usin_input.clear()
         self.invoice_chassis_input.clear()
         self.invoice_engine_input.clear()
         self.invoice_quantity_spin.setValue(1)

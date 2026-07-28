@@ -2,6 +2,16 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime as dt
 
+try:
+    from zoneinfo import ZoneInfo
+    _PKT = ZoneInfo("Asia/Karachi")
+except Exception:
+    import datetime as _dt_mod
+    _PKT = _dt_mod.timezone(_dt_mod.timedelta(hours=5))
+
+def _pk_now():
+    return dt.now(_PKT).replace(tzinfo=None)
+
 
 class MotorcycleResponse(BaseModel):
     id: int
@@ -42,10 +52,12 @@ class InvoiceItemCreate(BaseModel):
     engine_number: Optional[str] = Field(default=None)
     model_name: Optional[str] = Field(default=None)
     color: Optional[str] = Field(default=None)
+    invoice_type: Optional[str] = Field(default=None)
+    ref_usin: Optional[str] = Field(default=None)
 
 class InvoiceCreate(BaseModel):
     invoice_number: str
-    datetime: dt = Field(default_factory=dt.utcnow)
+    datetime: dt = Field(default_factory=_pk_now)
     buyer_name: Optional[str] = Field(default=None)
     buyer_father_name: Optional[str] = Field(default=None)
     buyer_ntn: Optional[str] = Field(default=None)
@@ -55,6 +67,7 @@ class InvoiceCreate(BaseModel):
     buyer_type: Optional[str] = Field(default="INDIVIDUAL") # Added for dealer support
     payment_mode: str = "Cash"
     discount: float = 0.0
+    ref_usin: Optional[str] = Field(default=None)
     items: List[InvoiceItemCreate]
 
 class InvoiceResponse(InvoiceCreate):

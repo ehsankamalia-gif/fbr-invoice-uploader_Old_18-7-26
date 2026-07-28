@@ -101,6 +101,7 @@ class SettingsService:
             "pct_code": os.getenv(f"{prefix}_PCT_CODE", "8711.2010").strip(),
             "invoice_type": os.getenv(f"{prefix}_INVOICE_TYPE", "Standard").strip(),
             "discount": os.getenv(f"{prefix}_DISCOUNT", "0.0").strip(),
+            "pos_fee": os.getenv(f"{prefix}_POS_FEE", "1.0").strip(),
             "item_code": os.getenv(f"{prefix}_ITEM_CODE", "").strip(),
             "item_name": os.getenv(f"{prefix}_ITEM_NAME", "").strip(),
             "business_name": os.getenv(f"{prefix}_BUSINESS_NAME", "").strip() or "Ehsan Trader",
@@ -125,6 +126,7 @@ class SettingsService:
         pct_code: str,
         invoice_type: str,
         discount: str,
+        pos_fee: str = "1.0",
         item_code: str,
         item_name: str,
         business_name: str,
@@ -142,6 +144,7 @@ class SettingsService:
             f"{prefix}_PCT_CODE": pct_code,
             f"{prefix}_INVOICE_TYPE": invoice_type,
             f"{prefix}_DISCOUNT": str(discount),
+            f"{prefix}_POS_FEE": str(pos_fee),
             f"{prefix}_ITEM_CODE": item_code,
             f"{prefix}_ITEM_NAME": item_name,
             f"{prefix}_BUSINESS_NAME": business_name,
@@ -166,6 +169,7 @@ class SettingsService:
                 "pct_code": config.pct_code,
                 "invoice_type": config.invoice_type,
                 "discount": str(config.discount),
+                "pos_fee": str(getattr(config, "pos_fee", 1.0) or 1.0),
                 "item_code": config.item_code,
                 "item_name": config.item_name,
                 "business_name": config.business_name or "Ehsan Trader",
@@ -198,6 +202,7 @@ class SettingsService:
                     tax_rate=18.0,
                     invoice_type="Standard",
                     discount=0.0,
+                    pos_fee=1.0,
                     pct_code="8711.2010"
                 )
                 db.add(sandbox)
@@ -216,6 +221,7 @@ class SettingsService:
                     tax_rate=18.0,
                     invoice_type="Standard",
                     discount=0.0,
+                    pos_fee=1.0,
                     pct_code="8711.2010"
                 )
                 db.add(prod)
@@ -272,13 +278,18 @@ class SettingsService:
         load_dotenv(dotenv_path=self.env_path, override=True)
 
     def save_environment(self, env: str, base_url: str, pos_id: str, usin: str, token: str, tax_rate: str, pct_code: str, 
-                         invoice_type: str, discount: str, item_code: str, item_name: str, secret_key: str = "", business_name: str = "Ehsan Trader"):
+                         invoice_type: str, discount: str, item_code: str, item_name: str, secret_key: str = "", business_name: str = "Ehsan Trader",
+                         pos_fee: str = "1.0"):
         env = env.upper()
         if env not in ("SANDBOX", "PRODUCTION"):
             raise ValueError("Environment must be SANDBOX or PRODUCTION")
         
         float(tax_rate)
         float(discount)
+        try:
+            float(pos_fee)
+        except (ValueError, TypeError):
+            pos_fee = "1.0"
 
         before_db = self._get_environment_from_db(env) or {}
         db = SessionLocal()
@@ -298,6 +309,10 @@ class SettingsService:
             config.pct_code = pct_code
             config.invoice_type = invoice_type
             config.discount = float(discount)
+            try:
+                config.pos_fee = float(pos_fee)
+            except (ValueError, TypeError):
+                config.pos_fee = 1.0
             config.item_code = item_code
             config.item_name = item_name
             config.business_name = business_name
@@ -321,6 +336,7 @@ class SettingsService:
             pct_code=pct_code,
             invoice_type=invoice_type,
             discount=discount,
+            pos_fee=pos_fee,
             item_code=item_code,
             item_name=item_name,
             business_name=business_name,
@@ -471,6 +487,7 @@ class SettingsService:
                 "pct_code": config.pct_code,
                 "invoice_type": config.invoice_type,
                 "discount": str(config.discount),
+                "pos_fee": str(getattr(config, "pos_fee", 1.0) or 1.0),
                 "item_code": config.item_code,
                 "item_name": config.item_name,
                 "business_name": config.business_name or "Ehsan Trader",

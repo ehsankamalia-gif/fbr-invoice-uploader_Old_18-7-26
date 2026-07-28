@@ -74,10 +74,10 @@ def test_transform_to_fbr_format_with_further_tax():
     assert fbr_data["Items"][0]["AdditionalTaxCharged"] == 3.0
     assert fbr_data["Items"][0]["OtherTax"] == 3.0
     
-    # Check PoSFee
-    assert fbr_data["PoSFee"] == 1.0
-    assert fbr_data["TotalPoSFee"] == 1.0
-    assert fbr_data["TotalBillAmount"] == 121.0 # 120 + 1.0 PoSFee
+    # PoS Fee is NOT sent to FBR
+    assert "PoSFee" not in fbr_data
+    assert "TotalPoSFee" not in fbr_data
+    assert fbr_data["TotalBillAmount"] == 120.0 # 100 + 17 + 3
 
 def test_transform_to_fbr_format_with_business_rules():
     """Verify that settings from the business rules image are applied correctly."""
