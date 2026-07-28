@@ -1,18 +1,36 @@
 
 import os
-import pandas as pd
+import re
 from sqlalchemy.orm import Session
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, date
 from app.core.logger import logger
 from app.db.models import (
     ExciseRecord,
     ExciseRecordStatus,
     pk_now,
 )
+from app.services.excel_processing_service import excel_processing_service
 
 
 class ExciseService:
+    def _normalize_column_name(self, column_name: Any) -> str:
+        """Convert Excel headers into stable lookup keys."""
+        normalized = re.sub(r"[^A-Z0-9]+", "_", str(column_name).strip().upper())
+        return normalized.strip("_")
+
+    def _is_empty_value(self, value: Any) -> bool:
+        if value is None:
+            return True
+        if isinstance(value, str):
+            return value.strip() == ""
+        return False
+
+    def _string_or_none(self, value: Any) -> Optional[str]:
+        if self._is_empty_value(value):
+            return None
+        return str(value).strip()
+
     def create_excise_record(
         self,
         db: Session,
@@ -146,21 +164,35 @@ class ExciseService:
 
     def _parse_date(self, date_value) -> Optional[datetime]:
         """Helper to parse Excel date values"""
-        if pd.isna(date_value):
+        if self._is_empty_value(date_value):
             return None
         if isinstance(date_value, datetime):
             return date_value
+        if isinstance(date_value, date):
+            return datetime.combine(date_value, datetime.min.time())
+        if hasattr(date_value, "to_pydatetime"):
+            try:
+                return date_value.to_pydatetime()
+            except Exception:
+                return None
         try:
-            return pd.to_datetime(date_value).to_pydatetime()
+            return datetime.fromisoformat(str(date_value).strip())
         except Exception:
-            return None
+            pass
+
+        for fmt in ("%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(str(date_value).strip(), fmt)
+            except ValueError:
+                continue
+        return None
 
     def _parse_float(self, value) -> Optional[float]:
         """Helper to parse float values"""
-        if pd.isna(value):
+        if self._is_empty_value(value):
             return None
         try:
-            return float(value)
+            return float(str(value).replace(",", "").strip())
         except (ValueError, TypeError):
             return None
 
@@ -172,15 +204,11 @@ class ExciseService:
         logger.info(f"Starting Excel import from: {file_path}")
         
         try:
-            # Read Excel file
-            df = pd.read_excel(file_path)
-            
-            # Normalize column names (lowercase, strip spaces)
-            df.columns = [str(col).strip().upper().replace(" ", "_") for col in df.columns]
+            rows, _headers = excel_processing_service.read_excel(file_path)
             
             # Mapping of Excel columns (normalized) to model fields
             column_mapping = {
-                "S#": "record_number",
+                "S": "record_number",
                 "DATE": "date",
                 "NAME": "customer_name",
                 "FATHER": "customer_father_name",
@@ -191,23 +219,24 @@ class ExciseService:
                 "ADDRESS": "customer_address",
                 "RECEIVE": "receive",
                 "REGISTRATION_NUMBER": "registration_number",
-                "MAKER/MAKE": "maker_make",
                 "MAKER_MAKE": "maker_make",
                 "CHASSIS_NUMBER": "chassis_number",
-                "ENGINE#": "engine_number",
-                "ENGINE_#": "engine_number",
+                "ENGINE": "engine_number",
                 "AMOUNT": "amount",
                 "INCOME": "income",
                 "PROFIT": "profit",
                 "INCOME2": "income2",
                 "EXPENDENTUR": "expenditure",
+                "EXPENDITURE": "expenditure",
                 "FILE_CARD": "file_card",
                 "TCS_RECEIVING_DATE": "tcs_receiving_date",
                 "EXCISE_SUBMITTEING_DATE": "excise_submitting_date",
+                "EXCISE_SUBMITTING_DATE": "excise_submitting_date",
                 "DEALER_ADDRESS": "dealer_address",
                 "REMARKS": "remarks",
                 "ISSUE_AUTHORITY": "issue_authority",
                 "RECIEVER": "receiver",
+                "RECEIVER": "receiver",
                 "MODIFIED_TIME": "modified_time",
                 "MODIFIED_PC": "modified_pc",
             }
@@ -216,19 +245,24 @@ class ExciseService:
             skipped_count = 0
             errors = []
             
-            for index, row in df.iterrows():
+            for index, row in enumerate(rows):
                 try:
+                    normalized_row = {
+                        self._normalize_column_name(column_name): value
+                        for column_name, value in row.items()
+                    }
+
                     # Prepare data
                     record_data = {}
                     for excel_col, model_field in column_mapping.items():
-                        if excel_col in df.columns:
-                            record_data[model_field] = row[excel_col]
+                        if excel_col in normalized_row:
+                            record_data[model_field] = normalized_row[excel_col]
                     
                     # Validate required fields
-                    record_number = record_data.get("record_number") or f"EXC-{datetime.now().strftime('%Y%m%d%H%M%S')}-{index+1}"
-                    chassis_number = record_data.get("chassis_number")
-                    engine_number = record_data.get("engine_number")
-                    customer_name = record_data.get("customer_name")
+                    record_number = self._string_or_none(record_data.get("record_number")) or f"EXC-{datetime.now().strftime('%Y%m%d%H%M%S')}-{index+1}"
+                    chassis_number = self._string_or_none(record_data.get("chassis_number"))
+                    engine_number = self._string_or_none(record_data.get("engine_number"))
+                    customer_name = self._string_or_none(record_data.get("customer_name"))
                     
                     if not chassis_number or not engine_number or not customer_name:
                         skipped_count += 1
@@ -245,7 +279,6 @@ class ExciseService:
                     # Parse date fields
                     tcs_receiving_date = self._parse_date(record_data.get("tcs_receiving_date"))
                     excise_submitting_date = self._parse_date(record_data.get("excise_submitting_date"))
-                    modified_time = self._parse_date(record_data.get("modified_time"))
                     
                     # Parse numeric fields
                     amount = self._parse_float(record_data.get("amount"))
