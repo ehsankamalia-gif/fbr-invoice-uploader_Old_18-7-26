@@ -304,6 +304,24 @@ def _load_or_create_default_template(db: Session) -> ReportTemplate:
     return tmpl
 
 
+def _ensure_template_has_widgets(db: Session, tmpl: Optional[ReportTemplate]) -> ReportTemplate:
+    """Return the template with a guaranteed non-empty widget list.
+
+    If the template is missing or its definition has no widgets (e.g. it was
+    created before the New-template fix and never saved via Builder), fall
+    back to DEFAULT_TEMPLATE widgets in-memory so the dashboard / exports
+    render usable content instead of an empty page.
+    """
+    if tmpl is None:
+        return _load_or_create_default_template(db)
+    widgets = ((tmpl.definition or {}).get("widgets") or [])
+    if len(widgets) == 0:
+        if not tmpl.definition:
+            tmpl.definition = {}
+        tmpl.definition["widgets"] = list(DEFAULT_TEMPLATE["widgets"])
+    return tmpl
+
+
 def _render_dashboard_html() -> str:
     return """
     <!doctype html>
@@ -780,7 +798,12 @@ def _render_dashboard_html() -> str:
             sel.appendChild(opt);
           });
           const q = qs();
-          if (q.template_id) sel.value = q.template_id;
+          if (q.template_id && [...sel.options].some(o => o.value == q.template_id)) {
+            sel.value = q.template_id;
+          } else {
+            const defaultOpt = [...sel.options].find(o => o.textContent === 'Default Dashboard') || sel.options[0];
+            if (defaultOpt) sel.value = defaultOpt.value;
+          }
           state.templateId = sel.value;
         }
         function renderKpi(title, value) {
@@ -840,6 +863,19 @@ def _render_dashboard_html() -> str:
           const data = await res.json();
           const w = document.getElementById('widgets');
           w.innerHTML = '';
+          if (!data.widgets || data.widgets.length === 0) {
+            w.innerHTML = `
+              <div class="col-12">
+                <div class="card border-warning">
+                  <div class="card-header fw-bold bg-warning-subtle">This template has no widgets yet.</div>
+                  <div class="card-body">
+                    <p class="mb-2">Go to <a class="fw-bold" href="/builder">Template Builder</a>, drag widgets from <b>Available Widgets</b> into the <b>Layout</b> area, and click <b>Save</b>.</p>
+                    <p class="mb-0 text-muted small">Or switch to the built-in <b>Default Dashboard</b> template from the dropdown above.</p>
+                  </div>
+                </div>
+              </div>`;
+            return;
+          }
           data.widgets.forEach(widget => {
             if (widget.type === 'kpi') w.appendChild(renderKpi(widget.title, widget.value));
             if (widget.type === 'chart') w.appendChild(renderChart(widget.title, widget.value));
@@ -1093,7 +1129,24 @@ def _render_builder_html() -> str:
           await loadTemplates();
         }
         async function newTemplate() {
-          const payload = { name: `Template ${Date.now()}`, description: '', definition: { version: 1, widgets: [] } };
+          const existing = [...document.querySelectorAll('#templateSelect option')].map(o => o.textContent);
+          let n = 1;
+          while (existing.includes(`New Template ${n}`)) n++;
+          const payload = {
+            name: `New Template ${n}`,
+            description: '',
+            definition: {
+              version: 1,
+              widgets: [
+                { type: "kpi", metric: "total_invoices", title: "Total Invoices" },
+                { type: "kpi", metric: "total_amount", title: "Total Amount" },
+                { type: "kpi", metric: "avg_invoice_amount", title: "Avg Invoice" },
+                { type: "chart", metric: "daily_sales", title: "Daily Sales" },
+                { type: "chart", metric: "status_breakdown", title: "Status Breakdown" },
+                { type: "table", metric: "invoices", title: "Invoices" },
+              ]
+            }
+          };
           const res = await fetch('/api/templates', { method: 'POST', headers: headers(), body: JSON.stringify(payload) });
           if (!res.ok) return;
           await loadTemplates();
@@ -1266,7 +1319,7 @@ def _render_lookup_html() -> str:
               <div class="card-body">
                 <div class="d-flex flex-wrap align-items-center gap-2">
                   <div class="fw-bold">Customer Lookup</div>
-                  <span class="text-muted small">Search customers by phone, CNIC, or name.</span>
+                  <span class="text-muted small">Search customers by phone, CNIC, name, chassis number, or engine number.</span>
                 </div>
               </div>
             </div>
@@ -1315,10 +1368,41 @@ def _render_lookup_html() -> str:
             </div>
           </div>
 
+          <div class="col-12 col-lg-6">
+            <div id="chassisCard" class="card filter-card">
+              <div class="card-header fw-bold">Chassis Number Filter</div>
+              <div class="card-body">
+                <label class="form-label">Chassis Number (min 3 chars, case insensitive)</label>
+                <div class="input-group">
+                  <input id="chassisInput" class="form-control mono" placeholder="e.g. DA232358" autocomplete="off"/>
+                  <button id="chassisSearchBtn" class="btn btn-primary">Search</button>
+                </div>
+                <div id="chassisError" class="invalid-feedback d-block"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-12 col-lg-6">
+            <div id="engineCard" class="card filter-card">
+              <div class="card-header fw-bold">Engine Number Filter</div>
+              <div class="card-body">
+                <label class="form-label">Engine Number (min 3 chars, case insensitive)</label>
+                <div class="input-group">
+                  <input id="engineInput" class="form-control mono" placeholder="e.g. EN1234567" autocomplete="off"/>
+                  <button id="engineSearchBtn" class="btn btn-primary">Search</button>
+                </div>
+                <div id="engineError" class="invalid-feedback d-block"></div>
+              </div>
+            </div>
+          </div>
+
           <div class="col-12">
             <div class="card">
               <div class="card-header d-flex flex-wrap align-items-center justify-content-between gap-2">
-                <div class="fw-bold">Search Results</div>
+                <div class="d-flex align-items-center gap-2">
+                  <div class="fw-bold">Search Results</div>
+                  <button id="printReportBtn" type="button" class="btn btn-sm btn-outline-primary">🖨️ Print Report</button>
+                </div>
                 <div class="d-flex align-items-center gap-2">
                   <span class="text-muted small">Filtered results</span>
                   <span id="resultsCount" class="badge text-bg-secondary">0</span>
@@ -1335,11 +1419,12 @@ def _render_lookup_html() -> str:
                         <th role="button" class="text-nowrap mono" data-sort="invoice_number">Invoice Number</th>
                         <th role="button" class="text-nowrap" data-sort="bike_model">Bike Model</th>
                         <th role="button" class="text-nowrap mono" data-sort="chassis_number">Chassis Number</th>
+                        <th role="button" class="text-nowrap mono" data-sort="engine_number">Engine Number</th>
                         <th role="button" class="text-nowrap" data-sort="date">Date</th>
                       </tr>
                     </thead>
                     <tbody id="resultsBody">
-                      <tr><td colspan="7" class="text-muted p-3">No results found.</td></tr>
+                      <tr><td colspan="8" class="text-muted p-3">No results found.</td></tr>
                     </tbody>
                   </table>
                 </div>
@@ -1353,6 +1438,7 @@ def _render_lookup_html() -> str:
                     <button id="retryUploadBtn" type="button" class="btn btn-outline-primary" disabled>Retry Upload</button>
                     <button id="copyInvoiceBtn" type="button" class="btn btn-outline-secondary" disabled>Copy Invoice #</button>
                     <button id="copyChassisBtn" type="button" class="btn btn-outline-secondary" disabled>Copy Chassis</button>
+                    <button id="copyEngineBtn" type="button" class="btn btn-outline-secondary" disabled>Copy Engine</button>
                   </div>
                 </div>
                 <nav>
@@ -1442,26 +1528,241 @@ def _render_lookup_html() -> str:
         }
 
         function printInvoice() {
-          const body = document.getElementById('invoiceDetailBody').innerHTML;
-          const title = document.getElementById('invoiceDetailTitle').textContent;
-          const printWindow = window.open('', '_blank');
-          printWindow.document.write('<html><head><title>' + title + '</title>');
-          printWindow.document.write('<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">');
-          printWindow.document.write('<style>.mono { font-family: monospace; } hr { margin: 1rem 0; } .badge { border: 1px solid #ccc; color: black !important; background: none !important; }</style>');
-          printWindow.document.write('</head><body>');
-          printWindow.document.write('<div class="container py-4">');
-          printWindow.document.write('<h2 class="mb-4">' + title + '</h2>');
-          printWindow.document.write(body);
-          printWindow.document.write('</div>');
-          printWindow.document.write('</body></html>');
-          printWindow.document.close();
-          printWindow.onload = function() {
-            setTimeout(() => {
-              printWindow.focus();
-              printWindow.print();
-              printWindow.close();
-            }, 250);
-          };
+          const bodyHtml = document.getElementById('invoiceDetailBody').innerHTML;
+          const title = (document.getElementById('invoiceDetailTitle').textContent || 'Invoice').trim();
+          const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"/>
+            <title>${escapeHtml(title)}</title>
+            <style>
+              * { box-sizing: border-box; }
+              body { font-family: "Segoe UI", Arial, Helvetica, sans-serif; color: #111; margin: 0; padding: 16mm; font-size: 11pt; }
+              h2 { margin: 0 0 12px 0; font-size: 18pt; }
+              .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+              hr { margin: 1rem 0; }
+              .badge { border: 1px solid #ccc; color: #111 !important; background: none !important; padding: 2px 6px; border-radius: 6px; }
+              .screen-toolbar {
+                position: sticky; top: 0; z-index: 10; display: flex; justify-content: space-between; align-items: center;
+                padding: 10px 16px; margin: -16mm -16mm 12mm -16mm; background: #0f172a; color: white;
+                border-bottom: 1px solid #ccc;
+              }
+              .screen-toolbar .title-text { font-weight: 600; }
+              .screen-toolbar button {
+                border: 0; border-radius: 6px; padding: 7px 14px; font-weight: 600; cursor: pointer; margin-left: 8px;
+              }
+              .btn-print { background: #2563eb; color: white; }
+              .btn-close { background: #cbd5e1; color: #0f172a; }
+              .hint { margin-top: 6px; font-size: 10pt; color: #fff; }
+              @media print {
+                body { padding: 8mm; }
+                .screen-toolbar { display: none !important; }
+              }
+            </style></head><body>
+            <div class="screen-toolbar">
+              <div>
+                <div class="title-text">${escapeHtml(title)}</div>
+                <div class="hint">If print dialog did not open automatically, click Print below (or press Ctrl+P).</div>
+              </div>
+              <div>
+                <button type="button" class="btn-close" onclick="window.close()">Close</button>
+                <button type="button" class="btn-print" onclick="window.focus(); try { window.print(); } catch(e){}">🖨️ Print / Save as PDF</button>
+              </div>
+            </div>
+            <div class="container py-4">
+              <h2 class="mb-4">${escapeHtml(title)}</h2>
+              ${bodyHtml}
+            </div>
+            <script>
+              (function(){
+                function tryPrint(){ try { window.focus(); window.print(); } catch(e){} }
+                if (document.readyState === 'complete') { setTimeout(tryPrint, 300); }
+                else { window.addEventListener('load', function(){ setTimeout(tryPrint, 300); }, { once: true }); }
+              })();
+            <\/script>
+          </body></html>`;
+
+          try {
+            const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const pw = window.open(url, '_blank', 'noopener');
+            if (!pw) {
+              URL.revokeObjectURL(url);
+              alert('Please allow pop-ups for this page to open the print window.');
+              return;
+            }
+            pw.addEventListener('pagehide', function() { try { URL.revokeObjectURL(url); } catch (e) {} });
+            setTimeout(function() { try { URL.revokeObjectURL(url); } catch (e) {} }, 60000);
+          } catch (e) {
+            alert('Failed to open print window: ' + e);
+          }
+        }
+
+        async function printReport() {
+          const filters = getFilters();
+          const sortBy = state.sortBy || 'date';
+          const sortDir = state.sortDir || 'desc';
+          const hasAnyFilter = !!(filters.phone || filters.cnic || filters.name || filters.chassis || filters.engine);
+          if (!hasAnyFilter) {
+            const ok = window.confirm(
+              'No filters are currently set. This will print ALL invoice records in the database (up to 10,000 rows).\\n\\nDo you want to continue?'
+            );
+            if (!ok) return;
+          }
+          const btn = document.getElementById('printReportBtn');
+          const origText = btn ? btn.textContent : '';
+          try {
+            if (btn) { btn.disabled = true; btn.textContent = 'Preparing…'; }
+            const base = '/api/lookup/search?page=1&page_size=10000';
+            const url =
+              `${base}&phone=${encodeURIComponent(filters.phone)}&cnic=${encodeURIComponent(filters.cnic)}` +
+              `&name=${encodeURIComponent(filters.name)}&chassis=${encodeURIComponent(filters.chassis)}&engine=${encodeURIComponent(filters.engine)}` +
+              `&sort_by=${encodeURIComponent(sortBy)}&sort_dir=${encodeURIComponent(sortDir)}`;
+            const res = await fetch(url, { headers: headers() });
+            let data = null;
+            try { data = await res.json(); } catch (e) { data = null; }
+            if (!res.ok) {
+              let detail = '';
+              if (data && data.detail) {
+                if (Array.isArray(data.detail)) {
+                  detail = data.detail.map(d => d && d.msg ? d.msg : String(d)).join('; ');
+                } else {
+                  detail = String(data.detail);
+                }
+              }
+              const statusMsg = detail ? ` (${res.status}: ${detail})` : ` (HTTP ${res.status})`;
+              alert('Unable to fetch report for printing.' + statusMsg);
+              return;
+            }
+            const payload = data || {};
+            const count = payload.count || 0;
+            const items = Array.isArray(payload.items) ? payload.items : [];
+
+            const filterRows = [];
+            if (filters.phone) filterRows.push(`<tr><td class="pe-3 fw-semibold">Phone</td><td>${escapeHtml(filters.phone)}</td></tr>`);
+            if (filters.cnic) filterRows.push(`<tr><td class="pe-3 fw-semibold">CNIC</td><td>${escapeHtml(filters.cnic)}</td></tr>`);
+            if (filters.name) filterRows.push(`<tr><td class="pe-3 fw-semibold">Name</td><td>${escapeHtml(filters.name)}</td></tr>`);
+            if (filters.chassis) filterRows.push(`<tr><td class="pe-3 fw-semibold">Chassis</td><td>${escapeHtml(filters.chassis)}</td></tr>`);
+            if (filters.engine) filterRows.push(`<tr><td class="pe-3 fw-semibold">Engine</td><td>${escapeHtml(filters.engine)}</td></tr>`);
+            const filtersHtml = filterRows.length
+              ? `<table class="table table-sm table-borderless mb-3"><tbody>${filterRows.join('')}</tbody></table>`
+              : `<div class="text-muted mb-3 small">No filters applied — showing all invoices (up to 10,000 rows).</div>`;
+
+            const cols = [
+              { key: 'customer_name', label: 'Customer Name' },
+              { key: 'father_name',   label: 'Father\\'s Name' },
+              { key: 'mobile_number', label: 'Mobile Number', mono: true },
+              { key: 'invoice_number', label: 'Invoice Number', mono: true },
+              { key: 'bike_model',    label: 'Bike Model' },
+              { key: 'chassis_number', label: 'Chassis Number', mono: true },
+              { key: 'engine_number', label: 'Engine Number', mono: true },
+              { key: 'date',          label: 'Date' },
+            ];
+            const headerHtml = `<tr>${cols.map(c => `<th class="text-start border-bottom border-2 border-black">${c.label}</th>`).join('')}</tr>`;
+            let bodyHtml = '';
+            if (!items.length) {
+              bodyHtml = `<tr><td colspan="${cols.length}" class="text-muted py-4 text-center">No results found.</td></tr>`;
+            } else {
+              bodyHtml = items.map(r => {
+                return '<tr class="align-top">' + cols.map(c => {
+                  const v = (r && typeof r === 'object') ? (r[c.key] ?? '') : '';
+                  const cls = c.mono ? ' class="mono"' : '';
+                  return `<td${cls}>${escapeHtml(String(v))}</td>`;
+                }).join('') + '</tr>';
+              }).join('');
+            }
+            const totalAmount = items.reduce((s, r) => s + (Number(r.sale_value) || 0), 0);
+            const nowStr = new Date().toLocaleString();
+            const sortLabel = cols.find(c => c.key === sortBy) ? cols.find(c => c.key === sortBy).label : 'Date';
+
+            const printTitle = 'Customer Lookup Report';
+            const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"/>
+              <title>${printTitle}</title>
+              <style>
+                * { box-sizing: border-box; }
+                body { font-family: "Segoe UI", Arial, Helvetica, sans-serif; color: #111; margin: 0; padding: 16mm; font-size: 11pt; }
+                h1 { margin: 0 0 4mm 0; font-size: 20pt; }
+                .meta { font-size: 9pt; color: #444; margin-bottom: 6mm; line-height: 1.5; }
+                .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+                table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+                th, td { padding: 2.2mm 2.5mm; border-bottom: 1px solid #d0d0d0; vertical-align: top; word-wrap: break-word; text-align: left; }
+                thead th { background: #0f172a; color: white; font-weight: 600; border-bottom: 1.5px solid #000; }
+                tbody tr:nth-child(even) td { background: #f7f7f7; }
+                .sum-table { margin-top: 5mm; width: auto; }
+                .sum-table td { padding: 1.5mm 3mm; border: 0; }
+                .sum-table td.k { font-weight: 600; text-align: right; }
+                .card { border: 1px solid #dedede; background: #f7f7f7; padding: 10px 14px; border-radius: 8px; margin-bottom: 10px; }
+                .fw-semibold { font-weight: 600; }
+                .mb-2 { margin-bottom: 8px; }
+                .screen-toolbar {
+                  position: sticky; top: 0; z-index: 10; display: flex; justify-content: space-between; align-items: center;
+                  padding: 10px 16px; margin: -16mm -16mm 12mm -16mm; background: #0f172a; color: white;
+                  border-bottom: 1px solid #ccc;
+                }
+                .screen-toolbar .title-text { font-weight: 600; }
+                .screen-toolbar button {
+                  border: 0; border-radius: 6px; padding: 7px 14px; font-weight: 600; cursor: pointer; margin-left: 8px;
+                }
+                .btn-print { background: #2563eb; color: white; }
+                .btn-close { background: #cbd5e1; color: #0f172a; }
+                .hint { margin-top: 6px; font-size: 10pt; color: #fff; }
+                @media print {
+                  body { padding: 8mm; }
+                  thead { display: table-header-group; }
+                  tr    { page-break-inside: avoid; }
+                  .screen-toolbar { display: none !important; }
+                }
+              </style></head><body>
+              <div class="screen-toolbar">
+                <div>
+                  <div class="title-text">${printTitle}</div>
+                  <div class="hint">If print dialog did not open automatically, click Print below (or press Ctrl+P).</div>
+                </div>
+                <div>
+                  <button type="button" class="btn-close" onclick="window.close()">Close</button>
+                  <button type="button" class="btn-print" onclick="window.focus(); try { window.print(); } catch(e){}">🖨️ Print / Save as PDF</button>
+                </div>
+              </div>
+              <h1>${printTitle}</h1>
+              <div class="meta">
+                <div>Generated: <span class="mono">${escapeHtml(nowStr)}</span></div>
+                <div>Total records: <b>${count}</b> &nbsp;|&nbsp; Sorted by: <b>${escapeHtml(sortLabel)} (${escapeHtml(sortDir.toUpperCase())})</b></div>
+              </div>
+              <div class="card">
+                <div class="fw-semibold mb-2">Applied Filters</div>
+                ${filtersHtml}
+              </div>
+              <table>
+                <thead>${headerHtml}</thead>
+                <tbody>${bodyHtml}</tbody>
+              </table>
+              <table class="sum-table">
+                <tr><td class="k">Total rows printed:</td><td>${count}</td></tr>
+                <tr><td class="k">Aggregate sale value:</td><td class="mono">Rs ${totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr>
+              </table>
+              <script>
+                (function(){
+                  function tryPrint(){ try { window.focus(); window.print(); } catch(e){} }
+                  if (document.readyState === 'complete') { setTimeout(tryPrint, 450); }
+                  else { window.addEventListener('load', function(){ setTimeout(tryPrint, 450); }, { once: true }); }
+                })();
+              <\/script>
+            </body></html>`;
+
+            try {
+              const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+              const url = URL.createObjectURL(blob);
+              const pw = window.open(url, '_blank', 'noopener');
+              if (!pw) {
+                URL.revokeObjectURL(url);
+                alert('Please allow pop-ups for this page to open the print window.');
+                return;
+              }
+              pw.addEventListener('pagehide', function() { try { URL.revokeObjectURL(url); } catch (e) {} });
+              setTimeout(function() { try { URL.revokeObjectURL(url); } catch (e) {} }, 60000);
+            } catch (e) {
+              alert(`Print failed: ${e}`);
+            }
+          } finally {
+            if (btn) { btn.disabled = false; btn.textContent = origText || '🖨️ Print Report'; }
+          }
         }
 
         function updateActionButtons() {
@@ -1470,21 +1771,25 @@ def _render_lookup_html() -> str:
           const retryBtn = document.getElementById('retryUploadBtn');
           const copyInvBtn = document.getElementById('copyInvoiceBtn');
           const copyChBtn = document.getElementById('copyChassisBtn');
+          const copyEnBtn = document.getElementById('copyEngineBtn');
 
           if (!row) {
             selectedMeta.textContent = 'No row selected';
             retryBtn.disabled = true;
             copyInvBtn.disabled = true;
             copyChBtn.disabled = true;
+            if (copyEnBtn) copyEnBtn.disabled = true;
             return;
           }
 
           const inv = row.invoice_number || '';
           const ch = row.chassis_number || '';
+          const en = row.engine_number || '';
           const st = String(row.sync_status || '').toUpperCase();
           selectedMeta.textContent = inv ? `Selected: ${inv}` : 'Selected row';
           copyInvBtn.disabled = !inv;
           copyChBtn.disabled = !ch;
+          if (copyEnBtn) copyEnBtn.disabled = !en;
           retryBtn.disabled = !inv || !['PENDING', 'FAILED'].includes(st);
         }
 
@@ -1673,6 +1978,14 @@ def _render_lookup_html() -> str:
           return /^\\d{5}-\\d{7}-\\d$/.test(cnic);
         }
 
+        function normalizeChassis(raw) {
+          return String(raw || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 50);
+        }
+
+        function normalizeEngine(raw) {
+          return String(raw || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 50);
+        }
+
         let nameTimer = null;
         async function autocompleteName() {
           const q = (document.getElementById('nameInput').value || '').trim();
@@ -1693,13 +2006,17 @@ def _render_lookup_html() -> str:
           const phone = normalizePhone(document.getElementById('phoneInput').value || '');
           const cnic = normalizeCnic(document.getElementById('cnicInput').value || '');
           const name = (document.getElementById('nameInput').value || '').trim();
-          return { phone, cnic, name };
+          const chassis = normalizeChassis(document.getElementById('chassisInput') ? document.getElementById('chassisInput').value : '');
+          const engine = normalizeEngine(document.getElementById('engineInput') ? document.getElementById('engineInput').value : '');
+          return { phone, cnic, name, chassis, engine };
         }
 
         function validateFilters(filters) {
           setError('phoneError', '');
           setError('cnicError', '');
           setError('nameError', '');
+          setError('chassisError', '');
+          setError('engineError', '');
 
           let ok = true;
           if (filters.phone && !validPhone(filters.phone)) {
@@ -1714,12 +2031,23 @@ def _render_lookup_html() -> str:
             setError('nameError', 'Please type at least 2 characters.');
             ok = false;
           }
+          if (filters.chassis && filters.chassis.length < 3) {
+            setError('chassisError', 'Chassis Number must be at least 3 characters.');
+            ok = false;
+          }
+          if (filters.engine && filters.engine.length < 3) {
+            setError('engineError', 'Engine Number must be at least 3 characters.');
+            ok = false;
+          }
 
           setActive('phoneCard', !!filters.phone && validPhone(filters.phone));
           setActive('cnicCard', !!filters.cnic && validCnic(filters.cnic));
           setActive('nameCard', !!filters.name && filters.name.length >= 2);
+          setActive('chassisCard', !!filters.chassis && filters.chassis.length >= 3);
+          setActive('engineCard', !!filters.engine && filters.engine.length >= 3);
 
-          return ok;
+          const hasAny = !!(filters.phone || filters.cnic || filters.name || filters.chassis || filters.engine);
+          return hasAny && ok;
         }
 
         function setLoading(isLoading) {
@@ -1737,7 +2065,7 @@ def _render_lookup_html() -> str:
           document.getElementById('resultsCount').textContent = String(count);
 
           if (!items.length) {
-            body.innerHTML = `<tr><td colspan="7" class="text-muted p-3">No results found.</td></tr>`;
+            body.innerHTML = `<tr><td colspan="8" class="text-muted p-3">No results found.</td></tr>`;
           } else {
             const rows = items.map((r) => `
               <tr class="row-click" role="button" tabindex="0" aria-label="View invoice ${escapeHtml(r.invoice_number || '')}">
@@ -1747,6 +2075,7 @@ def _render_lookup_html() -> str:
                 <td class="mono">${escapeHtml(r.invoice_number || '')}</td>
                 <td>${escapeHtml(r.bike_model || '')}</td>
                 <td class="mono">${escapeHtml(r.chassis_number || '')}</td>
+                <td class="mono">${escapeHtml(r.engine_number || '')}</td>
                 <td>${escapeHtml(r.date || '')}</td>
               </tr>
             `).join('');
@@ -1819,6 +2148,10 @@ def _render_lookup_html() -> str:
           const filters = getFilters();
           document.getElementById('phoneInput').value = filters.phone;
           document.getElementById('cnicInput').value = filters.cnic;
+          const chInput = document.getElementById('chassisInput');
+          const enInput = document.getElementById('engineInput');
+          if (chInput) chInput.value = filters.chassis;
+          if (enInput) enInput.value = filters.engine;
 
           if (!validateFilters(filters)) {
             renderTable({ count: 0, items: [], page: 1, page_size: state.pageSize, total_pages: 1 });
@@ -1832,7 +2165,8 @@ def _render_lookup_html() -> str:
           setLoading(true);
           try {
             const url =
-              `/api/lookup/search?phone=${encodeURIComponent(filters.phone)}&cnic=${encodeURIComponent(filters.cnic)}&name=${encodeURIComponent(filters.name)}` +
+              `/api/lookup/search?phone=${encodeURIComponent(filters.phone)}&cnic=${encodeURIComponent(filters.cnic)}` +
+              `&name=${encodeURIComponent(filters.name)}&chassis=${encodeURIComponent(filters.chassis)}&engine=${encodeURIComponent(filters.engine)}` +
               `&sort_by=${encodeURIComponent(state.sortBy)}&sort_dir=${encodeURIComponent(state.sortDir)}` +
               `&page=${encodeURIComponent(state.page)}&page_size=${encodeURIComponent(state.pageSize)}`;
             const res = await fetch(url, { headers: headers() });
@@ -1869,10 +2203,34 @@ def _render_lookup_html() -> str:
           if (nameTimer) clearTimeout(nameTimer);
           nameTimer = setTimeout(() => { autocompleteName(); runSearch(true); }, 220);
         });
+        const chassisInputEl = document.getElementById('chassisInput');
+        if (chassisInputEl) {
+          chassisInputEl.addEventListener('input', (e) => {
+            e.target.value = normalizeChassis(e.target.value);
+            setError('chassisError', '');
+            if (nameTimer) clearTimeout(nameTimer);
+            nameTimer = setTimeout(() => runSearch(true), 220);
+          });
+        }
+        const engineInputEl = document.getElementById('engineInput');
+        if (engineInputEl) {
+          engineInputEl.addEventListener('input', (e) => {
+            e.target.value = normalizeEngine(e.target.value);
+            setError('engineError', '');
+            if (nameTimer) clearTimeout(nameTimer);
+            nameTimer = setTimeout(() => runSearch(true), 220);
+          });
+        }
 
         document.getElementById('phoneSearchBtn').addEventListener('click', () => runSearch(true));
         document.getElementById('cnicSearchBtn').addEventListener('click', () => runSearch(true));
         document.getElementById('nameSearchBtn').addEventListener('click', () => runSearch(true));
+        const chassisSearchBtn = document.getElementById('chassisSearchBtn');
+        if (chassisSearchBtn) chassisSearchBtn.addEventListener('click', () => runSearch(true));
+        const engineSearchBtn = document.getElementById('engineSearchBtn');
+        if (engineSearchBtn) engineSearchBtn.addEventListener('click', () => runSearch(true));
+        const printReportBtn = document.getElementById('printReportBtn');
+        if (printReportBtn) printReportBtn.addEventListener('click', () => printReport());
         document.getElementById('retryUploadBtn').addEventListener('click', retrySelected);
         document.getElementById('copyInvoiceBtn').addEventListener('click', async () => {
           const row = getSelectedRow();
@@ -1886,6 +2244,15 @@ def _render_lookup_html() -> str:
           const ok = await copyText(row.chassis_number || '');
           if (!ok) setError('nameError', 'Unable to copy chassis number.');
         });
+        const copyEngineBtn = document.getElementById('copyEngineBtn');
+        if (copyEngineBtn) {
+          copyEngineBtn.addEventListener('click', async () => {
+            const row = getSelectedRow();
+            if (!row) return;
+            const ok = await copyText(row.engine_number || '');
+            if (!ok) setError('nameError', 'Unable to copy engine number.');
+          });
+        }
 
         document.querySelectorAll('#resultsTable thead th[data-sort]').forEach((th) => {
           th.addEventListener('click', () => {
@@ -1988,8 +2355,7 @@ def _execute_schedule(db: Session, sch: ReportSchedule) -> None:
 
     try:
         tmpl = db.query(ReportTemplate).filter(ReportTemplate.id == sch.template_id).first()
-        if not tmpl:
-            raise RuntimeError("Template not found")
+        tmpl = _ensure_template_has_widgets(db, tmpl)
 
         metrics = _compute_metrics(db, None, None, "ALL")
         file_bytes, name, media_type = _export_bytes(tmpl, metrics, sch.export_format)
@@ -2257,8 +2623,7 @@ def api_dashboard(
     role = _get_role(x_user_role)
     _require_auth(x_api_key, role)
     tmpl = db.query(ReportTemplate).filter(ReportTemplate.id == template_id).first()
-    if not tmpl:
-        tmpl = _load_or_create_default_template(db)
+    tmpl = _ensure_template_has_widgets(db, tmpl)
     start_dt, end_dt = _parse_dates(from_date, to_date)
     metrics = _compute_metrics(db, start_dt, end_dt, status or "ALL")
 
@@ -2378,10 +2743,12 @@ def lookup_search(
     phone: Optional[str] = Query(default=""),
     cnic: Optional[str] = Query(default=""),
     name: Optional[str] = Query(default=""),
+    chassis: Optional[str] = Query(default=""),
+    engine: Optional[str] = Query(default=""),
     sort_by: Optional[str] = Query(default="date"),
     sort_dir: Optional[str] = Query(default="desc"),
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
+    page_size: int = Query(default=20, ge=1, le=10000),
     x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
     x_user_role: Optional[str] = Header(default=None, alias="X-User-Role"),
 ) -> JSONResponse:
@@ -2389,7 +2756,9 @@ def lookup_search(
     _require_auth(x_api_key, role)
 
     try:
-        phone_digits, cnic_digits, name_q = validate_lookup_inputs(phone=phone or "", cnic=cnic or "", name=name or "")
+        phone_digits, cnic_digits, name_q, chassis_q, engine_q = validate_lookup_inputs(
+            phone=phone or "", cnic=cnic or "", name=name or "", chassis=chassis or "", engine=engine or ""
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -2428,6 +2797,12 @@ def lookup_search(
     if name_q:
         like = f"%{name_q}%"
         q = q.filter((Customer.name.ilike(like)) | (Customer.business_name.ilike(like)))
+    if chassis_q:
+        like = f"%{chassis_q}%"
+        q = q.filter(Motorcycle.chassis_number.ilike(like))
+    if engine_q:
+        like = f"%{engine_q}%"
+        q = q.filter(Motorcycle.engine_number.ilike(like))
 
     sort_map = {
         "customer_name": Customer.name,
@@ -2436,6 +2811,7 @@ def lookup_search(
         "invoice_number": Invoice.invoice_number,
         "bike_model": ProductModel.model_name,
         "chassis_number": Motorcycle.chassis_number,
+        "engine_number": Motorcycle.engine_number,
         "date": Invoice.datetime,
     }
     sort_col = sort_map.get((sort_by or "date").strip(), Invoice.datetime)
@@ -2603,8 +2979,7 @@ def export_report(
     role = _get_role(x_user_role)
     _require_auth(x_api_key, role)
     tmpl = db.query(ReportTemplate).filter(ReportTemplate.id == template_id).first()
-    if not tmpl:
-        tmpl = _load_or_create_default_template(db)
+    tmpl = _ensure_template_has_widgets(db, tmpl)
     start_dt, end_dt = _parse_dates(from_date, to_date)
     metrics = _compute_metrics(db, start_dt, end_dt, status or "ALL")
     content, filename, media_type = _export_bytes(tmpl, metrics, fmt)
