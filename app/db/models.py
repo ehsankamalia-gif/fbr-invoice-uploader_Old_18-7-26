@@ -792,3 +792,64 @@ class FinanceLedger(Base):
     customer = relationship("Customer")
     sale = relationship("FinanceCreditSale")
 
+
+class ExciseRecordStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    SUBMITTED = "SUBMITTED"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
+class ExciseRecord(Base):
+    __tablename__ = "excise_records"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    record_number = Column(String(50), unique=True, index=True, nullable=False)
+    
+    # Vehicle details
+    chassis_number = Column(String(50), unique=True, index=True, nullable=False)
+    engine_number = Column(String(50), unique=True, index=True, nullable=False)
+    motorcycle_model = Column(String(50), nullable=True)
+    maker_make = Column(String(100), nullable=True)
+    color = Column(String(30), nullable=True)
+    year_of_manufacture = Column(Integer, nullable=True)
+    
+    # Customer details
+    customer_name = Column(String(100), nullable=False)
+    customer_father_name = Column(String(100), nullable=True)
+    customer_cnic = Column(String(20), index=True, nullable=True)
+    customer_phone = Column(String(20), nullable=True)
+    customer_address = Column(String(255), nullable=True)
+    
+    # Excise details
+    registration_number = Column(String(50), nullable=True, index=True)
+    tax_amount = Column(Float, nullable=True)
+    fine_amount = Column(Float, default=0.0)
+    total_amount = Column(Float, nullable=True)
+    amount = Column(Float, nullable=True)
+    
+    # Financial details (from Excel)
+    income = Column(Float, nullable=True)
+    profit = Column(Float, nullable=True)
+    income2 = Column(Float, nullable=True)
+    expenditure = Column(Float, nullable=True)
+    
+    # Dates and other details
+    tcs_receiving_date = Column(DateTime, nullable=True)
+    excise_submitting_date = Column(DateTime, nullable=True)
+    dealer_address = Column(String(255), nullable=True)
+    issue_authority = Column(String(100), nullable=True)
+    receiver = Column(String(100), nullable=True)
+    file_card = Column(String(500), nullable=True)
+    modified_pc = Column(String(100), nullable=True)
+    
+    status = Column(String(20), default=ExciseRecordStatus.PENDING, index=True)
+    remarks = Column(String(500), nullable=True)
+    
+    created_at = Column(DateTime, default=pk_now)
+    updated_at = Column(DateTime, default=pk_now, onupdate=pk_now)
+    is_deleted = Column(Boolean, default=False, index=True)
+    
+    # For attachments
+    attachments = Column(JSON, nullable=True)
+
