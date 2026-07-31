@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, inspect
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import OperationalError
 from app.core import config
@@ -122,7 +122,17 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base.metadata.create_all(bind=engine)
 _ensure_critical_tables(engine)
 
-def init_db():
+def _assert_required_tables(target_engine, required_tables: list[str]):
+    """Ensure critical tables exist before serving runtime traffic."""
+    existing_tables = set(inspect(target_engine).get_table_names())
+    missing_tables = [table for table in required_tables if table not in existing_tables]
+    if missing_tables:
+        raise RuntimeError(
+            f"Database is missing required tables: {', '.join(missing_tables)} on {target_engine.url}"
+        )
+
+
+def init_db(strict: bool = False):
     """Re-initialize the database engine. Useful after settings change."""
     global engine, SessionLocal
     
@@ -168,6 +178,7 @@ def init_db():
                 run_migrations()
             except Exception as e:
                 logger.error(f"Non-critical migration error: {e}")
+            _assert_required_tables(engine, ["customers", "product_models", "motorcycles"])
             logger.info("Database initialized successfully.")
             
         except Exception as e:
@@ -177,12 +188,17 @@ def init_db():
             else:
                 logger.error(f"Database probe failed: {err_msg}")
             
+            if strict:
+                raise RuntimeError(f"Failed to initialize configured database {new_db_url}: {err_msg}") from e
+
             # Ensure SessionLocal is bound to the fallback engine if it wasn't already
             SessionLocal.configure(bind=engine)
             _ensure_critical_tables(engine)
             
     except Exception as e:
         logger.error(f"Critical error in init_db: {e}")
+        if strict:
+            raise
 
 def close_all_db_connections():
     """Professionally disposes of the SQLAlchemy engine and all pool connections."""
@@ -244,8 +260,6 @@ def create_mysql_db_if_missing():
         logger.error(f"Failed to check/create MySQL database: {e}")
 
 from app.utils.string_utils import normalize_business_name
-from sqlalchemy import inspect
-
 def verify_schema_integrity(target_engine):
     """
     Self-healing schema check.

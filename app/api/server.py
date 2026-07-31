@@ -18,7 +18,7 @@ from app.api.schemas import PriceResponse, PriceCreate, MotorcycleResponse, Invo
 from app.db.models import Motorcycle, Invoice, Price, ProductModel, InvoiceItem, Customer, ExciseRecord
 
 # Initialize database when server starts
-init_db()
+init_db(strict=True)
 
 app = FastAPI(title="FBR Invoice Uploader API", version="1.0.0")
 
