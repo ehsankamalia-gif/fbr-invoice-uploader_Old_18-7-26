@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.db.session import check_connection, init_db
+from app.qt_ui.copy_support import CopySupportManager
 from reporting.server import start_reporting_server
 
 from PyQt6.QtCore import QObject, QEvent
@@ -224,9 +225,13 @@ def main() -> None:
 
     app = QApplication(sys_args)
     font_manager = _FontManager(app)
+    copy_support_manager = CopySupportManager(app)
     app.installEventFilter(font_manager)
+    app.installEventFilter(copy_support_manager)
     app._font_manager = font_manager
+    app._copy_support_manager = copy_support_manager
     font_manager.refresh_from_settings()
+    copy_support_manager.apply_existing_widgets()
 
     db_success, db_status = check_connection()
     if not db_success and db_status != "DATABASE_MISSING":

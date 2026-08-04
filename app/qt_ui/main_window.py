@@ -58,6 +58,7 @@ from PyQt6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QTextEdit,
+    QPlainTextEdit,
     QFileDialog,
     QTableWidget,
     QTableWidgetItem,
@@ -86,6 +87,7 @@ from app.api.schemas import InvoiceCreate, InvoiceItemCreate
 from app.services.invoice_service import invoice_service
 from app.services.price_service import price_service
 from app.services.settings_service import settings_service
+from app.services.api_server_manager import get_api_server_status, start_api_server, stop_api_server
 from app.services.dealer_service import dealer_service
 from app.services.customer_service import customer_service
 from app.services.advance_booking_service import advance_booking_service
@@ -824,6 +826,13 @@ class MainWindow(QMainWindow):
         self._is_dealer_selected: bool = False
         self._is_sidebar_collapsed: bool = False # Track sidebar state
         self._ab_last_width = 0  # Track last width for advance booking page responsive layouts
+        self._api_server_launch_in_progress = False
+        self._api_server_stop_in_progress = False
+        self.api_server_status_badge = None
+        self.api_server_status_label = None
+        self.api_server_detail_label = None
+        self.api_server_launch_button = None
+        self.api_server_stop_button = None
 
         # SMS Signal connection
         self.sms_result_signal.connect(self._handle_sms_result)
@@ -841,6 +850,11 @@ class MainWindow(QMainWindow):
         self._sms_campaigns_timer.setInterval(5000) # Every 5 seconds
         self._sms_campaigns_timer.timeout.connect(self._auto_refresh_campaigns)
 
+        # API server status timer
+        self._api_server_status_timer = QTimer(self)
+        self._api_server_status_timer.setInterval(3000)
+        self._api_server_status_timer.timeout.connect(self._refresh_api_server_status)
+
         # Register Data Capture Callback
         form_capture_service.on_data_captured = self._on_browser_data_captured
 
@@ -852,6 +866,8 @@ class MainWindow(QMainWindow):
         self._settings_subscription_token = settings_service.subscribe(self._on_settings_event)
         self._active_fbr_settings_snapshot = settings_service.get_active_settings()
         self._last_settings_revision = settings_service.get_revision()
+        self._refresh_api_server_status()
+        self._api_server_status_timer.start()
 
         self._update_app_branding(self._active_fbr_settings_snapshot.get("business_name", "Ehsan Trader"))
         try:
@@ -3297,6 +3313,103 @@ class MainWindow(QMainWindow):
         header_layout.addStretch(1)
         root_layout.addLayout(header_layout)
 
+        api_card = QFrame()
+        api_card.setObjectName("formGroup")
+        api_card.setStyleSheet("""
+            QFrame#formGroup {
+                background-color: white;
+                border: 1px solid #dfe6e9;
+                border-radius: 14px;
+                padding: 22px;
+            }
+        """)
+        api_layout = QVBoxLayout(api_card)
+        api_layout.setSpacing(14)
+
+        api_title_row = QHBoxLayout()
+        api_title = QLabel("Persistent API Server")
+        api_title.setStyleSheet("font-size: 18px; font-weight: bold; color: #2c3e50;")
+        api_title_row.addWidget(api_title)
+
+        self.api_server_status_badge = QLabel("Checking")
+        self.api_server_status_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.api_server_status_badge.setMinimumWidth(96)
+        self.api_server_status_badge.setStyleSheet(
+            "background-color: #f39c12; color: white; font-weight: bold; "
+            "border-radius: 12px; padding: 6px 12px;"
+        )
+        api_title_row.addWidget(self.api_server_status_badge)
+        api_title_row.addStretch(1)
+        api_layout.addLayout(api_title_row)
+
+        api_desc = QLabel(
+            "Launch the FastAPI server as a detached background process. "
+            "It will stay active independently of this application and automatically "
+            "recover if the server process exits unexpectedly."
+        )
+        api_desc.setWordWrap(True)
+        api_desc.setStyleSheet("color: #5f6b77; font-size: 13px;")
+        api_layout.addWidget(api_desc)
+
+        self.api_server_status_label = QLabel("Checking API server status...")
+        self.api_server_status_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #2c3e50;")
+        api_layout.addWidget(self.api_server_status_label)
+
+        self.api_server_detail_label = QLabel("URL: http://127.0.0.1:8000/docs")
+        self.api_server_detail_label.setWordWrap(True)
+        self.api_server_detail_label.setStyleSheet("font-size: 13px; color: #7f8c8d;")
+        api_layout.addWidget(self.api_server_detail_label)
+
+        api_actions = QHBoxLayout()
+        self.api_server_launch_button = QPushButton("Launch API Server")
+        self.api_server_launch_button.setMinimumHeight(42)
+        self.api_server_launch_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.api_server_launch_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2d8cff;
+                color: white;
+                border: none;
+                border-radius: 10px;
+                padding: 10px 18px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1f78e0;
+            }
+            QPushButton:disabled {
+                background-color: #b9c3cf;
+            }
+        """)
+        self.api_server_launch_button.clicked.connect(self._start_api_server_from_settings)
+        api_actions.addWidget(self.api_server_launch_button)
+
+        self.api_server_stop_button = QPushButton("API Server Stopped")
+        self.api_server_stop_button.setMinimumHeight(42)
+        self.api_server_stop_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.api_server_stop_button.setStyleSheet("""
+            QPushButton {
+                background-color: #bdc3c7;
+                color: white;
+                border: none;
+                border-radius: 10px;
+                padding: 10px 18px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #a7b0b5;
+            }
+            QPushButton:disabled {
+                background-color: #d7dde2;
+                color: #7f8c8d;
+            }
+        """)
+        self.api_server_stop_button.clicked.connect(self._stop_api_server_from_settings)
+        api_actions.addWidget(self.api_server_stop_button)
+        api_actions.addStretch(1)
+        api_layout.addLayout(api_actions)
+
+        root_layout.addWidget(api_card)
+
         # Grid for settings categories
         grid_container = QWidget()
         grid_layout = QGridLayout(grid_container)
@@ -3356,8 +3469,275 @@ class MainWindow(QMainWindow):
 
         root_layout.addWidget(grid_container)
         root_layout.addStretch(1)
+        self._refresh_api_server_status()
 
         return page
+
+    def _refresh_api_server_status(self) -> None:
+        if not self.api_server_status_label or not self.api_server_detail_label or not self.api_server_status_badge:
+            return
+
+        try:
+            status = get_api_server_status()
+        except Exception as e:
+            logger.error(f"Failed to fetch API server status: {e}", exc_info=True)
+            status = {
+                "running": False,
+                "state": "stopped",
+                "message": f"Unable to read API server status: {e}",
+                "docs_url": "http://127.0.0.1:8000/docs",
+                "log_file": "",
+            }
+
+        state = status.get("state", "stopped")
+        message = status.get("message", "API server is not running.")
+        docs_url = status.get("docs_url", "http://127.0.0.1:8000/docs")
+        log_file = status.get("log_file", "")
+
+        if state == "running":
+            badge_text = "Running"
+            badge_style = "background-color: #27ae60; color: white; font-weight: bold; border-radius: 12px; padding: 6px 12px;"
+            detail_text = f"{message} Docs: {docs_url}"
+        elif state in {"starting", "restart_scheduled"}:
+            badge_text = "Starting"
+            badge_style = "background-color: #f39c12; color: white; font-weight: bold; border-radius: 12px; padding: 6px 12px;"
+            detail_text = message
+            if log_file:
+                detail_text = f"{detail_text} Log: {log_file}"
+        elif state == "stopping":
+            badge_text = "Stopping"
+            badge_style = "background-color: #e67e22; color: white; font-weight: bold; border-radius: 12px; padding: 6px 12px;"
+            detail_text = message
+            if log_file:
+                detail_text = f"{detail_text} Log: {log_file}"
+        else:
+            badge_text = "Stopped"
+            badge_style = "background-color: #c0392b; color: white; font-weight: bold; border-radius: 12px; padding: 6px 12px;"
+            detail_text = f"{message} Launch it to make Swagger available at {docs_url}"
+
+        self.api_server_status_badge.setText(badge_text)
+        self.api_server_status_badge.setStyleSheet(badge_style)
+        self.api_server_status_label.setText(message)
+        self.api_server_detail_label.setText(detail_text)
+
+        if self.api_server_launch_button:
+            button_busy = self._api_server_launch_in_progress or self._api_server_stop_in_progress or state in {"starting", "restart_scheduled", "stopping"}
+            self.api_server_launch_button.setEnabled(not button_busy and not bool(status.get("running")))
+            if state == "running":
+                self.api_server_launch_button.setText("API Server Running")
+            elif button_busy:
+                self.api_server_launch_button.setText("Starting API Server..." if state != "stopping" else "Start Disabled During Stop")
+            else:
+                self.api_server_launch_button.setText("Launch API Server")
+
+        if self.api_server_stop_button:
+            stop_enabled = not self._api_server_launch_in_progress and not self._api_server_stop_in_progress and bool(status.get("running"))
+            self.api_server_stop_button.setEnabled(stop_enabled)
+            if state == "running":
+                self.api_server_stop_button.setText("Stop API Server")
+                self.api_server_stop_button.setStyleSheet("""
+                    QPushButton {
+                        background-color: #e74c3c;
+                        color: white;
+                        border: none;
+                        border-radius: 10px;
+                        padding: 10px 18px;
+                        font-weight: bold;
+                    }
+                    QPushButton:hover {
+                        background-color: #d63d2d;
+                    }
+                    QPushButton:disabled {
+                        background-color: #d7dde2;
+                        color: #7f8c8d;
+                    }
+                """)
+            elif state == "stopping" or self._api_server_stop_in_progress:
+                self.api_server_stop_button.setText("Stopping API Server...")
+                self.api_server_stop_button.setStyleSheet("""
+                    QPushButton {
+                        background-color: #f39c12;
+                        color: white;
+                        border: none;
+                        border-radius: 10px;
+                        padding: 10px 18px;
+                        font-weight: bold;
+                    }
+                    QPushButton:hover {
+                        background-color: #e08f10;
+                    }
+                    QPushButton:disabled {
+                        background-color: #f5c97d;
+                        color: white;
+                    }
+                """)
+            else:
+                self.api_server_stop_button.setText("API Server Stopped")
+                self.api_server_stop_button.setStyleSheet("""
+                    QPushButton {
+                        background-color: #95a5a6;
+                        color: white;
+                        border: none;
+                        border-radius: 10px;
+                        padding: 10px 18px;
+                        font-weight: bold;
+                    }
+                    QPushButton:hover {
+                        background-color: #869596;
+                    }
+                    QPushButton:disabled {
+                        background-color: #d7dde2;
+                        color: #7f8c8d;
+                    }
+                """)
+
+        if status.get("running"):
+            self._api_server_launch_in_progress = False
+        if not status.get("running") or state == "stopped":
+            self._api_server_stop_in_progress = False
+
+    def _start_api_server_from_settings(self) -> None:
+        if self._api_server_launch_in_progress:
+            return
+
+        self._api_server_launch_in_progress = True
+        self._refresh_api_server_status()
+
+        try:
+            result = start_api_server()
+            self._refresh_api_server_status()
+
+            if result.get("already_running"):
+                QMessageBox.information(self, "API Server", result.get("message", "API server is already running."))
+                self._api_server_launch_in_progress = False
+                self._refresh_api_server_status()
+                return
+
+            if not result.get("started"):
+                self._api_server_launch_in_progress = False
+                self._refresh_api_server_status()
+                QMessageBox.warning(self, "API Server", result.get("message", "Failed to launch the API server."))
+                return
+
+            QMessageBox.information(
+                self,
+                "API Server",
+                (
+                    "API server launch has been requested successfully.\n\n"
+                    "It will keep running in the background even after this application closes."
+                ),
+            )
+            QTimer.singleShot(2000, self._refresh_api_server_status)
+            QTimer.singleShot(5000, self._refresh_api_server_status)
+        except Exception as e:
+            logger.error(f"Failed to start API server from settings: {e}", exc_info=True)
+            self._api_server_launch_in_progress = False
+            self._refresh_api_server_status()
+            QMessageBox.critical(self, "API Server", f"Failed to launch the API server:\n{e}")
+
+    def _collect_unsaved_text_edits(self) -> list[str]:
+        labels: list[str] = []
+
+        for line_edit in self.findChildren(QLineEdit):
+            if not line_edit.isVisibleTo(self) or line_edit.isReadOnly() or not line_edit.isModified():
+                continue
+            label = (line_edit.placeholderText() or line_edit.objectName() or "Edited text field").strip()
+            labels.append(label)
+
+        for text_edit in self.findChildren(QTextEdit):
+            if not text_edit.isVisibleTo(self) or text_edit.isReadOnly():
+                continue
+            if text_edit.document().isModified():
+                label = (text_edit.placeholderText() or text_edit.objectName() or "Edited text area").strip()
+                labels.append(label)
+
+        for text_edit in self.findChildren(QPlainTextEdit):
+            if not text_edit.isVisibleTo(self) or text_edit.isReadOnly():
+                continue
+            if text_edit.document().isModified():
+                label = (text_edit.placeholderText() or text_edit.objectName() or "Edited text area").strip()
+                labels.append(label)
+
+        deduped: list[str] = []
+        for label in labels:
+            if label not in deduped:
+                deduped.append(label)
+        return deduped[:6]
+
+    def _confirm_api_server_stop(self) -> bool:
+        unsaved_labels = self._collect_unsaved_text_edits()
+        if unsaved_labels:
+            details = "\n".join(f"- {label}" for label in unsaved_labels)
+            if len(unsaved_labels) == 6:
+                details += "\n- Additional edited fields may also be pending."
+
+            reply = QMessageBox.question(
+                self,
+                "Unsaved Work Detected",
+                (
+                    "Some visible text fields appear to have unsaved edits.\n\n"
+                    f"{details}\n\n"
+                    "Stopping the API server will gracefully close active API connections, "
+                    "but these edits in the application will still remain unsaved.\n\n"
+                    "Do you want to stop the API server anyway?"
+                ),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            return reply == QMessageBox.StandardButton.Yes
+
+        reply = QMessageBox.question(
+            self,
+            "Stop API Server",
+            (
+                "This will gracefully stop the background API server, close active API connections, "
+                "and update the application to the stopped state.\n\n"
+                "Do you want to continue?"
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
+    def _stop_api_server_from_settings(self) -> None:
+        if self._api_server_stop_in_progress:
+            return
+
+        if not self._confirm_api_server_stop():
+            return
+
+        self._api_server_stop_in_progress = True
+        self._refresh_api_server_status()
+
+        try:
+            result = stop_api_server()
+            self._refresh_api_server_status()
+
+            if result.get("already_stopped"):
+                self._api_server_stop_in_progress = False
+                self._refresh_api_server_status()
+                QMessageBox.information(self, "API Server", result.get("message", "API server is already stopped."))
+                return
+
+            if not result.get("stopped"):
+                self._api_server_stop_in_progress = False
+                self._refresh_api_server_status()
+                QMessageBox.warning(self, "API Server", result.get("message", "Failed to stop the API server cleanly."))
+                return
+
+            self._api_server_stop_in_progress = False
+            self._refresh_api_server_status()
+            QMessageBox.information(
+                self,
+                "API Server",
+                "API server stopped successfully. The background API service is now offline.",
+            )
+            QTimer.singleShot(1500, self._refresh_api_server_status)
+        except Exception as e:
+            logger.error(f"Failed to stop API server from settings: {e}", exc_info=True)
+            self._api_server_stop_in_progress = False
+            self._refresh_api_server_status()
+            QMessageBox.critical(self, "API Server", f"Failed to stop the API server:\n{e}")
 
     def _create_dms_automation_page(self) -> QWidget:
         return DMSAutomationPage(self)
