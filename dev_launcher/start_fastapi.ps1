@@ -13,6 +13,60 @@ $script:CleanupComplete = $false
 $script:PidFilePath = $null
 $script:Mutex = $null
 $script:LogFile = $null
+$script:DebugConfig = $null
+
+function Get-DebugConfig {
+    if ($script:DebugConfig) {
+        return $script:DebugConfig
+    }
+
+    $envPath = Join-Path $script:RepoRoot ".dbg\api-autostart-failure.env"
+    $config = @{
+        Url = "http://127.0.0.1:7777/event"
+        SessionId = "api-autostart-failure"
+    }
+
+    if (Test-Path -LiteralPath $envPath) {
+        foreach ($line in Get-Content -LiteralPath $envPath) {
+            if ($line -like "DEBUG_SERVER_URL=*") {
+                $config.Url = $line.Substring("DEBUG_SERVER_URL=".Length)
+            } elseif ($line -like "DEBUG_SESSION_ID=*") {
+                $config.SessionId = $line.Substring("DEBUG_SESSION_ID=".Length)
+            }
+        }
+    }
+
+    $script:DebugConfig = $config
+    return $script:DebugConfig
+}
+
+function Send-DebugEvent {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$HypothesisId,
+        [Parameter(Mandatory = $true)]
+        [string]$Location,
+        [Parameter(Mandatory = $true)]
+        [string]$Message,
+        [hashtable]$Data = @{}
+    )
+
+    try {
+        $debugConfig = Get-DebugConfig
+        $payload = @{
+            sessionId = $debugConfig.SessionId
+            runId = "pre-fix"
+            hypothesisId = $HypothesisId
+            location = $Location
+            msg = "[DEBUG] $Message"
+            data = $Data
+            ts = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        } | ConvertTo-Json -Depth 5 -Compress
+
+        Invoke-WebRequest -Uri $debugConfig.Url -Method Post -ContentType "application/json" -Body $payload -UseBasicParsing | Out-Null
+    } catch {
+    }
+}
 
 function Resolve-AbsolutePath {
     param(
@@ -95,16 +149,39 @@ function Wait-ForTcpPort {
 
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     Write-LauncherLog ("Waiting for {0} on {1}:{2}..." -f $Name, $HostName, $Port)
+    # #region debug-point B:wait-for-port
+    Send-DebugEvent -HypothesisId "B" -Location "start_fastapi.ps1:Wait-ForTcpPort" -Message "Waiting for TCP port readiness." -Data @{
+        name = $Name
+        host = $HostName
+        port = $Port
+        timeoutSeconds = $TimeoutSeconds
+    }
+    # #endregion
 
     while ((Get-Date) -lt $deadline) {
         if (Test-TcpPort -HostName $HostName -Port $Port) {
             Write-LauncherLog ("{0} is available on {1}:{2}." -f $Name, $HostName, $Port)
+            # #region debug-point B:port-ready
+            Send-DebugEvent -HypothesisId "B" -Location "start_fastapi.ps1:Wait-ForTcpPort" -Message "TCP port became available." -Data @{
+                name = $Name
+                host = $HostName
+                port = $Port
+            }
+            # #endregion
             return $true
         }
 
         Start-Sleep -Seconds 2
     }
 
+    # #region debug-point B:port-timeout
+    Send-DebugEvent -HypothesisId "B" -Location "start_fastapi.ps1:Wait-ForTcpPort" -Message "TCP port did not become available before timeout." -Data @{
+        name = $Name
+        host = $HostName
+        port = $Port
+        timeoutSeconds = $TimeoutSeconds
+    }
+    # #endregion
     return $false
 }
 
@@ -267,10 +344,20 @@ function Start-LaragonIfNeeded {
     $laragonProcess = Get-LaragonProcess
     if ($laragonProcess) {
         Write-LauncherLog ("Laragon is already running with PID {0}." -f $laragonProcess.Id)
+        # #region debug-point B:laragon-already-running
+        Send-DebugEvent -HypothesisId "B" -Location "start_fastapi.ps1:Start-LaragonIfNeeded" -Message "Laragon is already running before startup logic begins." -Data @{
+            pid = $laragonProcess.Id
+        }
+        # #endregion
         return
     }
 
     Write-LauncherLog "Starting Laragon..."
+    # #region debug-point B:starting-laragon
+    Send-DebugEvent -HypothesisId "B" -Location "start_fastapi.ps1:Start-LaragonIfNeeded" -Message "Launcher is starting Laragon." -Data @{
+        laragonExePath = $LaragonExePath
+    }
+    # #endregion
     Start-Process -FilePath $LaragonExePath -WorkingDirectory (Split-Path -Parent $LaragonExePath) | Out-Null
     $script:StartedLaragon = $true
 }
@@ -301,6 +388,12 @@ function Start-ManagedFastApi {
 
     if (Test-TcpPort -HostName $HostName -Port $Port) {
         Write-LauncherLog ("FastAPI is already running on {0}:{1}. Not starting another instance." -f $HostName, $Port)
+        # #region debug-point D:port-already-occupied
+        Send-DebugEvent -HypothesisId "D" -Location "start_fastapi.ps1:Start-ManagedFastApi" -Message "FastAPI port was already occupied, so a new managed instance was not started." -Data @{
+            host = $HostName
+            port = $Port
+        }
+        # #endregion
         $script:ManagedFastApiProcess = $null
         return
     }
@@ -320,6 +413,15 @@ function Start-ManagedFastApi {
     }
 
     Write-LauncherLog "Starting FastAPI..."
+    # #region debug-point C:starting-fastapi
+    Send-DebugEvent -HypothesisId "C" -Location "start_fastapi.ps1:Start-ManagedFastApi" -Message "Launcher is starting a managed FastAPI process." -Data @{
+        pythonExe = $PythonExe
+        projectPath = $ProjectPath
+        appReference = $AppReference
+        host = $HostName
+        port = $Port
+    }
+    # #endregion
     $process = Start-Process -FilePath $PythonExe `
         -ArgumentList $arguments `
         -WorkingDirectory $ProjectPath `
@@ -329,13 +431,32 @@ function Start-ManagedFastApi {
 
     $script:ManagedFastApiProcess = $process
     Save-FastApiState -ProcessId $process.Id -HostName $HostName -Port $Port
+    # #region debug-point C:fastapi-started
+    Send-DebugEvent -HypothesisId "C" -Location "start_fastapi.ps1:Start-ManagedFastApi" -Message "Managed FastAPI process started and health check is beginning." -Data @{
+        pid = $process.Id
+        healthCheckPath = $HealthCheckPath
+    }
+    # #endregion
 
     $healthUri = "http://{0}:{1}{2}" -f $HostName, $Port, $HealthCheckPath
     if (-not (Wait-ForHttpEndpoint -Uri $healthUri -TimeoutSeconds $StartupTimeoutSeconds)) {
+        # #region debug-point C:health-timeout
+        Send-DebugEvent -HypothesisId "C" -Location "start_fastapi.ps1:Start-ManagedFastApi" -Message "Managed FastAPI process did not reach a healthy HTTP endpoint before timeout." -Data @{
+            pid = $process.Id
+            healthUri = $healthUri
+            timeoutSeconds = $StartupTimeoutSeconds
+        }
+        # #endregion
         throw ("FastAPI did not become ready at {0} within {1} seconds." -f $healthUri, $StartupTimeoutSeconds)
     }
 
     Write-LauncherLog ("API Server is running. PID={0} URL=http://{1}:{2}" -f $process.Id, $HostName, $Port)
+    # #region debug-point C:health-success
+    Send-DebugEvent -HypothesisId "C" -Location "start_fastapi.ps1:Start-ManagedFastApi" -Message "Managed FastAPI process reached a healthy HTTP endpoint." -Data @{
+        pid = $process.Id
+        healthUri = $healthUri
+    }
+    # #endregion
 }
 
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
@@ -380,6 +501,11 @@ $createdNew = $false
 $script:Mutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$createdNew)
 if (-not $createdNew) {
     Write-LauncherLog "Another launcher instance is already running." "WARN"
+    # #region debug-point D:mutex-collision
+    Send-DebugEvent -HypothesisId "D" -Location "start_fastapi.ps1:mutex" -Message "Launcher mutex indicates another supervisor instance is already running." -Data @{
+        mutexName = $mutexName
+    }
+    # #endregion
     exit 1
 }
 
