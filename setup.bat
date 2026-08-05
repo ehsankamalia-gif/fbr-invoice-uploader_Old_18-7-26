@@ -42,6 +42,7 @@ echo.
 echo ===================================================
 echo      Setup Complete!
 echo ===================================================
-echo You can now run the application using 'run.bat'
+echo You can now run the application using 'run.bat' for silent startup.
+echo Use 'run.bat --console' only when you want to see startup logs.
 echo.
 pause

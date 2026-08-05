@@ -5,6 +5,8 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 strDesktop = WshShell.SpecialFolders("Desktop")
 currentDir = fso.GetParentFolderName(WScript.ScriptFullName)
 targetScript = currentDir & "\run_silent.vbs"
+pythonwPath = currentDir & "\venv\Scripts\pythonw.exe"
+mainScript = currentDir & "\main.pyw"
 
 ' Check if target exists
 If Not fso.FileExists(targetScript) Then
@@ -14,8 +16,13 @@ End If
 
 ' Create Shortcut
 Set oShellLink = WshShell.CreateShortcut(strDesktop & "\Honda FBR Uploader.lnk")
-oShellLink.TargetPath = "wscript.exe"
-oShellLink.Arguments = chr(34) & targetScript & chr(34)
+If fso.FileExists(pythonwPath) And fso.FileExists(mainScript) Then
+    oShellLink.TargetPath = pythonwPath
+    oShellLink.Arguments = chr(34) & mainScript & chr(34)
+Else
+    oShellLink.TargetPath = "wscript.exe"
+    oShellLink.Arguments = chr(34) & targetScript & chr(34)
+End If
 oShellLink.WorkingDirectory = currentDir
 oShellLink.WindowStyle = 1
 oShellLink.Description = "Launch Honda FBR Uploader (Silent)"

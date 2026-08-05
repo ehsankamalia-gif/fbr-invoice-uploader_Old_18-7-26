@@ -1,36 +1,22 @@
 @echo off
-setlocal enabledelayedexpansion
-for /f "tokens=*" %%b in ('git branch --show-current') do set CUR_BRANCH=%%b
-if /i not "!CUR_BRANCH!"=="master" (
-    echo Current branch is "!CUR_BRANCH!". Please switch to "master" before running.
+setlocal
+
+if /i "%~1"=="--console" (
+    call "%~dp0run_console.bat"
+    exit /b %errorlevel%
+)
+
+if not exist "%~dp0venv\Scripts\pythonw.exe" (
+    echo Virtual environment not found. Please run setup.bat first.
     pause
     exit /b 1
 )
 
-TITLE Honda FBR Invoice Uploader
-echo Starting application...
-
-:: Check if venv exists
-if not exist venv (
-    echo Virtual environment not found. Running setup first...
-    call setup.bat
-)
-
-:: Activate venv
-call venv\Scripts\activate
-
-:: Check for dependency updates
-echo Checking for dependency updates...
-echo This may take a moment if packages are being updated.
-venv\Scripts\python -m pip install -r requirements.txt
-
-:: Run Application
-echo.
-echo Launching application...
-venv\Scripts\python -m app.main
-
-if %errorlevel% neq 0 (
-    echo.
-    echo Application crashed or closed with an error.
+if not exist "%~dp0run_silent.vbs" (
+    echo Silent launcher not found: "%~dp0run_silent.vbs"
     pause
+    exit /b 1
 )
+
+start "" wscript.exe "%~dp0run_silent.vbs"
+exit /b 0

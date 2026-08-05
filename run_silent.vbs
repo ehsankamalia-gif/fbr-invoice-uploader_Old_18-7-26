@@ -9,7 +9,7 @@ If Not fso.FolderExists(strPath & "\venv") Then
 End If
 
 ' Run using pythonw.exe (Windowless Python)
-' We run directly from venv, skipping run.bat to avoid its console window
+' We launch the .pyw entry point so the main process stays windowless on Windows
 WshShell.CurrentDirectory = strPath
-WshShell.Run chr(34) & strPath & "\venv\Scripts\pythonw.exe" & chr(34) & " -m app.main", 0
+WshShell.Run chr(34) & strPath & "\venv\Scripts\pythonw.exe" & chr(34) & " " & chr(34) & strPath & "\main.pyw" & chr(34), 0
 Set WshShell = Nothing

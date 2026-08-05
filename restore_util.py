@@ -7,6 +7,48 @@ import time
 import subprocess
 from pathlib import Path
 
+
+def resolve_silent_python(project_root: Path) -> str:
+    candidates = [
+        project_root / "venv" / "Scripts" / "pythonw.exe",
+        Path(sys.executable).with_name("pythonw.exe"),
+        Path(sys.executable),
+    ]
+
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+
+    return sys.executable
+
+
+def build_restart_command(app_exe: str, project_root: Path) -> list[str] | None:
+    if app_exe.endswith(".exe"):
+        return None
+
+    launcher = project_root / "main.pyw"
+    if "app.main" in app_exe or "app/main" in app_exe or app_exe.endswith("main.pyw"):
+        return [resolve_silent_python(project_root), str(launcher)]
+
+    return [sys.executable, app_exe]
+
+
+def _hidden_popen_kwargs() -> dict:
+    if os.name != "nt":
+        return {}
+
+    creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    creation_flags |= getattr(subprocess, "DETACHED_PROCESS", 0)
+
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = 0
+
+    return {
+        "creationflags": creation_flags,
+        "startupinfo": startupinfo,
+    }
+
 def restore_standalone(backup_path_str, db_path_str, encryption_key=None):
     """Standalone restore function to be run in a separate process."""
     print(f"Starting professional restore process...")
@@ -95,15 +137,16 @@ if __name__ == "__main__":
     
     if success and app_exe:
         print(f"Restarting application: {app_exe}")
-        if app_exe.endswith(".exe"):
+        command = build_restart_command(app_exe, Path(__file__).resolve().parent)
+
+        if command is None:
             os.startfile(app_exe)
-        elif "app.main" in app_exe or "app/main" in app_exe:
-            # If running as script, use module-based launch to avoid ModuleNotFoundError
-            # The root directory is the parent of where restore_util.py is
-            project_root = Path(__file__).resolve().parent
-            subprocess.Popen([sys.executable, "-m", "app.main"], cwd=str(project_root))
         else:
-            subprocess.Popen([sys.executable, app_exe])
+            subprocess.Popen(
+                command,
+                cwd=str(Path(__file__).resolve().parent),
+                **_hidden_popen_kwargs(),
+            )
     
     print("Restore utility exiting in 3 seconds...")
     time.sleep(3)
