@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Report ScriptLanguage="CSharp" Dpi="100" DefaultFontFamily="Arial" DefaultFontSize="10" DefaultLcid="1033" ReportUnit="Centimeters" PageWidth="29.7" PageHeight="21" LeftMargin="1" RightMargin="1" TopMargin="1" BottomMargin="1" PrinterSettings="" Description="Customer Lookup Export">
+  <Dictionary>
+    <JsonDataSource Name="Data" Alias="Data" ConnectionString="dataset.json" TableName="Data.Report">
+      <Column Name="generated_at" DataType="System.String"/>
+      <Column Name="sort_by" DataType="System.String"/>
+      <Column Name="sort_dir" DataType="System.String"/>
+      <Column Name="business_name" DataType="System.String"/>
+      <Column Name="total_rows" DataType="System.Int32"/>
+      <Column Name="total_sale_value" DataType="System.Decimal"/>
+      <Column Name="applied_filters" DataType="System.String"/>
+      <Relation Name="Rows" ParentDataSource="Data.Report" ChildDataSource="Data.Rows"/>
+    </JsonDataSource>
+    <TableDataSource Name="Data.Rows" Alias="Rows">
+      <Column Name="customer_name" DataType="System.String"/>
+      <Column Name="father_name" DataType="System.String"/>
+      <Column Name="mobile_number" DataType="System.String"/>
+      <Column Name="invoice_number" DataType="System.String"/>
+      <Column Name="bike_model" DataType="System.String"/>
+      <Column Name="chassis_number" DataType="System.String"/>
+      <Column Name="engine_number" DataType="System.String"/>
+      <Column Name="date" DataType="System.String"/>
+      <Column Name="sale_value" DataType="System.Decimal"/>
+      <Column Name="sync_status" DataType="System.String"/>
+    </TableDataSource>
+  </Dictionary>
+  <ReportPage Name="Page1" PaperSize="A4" Orientation="Landscape">
+    <ReportTitleBand Name="title" Top="0" Width="27.7" Height="2.1" Fill="#F5F5F5">
+      <TextObject Name="biz" Left="0.2" Top="0.2" Width="15" Height="0.7" Font="Arial, 16pt, style=Bold" Text="[Data.Report.business_name]"/>
+      <TextObject Name="rep" Left="0.2" Top="0.9" Width="15" Height="0.55" Font="Arial, 12pt, style=Bold" Text="CUSTOMER LOOKUP REPORT"/>
+      <TextObject Name="gen" Left="20" Top="0.3" Width="7.5" Height="0.45" HorzAlign="Right" Text="Generated: [Data.Report.generated_at]"/>
+      <TextObject Name="srt" Left="20" Top="0.85" Width="7.5" Height="0.45" HorzAlign="Right" Text="Sorted: [Data.Report.sort_by] ([Data.Report.sort_dir])"/>
+    </ReportTitleBand>
+    <PageHeaderBand Name="filters" Top="2.2" Width="27.7" Height="1.5">
+      <TextObject Name="fLbl" Left="0.2" Top="0.2" Width="2.4" Height="0.45" Text="Filters:" Font="Arial, 10pt, style=Bold"/>
+      <TextObject Name="fVals" Left="2.6" Top="0.2" Width="24.9" Height="1.2" CanGrow="true" Text="[Data.Report.applied_filters]" TextRenderType="HtmlTags"/>
+    </PageHeaderBand>
+    <ColumnHeaderBand Name="cols" Top="3.8" Width="27.7" Height="0.6" Fill="#0B1020">
+      <TextObject Name="c1" Left="0.2" Top="0.1" Width="3.6" Height="0.45" Font="Arial, 9pt, style=Bold" TextColor="White" Text="Customer"/>
+      <TextObject Name="c2" Left="3.8" Top="0.1" Width="3.4" Height="0.45" Font="Arial, 9pt, style=Bold" TextColor="White" Text="Father"/>
+      <TextObject Name="c3" Left="7.2" Top="0.1" Width="3" Height="0.45" Font="Arial, 9pt, style=Bold" TextColor="White" Text="Mobile"/>
+      <TextObject Name="c4" Left="10.2" Top="0.1" Width="2.6" Height="0.45" Font="Arial, 9pt, style=Bold" TextColor="White" Text="Invoice #"/>
+      <TextObject Name="c5" Left="12.8" Top="0.1" Width="3" Height="0.45" Font="Arial, 9pt, style=Bold" TextColor="White" Text="Model"/>
+      <TextObject Name="c6" Left="15.8" Top="0.1" Width="3.4" Height="0.45" Font="Arial, 9pt, style=Bold" TextColor="White" Text="Chassis"/>
+      <TextObject Name="c7" Left="19.2" Top="0.1" Width="3.2" Height="0.45" Font="Arial, 9pt, style=Bold" TextColor="White" Text="Engine"/>
+      <TextObject Name="c8" Left="22.4" Top="0.1" Width="2.2" Height="0.45" Font="Arial, 9pt, style=Bold" TextColor="White" Text="Date"/>
+      <TextObject Name="c9" Left="24.6" Top="0.1" Width="3" Height="0.45" Font="Arial, 9pt, style=Bold" TextColor="White" HorzAlign="Right" Text="Sale Value"/>
+    </ColumnHeaderBand>
+    <DataBand Name="rows" Top="4.5" Width="27.7" Height="0.55" DataSource="Data.Report.Rows">
+      <TextObject Name="cust" Left="0.2" Top="0.1" Width="3.6" Height="0.45" Text="[customer_name]"/>
+      <TextObject Name="fath" Left="3.8" Top="0.1" Width="3.4" Height="0.45" Text="[father_name]"/>
+      <TextObject Name="mob" Left="7.2" Top="0.1" Width="3" Height="0.45" Text="[mobile_number]"/>
+      <TextObject Name="inv" Left="10.2" Top="0.1" Width="2.6" Height="0.45" Text="[invoice_number]"/>
+      <TextObject Name="bike" Left="12.8" Top="0.1" Width="3" Height="0.45" Text="[bike_model]"/>
+      <TextObject Name="chs" Left="15.8" Top="0.1" Width="3.4" Height="0.45" Text="[chassis_number]"/>
+      <TextObject Name="eng" Left="19.2" Top="0.1" Width="3.2" Height="0.45" Text="[engine_number]"/>
+      <TextObject Name="dt" Left="22.4" Top="0.1" Width="2.2" Height="0.45" Text="[date]"/>
+      <TextObject Name="sv" Left="24.6" Top="0.1" Width="3" Height="0.45" HorzAlign="Right" Format="N2" Text="[sale_value]"/>
+    </DataBand>
+    <DataFooterBand Name="totals" Top="5.2" Width="27.7" Height="1.8">
+      <LineObject Name="l" Left="21" Top="0.3" Width="6.6" Height="0" BorderStyle="Solid" BorderWidth="1" BorderColor="#333"/>
+      <TextObject Name="totLbl" Left="17.8" Top="0.6" Width="3.2" Height="0.55" HorzAlign="Right" Font="Arial, 11pt, style=Bold" Text="Total Rows:"/>
+      <TextObject Name="totVal" Left="21" Top="0.6" Width="6.6" Height="0.55" Font="Arial, 11pt, style=Bold" Text="[Data.Report.total_rows]"/>
+      <TextObject Name="sumLbl" Left="17.8" Top="1.2" Width="3.2" Height="0.55" HorzAlign="Right" Font="Arial, 11pt, style=Bold" Text="Aggregate Sale:"/>
+      <TextObject Name="sumVal" Left="21" Top="1.2" Width="6.6" Height="0.55" HorzAlign="Right" Font="Arial, 11pt, style=Bold" Format="N2" Text="[Data.Report.total_sale_value]"/>
+    </DataFooterBand>
+    <PageFooterBand Name="footer" Top="18.8" Width="27.7" Height="1">
+      <TextObject Name="note" Left="0.2" Top="0.3" Width="14" Height="0.5" TextColor="#777" Text="Generated by Honda FBR Uploader — Customer Lookup."/>
+      <TextObject Name="pg" Left="21" Top="0.3" Width="6.5" Height="0.5" HorzAlign="Right" TextColor="#777" Text="Page [Page#] / [TotalPages#]"/>
+    </PageFooterBand>
+  </ReportPage>
+</Report>

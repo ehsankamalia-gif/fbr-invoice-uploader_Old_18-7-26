@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Report ScriptLanguage="CSharp" Dpi="100" DefaultFontFamily="Arial" DefaultFontSize="10" DefaultLcid="1033" ReportUnit="Centimeters" PageWidth="21" PageHeight="29.7" LeftMargin="1" RightMargin="1" TopMargin="1" BottomMargin="1" PrinterSettings="" Description="Invoice print template — Honda FBR Uploader">
+  <Dictionary>
+    <JsonDataSource Name="Data" Alias="Data" ConnectionString="dataset.json" TableName="Data.Invoice">
+      <Column Name="invoice_number" DataType="System.String"/>
+      <Column Name="date" DataType="System.String"/>
+      <Column Name="customer_name" DataType="System.String"/>
+      <Column Name="customer_address" DataType="System.String"/>
+      <Column Name="fbr_invoice_number" DataType="System.String"/>
+      <Column Name="pos_id" DataType="System.String"/>
+      <Column Name="payment_mode" DataType="System.String"/>
+      <Column Name="total_amount" DataType="System.Decimal"/>
+      <Column Name="relation_prefix" DataType="System.String"/>
+      <Column Name="father_name" DataType="System.String"/>
+      <Column Name="registration_letter_no" DataType="System.String"/>
+      <Column Name="qr_code_base64" DataType="System.String"/>
+      <Column Name="business_name" DataType="System.String"/>
+      <Column Name="business_address" DataType="System.String"/>
+      <Column Name="business_phone" DataType="System.String"/>
+      <Relation Name="Items" ParentDataSource="Data.Invoice" ChildDataSource="Data.Items"/>
+    </JsonDataSource>
+    <TableDataSource Name="Data.Items" Alias="Items">
+      <Column Name="model" DataType="System.String"/>
+      <Column Name="description" DataType="System.String"/>
+      <Column Name="sale_value" DataType="System.Decimal"/>
+      <Column Name="sales_tax" DataType="System.Decimal"/>
+      <Column Name="levy" DataType="System.Decimal"/>
+      <Column Name="total_line" DataType="System.Decimal"/>
+      <Column Name="price" DataType="System.Decimal"/>
+      <Column Name="engine" DataType="System.String"/>
+      <Column Name="chassis" DataType="System.String"/>
+      <Column Name="color" DataType="System.String"/>
+      <Column Name="quantity" DataType="System.Decimal"/>
+    </TableDataSource>
+  </Dictionary>
+  <ReportPage Name="Page1" PaperSize="A4" Orientation="Portrait">
+    <ReportTitleBand Name="ReportTitle1" Top="0" Width="19" Height="2.2" Fill="#F5F5F5">
+      <TextObject Name="title" Left="0.2" Top="0.3" Width="12" Height="0.9" Font="Arial, 18pt, style=Bold" Text="TAX INVOICE" TextColor="#0B1020"/>
+      <TextObject Name="businessName" Left="0.2" Top="1.2" Width="11" Height="0.5" Font="Arial, 10pt, style=Bold" Text="[Data.Invoice.business_name]"/>
+      <TextObject Name="businessContact" Left="0.2" Top="1.65" Width="12" Height="0.45" Text="[Data.Invoice.business_address]  |  [Data.Invoice.business_phone]" TextColor="#404040"/>
+      <TextObject Name="lblInvoiceNo" Left="13" Top="0.3" Width="2.4" Height="0.45" Text="Invoice #:" HorzAlign="Right" TextColor="#606060"/>
+      <TextObject Name="invoiceNo" Left="15.5" Top="0.3" Width="3.4" Height="0.45" Font="Arial, 10pt, style=Bold" Text="[Data.Invoice.invoice_number]"/>
+      <TextObject Name="lblDate" Left="13" Top="0.8" Width="2.4" Height="0.45" Text="Date:" HorzAlign="Right" TextColor="#606060"/>
+      <TextObject Name="date" Left="15.5" Top="0.8" Width="3.4" Height="0.45" Font="Arial, 10pt, style=Bold" Text="[Data.Invoice.date]"/>
+      <TextObject Name="lblFbr" Left="13" Top="1.3" Width="2.4" Height="0.45" Text="FBR Ref:" HorzAlign="Right" TextColor="#606060"/>
+      <TextObject Name="fbrId" Left="15.5" Top="1.3" Width="3.4" Height="0.45" Text="[Data.Invoice.fbr_invoice_number]"/>
+    </ReportTitleBand>
+    <PageHeaderBand Name="PageHeader1" Top="2.3" Width="19" Height="2.3">
+      <LineObject Name="lineHeader" Left="0" Top="0" Width="19" Height="0" BorderStyle="Solid" BorderWidth="1" BorderColor="#BBB"/>
+      <TextObject Name="lblCustomer" Left="0.2" Top="0.3" Width="2.6" Height="0.45" Text="Customer:" TextColor="#606060"/>
+      <TextObject Name="customerName" Left="2.9" Top="0.3" Width="11.2" Height="0.45" Font="Arial, 10pt, style=Bold" Text="[Data.Invoice.customer_name] [Data.Invoice.relation_prefix] [Data.Invoice.father_name]"/>
+      <TextObject Name="lblAddress" Left="0.2" Top="0.8" Width="2.6" Height="0.45" Text="Address:" TextColor="#606060"/>
+      <TextObject Name="address" Left="2.9" Top="0.8" Width="15.8" Height="0.9" CanGrow="true" Text="[Data.Invoice.customer_address]"/>
+      <TextObject Name="lblPOS" Left="13" Top="1.8" Width="2.4" Height="0.45" Text="POS:" HorzAlign="Right" TextColor="#606060"/>
+      <TextObject Name="posId" Left="15.5" Top="1.8" Width="3.4" Height="0.45" Text="[Data.Invoice.pos_id]"/>
+    </PageHeaderBand>
+    <ColumnHeaderBand Name="ColumnHeader1" Top="4.7" Width="19" Height="0.6" Fill="#0B1020">
+      <TextObject Name="colItem" Left="0.2" Top="0.1" Width="5.6" Height="0.45" Font="Arial, 9pt, style=Bold" Text="Item / Model" TextColor="White"/>
+      <TextObject Name="colChassis" Left="5.8" Top="0.1" Width="3" Height="0.45" Font="Arial, 9pt, style=Bold" Text="Chassis" TextColor="White"/>
+      <TextObject Name="colEngine" Left="8.8" Top="0.1" Width="3" Height="0.45" Font="Arial, 9pt, style=Bold" Text="Engine" TextColor="White"/>
+      <TextObject Name="colPrice" Left="11.8" Top="0.1" Width="1.9" Height="0.45" Font="Arial, 9pt, style=Bold" Text="Price" HorzAlign="Right" TextColor="White"/>
+      <TextObject Name="colTax" Left="13.7" Top="0.1" Width="1.7" Height="0.45" Font="Arial, 9pt, style=Bold" Text="Tax" HorzAlign="Right" TextColor="White"/>
+      <TextObject Name="colLevy" Left="15.4" Top="0.1" Width="1.5" Height="0.45" Font="Arial, 9pt, style=Bold" Text="Levy" HorzAlign="Right" TextColor="White"/>
+      <TextObject Name="colTotal" Left="16.9" Top="0.1" Width="1.9" Height="0.45" Font="Arial, 9pt, style=Bold" Text="Total" HorzAlign="Right" TextColor="White"/>
+    </ColumnHeaderBand>
+    <DataBand Name="Data1" Top="5.4" Width="19" Height="0.7" DataSource="Data.Invoice.Items" Fill="#FAFAFA">
+      <TextObject Name="model" Left="0.2" Top="0.15" Width="5.6" Height="0.45" Text="[model]"/>
+      <TextObject Name="chassis" Left="5.8" Top="0.15" Width="3" Height="0.45" Text="[chassis]"/>
+      <TextObject Name="engine" Left="8.8" Top="0.15" Width="3" Height="0.45" Text="[engine]"/>
+      <TextObject Name="price" Left="11.8" Top="0.15" Width="1.9" Height="0.45" HorzAlign="Right" Format="N2" Text="[price]"/>
+      <TextObject Name="tax" Left="13.7" Top="0.15" Width="1.7" Height="0.45" HorzAlign="Right" Format="N2" Text="[sales_tax]"/>
+      <TextObject Name="levy" Left="15.4" Top="0.15" Width="1.5" Height="0.45" HorzAlign="Right" Format="N2" Text="[levy]"/>
+      <TextObject Name="total" Left="16.9" Top="0.15" Width="1.9" Height="0.45" HorzAlign="Right" Format="N2" Text="[total_line]"/>
+    </DataBand>
+    <DataFooterBand Name="DataFooter1" Top="6.2" Width="19" Height="2.8">
+      <TextObject Name="lblRegLetter" Left="0.2" Top="0.2" Width="3" Height="0.45" Text="Reg. Letter #:" TextColor="#606060"/>
+      <TextObject Name="regLetterNo" Left="3.2" Top="0.2" Width="5.2" Height="0.45" Text="[Data.Invoice.registration_letter_no]"/>
+      <LineObject Name="lineSummary" Left="12" Top="1.4" Width="6.8" Height="0" BorderStyle="Solid" BorderWidth="1" BorderColor="#CCC"/>
+      <TextObject Name="lblTotal" Left="13.7" Top="1.6" Width="3" Height="0.6" Font="Arial, 12pt, style=Bold" Text="Total:" HorzAlign="Right"/>
+      <TextObject Name="totalAmount" Left="16.9" Top="1.6" Width="2" Height="0.6" Font="Arial, 12pt, style=Bold" HorzAlign="Right" Format="N2" Text="[Data.Invoice.total_amount]"/>
+    </DataFooterBand>
+    <PageFooterBand Name="PageFooter1" Top="27.7" Width="19" Height="1">
+      <LineObject Name="lineFooter" Left="0" Top="0" Width="19" Height="0" BorderStyle="Solid" BorderWidth="0.5" BorderColor="#BBB"/>
+      <TextObject Name="footerNote" Left="0.2" Top="0.25" Width="12" Height="0.5" Text="Computer generated. All amounts in Pak Rupees." TextColor="#777"/>
+      <TextObject Name="pageNo" Left="14" Top="0.25" Width="4.8" Height="0.5" Text="Page [Page#] of [TotalPages#]" HorzAlign="Right" TextColor="#777"/>
+    </PageFooterBand>
+  </ReportPage>
+</Report>

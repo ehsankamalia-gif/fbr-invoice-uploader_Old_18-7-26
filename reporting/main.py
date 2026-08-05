@@ -34,6 +34,19 @@ from app.services.invoice_service import invoice_service
 from reporting.lookup_utils import format_cnic, validate_lookup_inputs
 from reporting.invoice_detail_utils import invoice_to_detail_dict
 
+try:
+    from app.services.fastreport_bridge import (
+        build_report as _fr_build_report,
+        is_fastreports_available as _fr_available,
+    )
+except Exception:  # pragma: no cover - bridge import guard
+    _fr_available = None
+
+    def _fr_build_report(*_a, **_kw):
+        from dataclasses import make_dataclass
+        Br = make_dataclass("Br", [("ok", bool), ("output_path", "Optional[Path]"), ("error", "Optional[str]"), ("args_used", list)])
+        return Br(ok=False, output_path=None, error="bridge_import_unavailable", args_used=[])
+
 logger = logging.getLogger(__name__)
 
 

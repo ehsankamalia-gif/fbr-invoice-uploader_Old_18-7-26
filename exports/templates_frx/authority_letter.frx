@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Report ScriptLanguage="CSharp" Dpi="100" DefaultFontFamily="Arial" DefaultFontSize="11" DefaultLcid="1033" ReportUnit="Centimeters" PageWidth="21" PageHeight="29.7" LeftMargin="1.2" RightMargin="1.2" TopMargin="1.2" BottomMargin="1.2" PrinterSettings="" Description="Authority Letter template">
+  <Dictionary>
+    <JsonDataSource Name="Data" Alias="Data" ConnectionString="dataset.json" TableName="Data.Letter">
+      <Column Name="serial_number" DataType="System.String"/>
+      <Column Name="date" DataType="System.String"/>
+      <Column Name="product_model" DataType="System.String"/>
+      <Column Name="customer_name" DataType="System.String"/>
+      <Column Name="father_name" DataType="System.String"/>
+      <Column Name="relation_prefix" DataType="System.String"/>
+      <Column Name="customer_address" DataType="System.String"/>
+      <Column Name="slip_address_1" DataType="System.String"/>
+      <Column Name="slip_address_2" DataType="System.String"/>
+      <Column Name="business_name" DataType="System.String"/>
+      <Column Name="business_address" DataType="System.String"/>
+      <Column Name="business_phone" DataType="System.String"/>
+    </JsonDataSource>
+  </Dictionary>
+  <ReportPage Name="Page1" PaperSize="A4" Orientation="Portrait">
+    <PageHeaderBand Name="PageHeader1" Top="0" Width="18.6" Height="3.4">
+      <TextObject Name="sLbl" Left="14" Top="0.3" Width="2.2" Height="0.45" HorzAlign="Right" Text="Serial #:" TextColor="#606060"/>
+      <TextObject Name="ser" Left="16.3" Top="0.3" Width="2.2" Height="0.45" Font="Arial, 11pt, style=Bold" Text="[Data.Letter.serial_number]"/>
+      <TextObject Name="dLbl" Left="14" Top="0.85" Width="2.2" Height="0.45" HorzAlign="Right" Text="Date:" TextColor="#606060"/>
+      <TextObject Name="dt" Left="16.3" Top="0.85" Width="2.2" Height="0.45" Font="Arial, 11pt, style=Bold" Text="[Data.Letter.date]"/>
+      <TextObject Name="lh" Left="0.2" Top="0.3" Width="12" Height="0.7" Font="Arial, 16pt, style=Bold" Text="[Data.Letter.business_name]" TextColor="#0B1020"/>
+      <TextObject Name="lha" Left="0.2" Top="0.95" Width="12" Height="0.45" Text="[Data.Letter.business_address]  |  [Data.Letter.business_phone]" TextColor="#555"/>
+      <LineObject Name="ln" Left="0" Top="1.8" Width="18.6" Height="0" BorderStyle="Solid" BorderWidth="1.5" BorderColor="#0B1020"/>
+      <TextObject Name="twc" Left="0.2" Top="2.2" Width="10" Height="0.6" Font="Arial, 11pt, style=Bold" Text="TO WHOM IT MAY CONCERN"/>
+    </PageHeaderBand>
+    <ReportTitleBand Name="Body" Top="3.5" Width="18.6" Height="6">
+      <TextObject Name="sLbl2" Left="0.2" Top="0.3" Width="1.9" Height="0.55" Font="Arial, 11pt, style=Bold" Text="Subject:"/>
+      <TextObject Name="sub" Left="2.1" Top="0.3" Width="16" Height="0.55" Font="Arial, 11pt, style=Bold" Text="Authority Letter — Vehicle Registration [Data.Letter.product_model]"/>
+      <TextObject Name="p1" Left="0.2" Top="1.3" Width="18.2" Height="4" CanGrow="true" TextRenderType="HtmlTags" Text="This is to certify that Mr./Ms. &lt;b&gt;[Data.Letter.customer_name] [Data.Letter.relation_prefix] [Data.Letter.father_name]&lt;/b&gt;, resident of &lt;b&gt;[Data.Letter.customer_address]&lt;/b&gt;, has purchased a motorcycle of model &lt;b&gt;[Data.Letter.product_model]&lt;/b&gt; from our establishment against valid sale receipt.&#13;&#10;&#13;&#10;This letter is being issued on the request of the above-named customer for registration of the motorcycle with the concerned Excise &amp; Taxation authorities.&#13;&#10;&#13;&#10;We hereby request all concerned departments to extend their full cooperation and assistance in this regard."/>
+    </ReportTitleBand>
+    <PageFooterBand Name="PageFooter1" Top="27.3" Width="18.6" Height="1.1">
+      <TextObject Name="sl" Left="12" Top="0.15" Width="6.4" Height="0.5" HorzAlign="Right" Text="For [Data.Letter.business_name]"/>
+      <LineObject Name="sigL" Left="12" Top="0.7" Width="6.4" Height="0" BorderStyle="Solid" BorderWidth="1" BorderColor="#333"/>
+      <TextObject Name="pg" Left="0.2" Top="0.7" Width="10" Height="0.4" TextColor="#777" Text="Page [Page#] / [TotalPages#]"/>
+    </PageFooterBand>
+  </ReportPage>
+</Report>

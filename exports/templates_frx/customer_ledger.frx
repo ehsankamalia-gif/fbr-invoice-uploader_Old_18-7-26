@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Report ScriptLanguage="CSharp" Dpi="100" DefaultFontFamily="Arial" DefaultFontSize="10" DefaultLcid="1033" ReportUnit="Centimeters" PageWidth="21" PageHeight="29.7" LeftMargin="1" RightMargin="1" TopMargin="1" BottomMargin="1" PrinterSettings="" Description="Customer Ledger Statement">
+  <Dictionary>
+    <JsonDataSource Name="Data" Alias="Data" ConnectionString="dataset.json" TableName="Data.Statement">
+      <Column Name="date_range" DataType="System.String"/>
+      <Column Name="generated_at" DataType="System.String"/>
+      <Column Name="business_name" DataType="System.String"/>
+      <Column Name="business_address" DataType="System.String"/>
+      <Column Name="business_phone" DataType="System.String"/>
+      <Column Name="total_debit" DataType="System.Decimal"/>
+      <Column Name="total_credit" DataType="System.Decimal"/>
+      <Column Name="final_balance" DataType="System.Decimal"/>
+      <Relation Name="Customer" ParentDataSource="Data.Statement" ChildDataSource="Data.Customer"/>
+      <Relation Name="Entries" ParentDataSource="Data.Statement" ChildDataSource="Data.Entries"/>
+    </JsonDataSource>
+    <TableDataSource Name="Data.Customer" Alias="Customer">
+      <Column Name="name" DataType="System.String"/>
+      <Column Name="father_name" DataType="System.String"/>
+      <Column Name="phone" DataType="System.String"/>
+      <Column Name="cnic" DataType="System.String"/>
+      <Column Name="address" DataType="System.String"/>
+    </TableDataSource>
+    <TableDataSource Name="Data.Entries" Alias="Entries">
+      <Column Name="date" DataType="System.String"/>
+      <Column Name="description" DataType="System.String"/>
+      <Column Name="debit" DataType="System.Decimal"/>
+      <Column Name="credit" DataType="System.Decimal"/>
+      <Column Name="balance" DataType="System.Decimal"/>
+    </TableDataSource>
+  </Dictionary>
+  <ReportPage Name="Page1" PaperSize="A4" Orientation="Landscape" PageWidth="29.7" PageHeight="21" LeftMargin="1" RightMargin="1" TopMargin="1" BottomMargin="1">
+    <ReportTitleBand Name="titleBand" Top="0" Width="27.7" Height="2.2" Fill="#F5F5F5">
+      <TextObject Name="biz" Left="0.2" Top="0.2" Width="14" Height="0.8" Font="Arial, 18pt, style=Bold" Text="[Data.Statement.business_name]"/>
+      <TextObject Name="bizAddr" Left="0.2" Top="0.9" Width="17" Height="0.45" Text="[Data.Statement.business_address]  |  [Data.Statement.business_phone]" TextColor="#555"/>
+      <TextObject Name="reportName" Left="0.2" Top="1.45" Width="14" Height="0.55" Font="Arial, 13pt, style=Bold" Text="CUSTOMER LEDGER STATEMENT"/>
+      <TextObject Name="period" Left="21" Top="0.3" Width="6.5" Height="0.45" Text="Period: [Data.Statement.date_range]" HorzAlign="Right"/>
+      <TextObject Name="generated" Left="21" Top="0.8" Width="6.5" Height="0.45" Text="Generated: [Data.Statement.generated_at]" HorzAlign="Right" TextColor="#555"/>
+    </ReportTitleBand>
+    <PageHeaderBand Name="customerBand" Top="2.3" Width="27.7" Height="2.4">
+      <TextObject Name="custLbl" Left="0.2" Top="0.3" Width="2.4" Height="0.45" Text="Customer:" TextColor="#606060"/>
+      <TextObject Name="custName" Left="2.6" Top="0.3" Width="13" Height="0.5" Font="Arial, 12pt, style=Bold" Text="[Data.Statement.Customer.name]"/>
+      <TextObject Name="phoneLbl" Left="18" Top="0.3" Width="2.2" Height="0.45" Text="Phone:" TextColor="#606060" HorzAlign="Right"/>
+      <TextObject Name="phone" Left="20.3" Top="0.3" Width="7" Height="0.45" Text="[Data.Statement.Customer.phone]"/>
+      <TextObject Name="fatherLbl" Left="0.2" Top="0.85" Width="2.4" Height="0.45" Text="Father:" TextColor="#606060"/>
+      <TextObject Name="fatherName" Left="2.6" Top="0.85" Width="13" Height="0.45" Text="[Data.Statement.Customer.father_name]"/>
+      <TextObject Name="cnicLbl" Left="18" Top="0.85" Width="2.2" Height="0.45" Text="CNIC:" TextColor="#606060" HorzAlign="Right"/>
+      <TextObject Name="cnic" Left="20.3" Top="0.85" Width="7" Height="0.45" Text="[Data.Statement.Customer.cnic]"/>
+      <TextObject Name="addrLbl" Left="0.2" Top="1.4" Width="2.4" Height="0.45" Text="Address:" TextColor="#606060"/>
+      <TextObject Name="address" Left="2.6" Top="1.4" Width="24.9" Height="0.9" CanGrow="true" Text="[Data.Statement.Customer.address]"/>
+    </PageHeaderBand>
+    <ColumnHeaderBand Name="cols" Top="4.8" Width="27.7" Height="0.6" Fill="#0B1020">
+      <TextObject Name="c1" Left="0.2" Top="0.1" Width="3" Height="0.45" Font="Arial, 9pt, style=Bold" TextColor="White" Text="Date"/>
+      <TextObject Name="c2" Left="3.2" Top="0.1" Width="14" Height="0.45" Font="Arial, 9pt, style=Bold" TextColor="White" Text="Description"/>
+      <TextObject Name="c3" Left="17.2" Top="0.1" Width="3.2" Height="0.45" Font="Arial, 9pt, style=Bold" TextColor="White" HorzAlign="Right" Text="Debit (Rs.)"/>
+      <TextObject Name="c4" Left="20.4" Top="0.1" Width="3.2" Height="0.45" Font="Arial, 9pt, style=Bold" TextColor="White" HorzAlign="Right" Text="Credit (Rs.)"/>
+      <TextObject Name="c5" Left="23.6" Top="0.1" Width="3.8" Height="0.45" Font="Arial, 9pt, style=Bold" TextColor="White" HorzAlign="Right" Text="Balance (Rs.)"/>
+    </ColumnHeaderBand>
+    <DataBand Name="entries" Top="5.5" Width="27.7" Height="0.6" DataSource="Data.Statement.Entries" Fill="#FAFAFA">
+      <TextObject Name="date" Left="0.2" Top="0.1" Width="3" Height="0.45" Text="[date]"/>
+      <TextObject Name="desc" Left="3.2" Top="0.1" Width="14" Height="0.45" CanGrow="true" Text="[description]"/>
+      <TextObject Name="debit" Left="17.2" Top="0.1" Width="3.2" Height="0.45" HorzAlign="Right" Format="N2" Text="[debit]"/>
+      <TextObject Name="credit" Left="20.4" Top="0.1" Width="3.2" Height="0.45" HorzAlign="Right" Format="N2" Text="[credit]"/>
+      <TextObject Name="balance" Left="23.6" Top="0.1" Width="3.8" Height="0.45" HorzAlign="Right" Font="Arial, 9pt, style=Bold" Format="N2" Text="[balance]"/>
+    </DataBand>
+    <DataFooterBand Name="summary" Top="6.2" Width="27.7" Height="2.2">
+      <LineObject Name="sLine" Left="17" Top="0.2" Width="10.5" Height="0" BorderStyle="Solid" BorderWidth="1" BorderColor="#333"/>
+      <TextObject Name="dLbl" Left="14" Top="0.5" Width="3" Height="0.5" HorzAlign="Right" Font="Arial, 10pt, style=Bold" Text="Total Debits:"/>
+      <TextObject Name="dTot" Left="17.2" Top="0.5" Width="3.2" Height="0.5" HorzAlign="Right" Font="Arial, 10pt, style=Bold" Format="N2" Text="[Data.Statement.total_debit]"/>
+      <TextObject Name="cLbl" Left="14" Top="1.05" Width="3" Height="0.5" HorzAlign="Right" Font="Arial, 10pt, style=Bold" Text="Total Credits:"/>
+      <TextObject Name="cTot" Left="17.2" Top="1.05" Width="3.2" Height="0.5" HorzAlign="Right" Font="Arial, 10pt, style=Bold" Format="N2" Text="[Data.Statement.total_credit]"/>
+      <TextObject Name="bLbl" Left="14" Top="1.6" Width="3" Height="0.6" HorzAlign="Right" Font="Arial, 12pt, style=Bold" Text="Balance:"/>
+      <TextObject Name="bTot" Left="17.2" Top="1.6" Width="10" Height="0.6" HorzAlign="Right" Font="Arial, 12pt, style=Bold" Format="N2" Text="[Data.Statement.final_balance]"/>
+    </DataFooterBand>
+    <PageFooterBand Name="footer" Top="18.8" Width="27.7" Height="1">
+      <TextObject Name="note" Left="0.2" Top="0.3" Width="14" Height="0.5" Text="Computer-generated statement. No signature required." TextColor="#777"/>
+      <TextObject Name="page" Left="20" Top="0.3" Width="7.5" Height="0.5" HorzAlign="Right" Text="Page [Page#] / [TotalPages#]" TextColor="#777"/>
+    </PageFooterBand>
+  </ReportPage>
+</Report>
