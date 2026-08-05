@@ -1,3 +1,4 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -8,6 +9,10 @@
     
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    {% if init_progress_bar_enabled %}
+    <link rel="stylesheet" href="{% static 'css/init_progress_bar.css' %}">
+    <script src="{% static 'js/init_progress_bar.js' %}" defer></script>
+    {% endif %}
     
     <script>
         tailwind.config = {
@@ -86,6 +91,17 @@
     </style>
 </head>
 <body class="bg-gray-50">
+    {% if init_progress_bar_enabled %}
+    <div id="init-progress-root" class="fixed top-0 left-0 w-full z-[9999] opacity-100 transition-opacity duration-200">
+        <div class="relative w-full">
+            <div class="w-full h-1 bg-gray-200">
+                <div id="init-progress-bar" class="h-1 w-0"></div>
+            </div>
+            <div id="init-progress-label" class="absolute right-2 top-1 text-[11px] leading-4 text-gray-700 bg-white/90 px-2 py-0.5 rounded-md shadow-sm" role="status" aria-live="polite">0%</div>
+            <div id="init-progress-a11y" class="sr-only" role="progressbar" aria-label="Loading" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">Loading 0%</div>
+        </div>
+    </div>
+    {% endif %}
     {% if 'customer_id' in request.session %}
     <div class="flex min-h-screen">
         <!-- Mobile menu overlay -->

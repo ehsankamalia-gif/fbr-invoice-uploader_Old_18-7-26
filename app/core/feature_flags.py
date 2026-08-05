@@ -15,6 +15,7 @@ class FeatureFlagManager:
         "new_dashboard": False,
         "advanced_reports": False,
         "bulk_sms_v2": False,
+        "init_progress_bar": False,
         "auto_updates": True,
         "performance_monitoring": True
     }

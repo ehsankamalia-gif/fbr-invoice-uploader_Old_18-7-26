@@ -3,9 +3,13 @@ import os
 from pathlib import Path
 
 from PyQt6.QtCore import QCoreApplication, Qt
-from PyQt6.QtGui import QFont, QFontDatabase
+from PyQt6.QtGui import QFont, QFontDatabase, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
+    QDialog,
+    QVBoxLayout,
+    QLabel,
+    QProgressBar,
     QMessageBox,
     QLineEdit,
     QTextEdit,
@@ -179,6 +183,67 @@ def _apply_font_to_input_widgets(app: QApplication, font: QFont) -> None:
 def _apply_urdu_font(app: QApplication) -> None:
     return
 
+def _asset_path(*parts: str) -> Path:
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        return Path(meipass, *parts)
+    base_dir = Path(__file__).resolve().parent.parent
+    return base_dir.joinpath(*parts)
+
+class _StartupDialog(QDialog):
+    def __init__(self, app: QApplication):
+        super().__init__(None)
+        self._app = app
+
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.Dialog
+            | Qt.WindowType.WindowStaysOnTopHint
+        )
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+
+        self._image_label = QLabel(self)
+        self._image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._image_label)
+
+        self._status_label = QLabel("Launching…", self)
+        self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._status_label)
+
+        self._progress = QProgressBar(self)
+        self._progress.setRange(0, 0)
+        self._progress.setTextVisible(False)
+        layout.addWidget(self._progress)
+
+        self._apply_splash_image()
+        self.adjustSize()
+        self._center_on_screen()
+
+    def set_status(self, text: str) -> None:
+        self._status_label.setText(text)
+        self._app.processEvents()
+
+    def _apply_splash_image(self) -> None:
+        splash_path = _asset_path("assets", "splash.png")
+        if splash_path.exists():
+            pixmap = QPixmap(str(splash_path))
+            if not pixmap.isNull():
+                self._image_label.setPixmap(
+                    pixmap.scaledToWidth(520, Qt.TransformationMode.SmoothTransformation)
+                )
+
+    def _center_on_screen(self) -> None:
+        screen = self._app.primaryScreen()
+        if screen is None:
+            return
+        geo = screen.availableGeometry()
+        frame = self.frameGeometry()
+        frame.moveCenter(geo.center())
+        self.move(frame.topLeft())
+
 def main() -> None:
     # --- Fix for QWebEngine GPU Crash on some Windows machines ---
     # Force software rendering if needed
@@ -201,40 +266,43 @@ def main() -> None:
     if str(base_dir) not in sys.path:
         sys.path.append(str(base_dir))
 
-    # Initialize database and run migrations FIRST
-    # This ensures that when services are imported later (via MainWindow),
-    # SessionLocal is already configured to the real DB.
-    try:
-        init_db()
-        # Initialize default settings if DB is ready
-        from app.services.settings_service import settings_service
-        settings_service.initialize_if_connected()
-    except Exception as e:
-        print(f"Database initialization failed: {e}")
-    
-    start_reporting_server()
-
-    # NOW import MainWindow
-    from app.qt_ui.main_window import MainWindow
-
-    # Add Chromium flags to further ensure stability
     sys_args = sys.argv
     sys_args.append("--no-sandbox")
 
     import PyQt6.QtWebEngineWidgets  # noqa: F401
 
     app = QApplication(sys_args)
+    startup = _StartupDialog(app)
+    startup.show()
+    app.processEvents()
+
+    startup.set_status("Initializing database…")
+    try:
+        init_db()
+        from app.services.settings_service import settings_service
+        settings_service.initialize_if_connected()
+    except Exception as e:
+        print(f"Database initialization failed: {e}")
+
+    startup.set_status("Starting reporting…")
+    start_reporting_server()
+
+    startup.set_status("Loading user interface…")
+    from app.qt_ui.main_window import MainWindow
     font_manager = _FontManager(app)
     copy_support_manager = CopySupportManager(app)
     app.installEventFilter(font_manager)
     app.installEventFilter(copy_support_manager)
     app._font_manager = font_manager
+    app._font_manager = font_manager
     app._copy_support_manager = copy_support_manager
     font_manager.refresh_from_settings()
     copy_support_manager.apply_existing_widgets()
 
+    startup.set_status("Checking database…")
     db_success, db_status = check_connection()
     if not db_success and db_status != "DATABASE_MISSING":
+        startup.close()
         QMessageBox.critical(
             None,
             "Connection Error",
@@ -242,6 +310,7 @@ def main() -> None:
         )
         sys.exit(1)
 
+    startup.close()
     window = MainWindow(db_status=db_status)
     window.show()
     sys.exit(app.exec())

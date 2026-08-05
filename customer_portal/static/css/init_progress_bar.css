@@ -1,0 +1,23 @@
+#init-progress-root {
+  pointer-events: none;
+}
+
+#init-progress-bar {
+  background: #2563eb;
+  transition: width 180ms ease-out, background-color 180ms ease-out;
+}
+
+#init-progress-root[data-state="error"] #init-progress-bar {
+  background: #ef4444;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #init-progress-bar {
+    transition: none;
+  }
+
+  #init-progress-root {
+    transition: none;
+  }
+}
+
