@@ -2,6 +2,7 @@ import os
 import json
 import time
 import threading
+import logging
 import smtplib
 import secrets
 from email.message import EmailMessage
@@ -32,6 +33,8 @@ from app.db.models import (
 from app.services.invoice_service import invoice_service
 from reporting.lookup_utils import format_cnic, validate_lookup_inputs
 from reporting.invoice_detail_utils import invoice_to_detail_dict
+
+logger = logging.getLogger(__name__)
 
 
 def get_db() -> Session:

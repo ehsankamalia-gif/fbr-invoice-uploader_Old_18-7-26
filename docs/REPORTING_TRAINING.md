@@ -5,7 +5,7 @@
 - Go to the Reports section.
 - Click Open Dashboard.
 
-The portal opens in your browser at `http://localhost:9000/dashboard`.
+The portal opens in your browser at `http://127.0.0.1:9000/dashboard`.
 
 ## 2) Use Filters (Date + Status)
 On the dashboard:

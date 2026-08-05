@@ -2203,14 +2203,43 @@ class MainWindow(QMainWindow):
             try:
                 from PyQt6.QtGui import QDesktopServices
                 from PyQt6.QtCore import QUrl
+                import socket
+                import time
+
+                if url.startswith("http://127.0.0.1:9000"):
+                    def _is_open() -> bool:
+                        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        try:
+                            s.settimeout(0.2)
+                            return s.connect_ex(("127.0.0.1", 9000)) == 0
+                        finally:
+                            s.close()
+
+                    if not _is_open():
+                        from reporting.server import start_reporting_server
+
+                        start_reporting_server()
+
+                        deadline = time.time() + 3.0
+                        while time.time() < deadline and not _is_open():
+                            time.sleep(0.1)
+
+                        if not _is_open():
+                            self._show_error(
+                                "Reporting Server",
+                                "Reporting server is not running on http://127.0.0.1:9000.\n\n"
+                                "If you are using the EXE build, rebuild it with FastAPI/Uvicorn included.\n"
+                                "If you are running from source, install dependencies from requirements.txt.",
+                            )
+                            return
 
                 QDesktopServices.openUrl(QUrl(url))
             except Exception as e:
                 self._show_error("Browser Error", str(e))
 
-        open_dash.clicked.connect(lambda: open_url("http://localhost:9000/dashboard"))
-        open_builder.clicked.connect(lambda: open_url("http://localhost:9000/builder"))
-        open_sched.clicked.connect(lambda: open_url("http://localhost:9000/schedules"))
+        open_dash.clicked.connect(lambda: open_url("http://127.0.0.1:9000/dashboard"))
+        open_builder.clicked.connect(lambda: open_url("http://127.0.0.1:9000/builder"))
+        open_sched.clicked.connect(lambda: open_url("http://127.0.0.1:9000/schedules"))
 
         btn_row.addWidget(open_dash)
         btn_row.addWidget(open_builder)
@@ -2218,7 +2247,7 @@ class MainWindow(QMainWindow):
         btn_row.addStretch(1)
         layout.addLayout(btn_row)
 
-        note = QLabel("If the portal does not open, ensure the Reporting Server is running on http://localhost:9000.")
+        note = QLabel("If the portal does not open, ensure the Reporting Server is running on http://127.0.0.1:9000.")
         note.setStyleSheet("color: #95a5a6; font-size: 11px;")
         note.setWordWrap(True)
         layout.addWidget(note)

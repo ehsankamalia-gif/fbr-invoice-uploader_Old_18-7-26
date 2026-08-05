@@ -1,7 +1,7 @@
 # Reporting Portal v2
 
 ## Overview
-The Reporting Portal v2 is a web-based reporting system running locally at `http://localhost:9000/` and started automatically by the desktop application. It replaces the legacy in-app reporting screens and provides:
+The Reporting Portal v2 is a web-based reporting system running locally at `http://127.0.0.1:9000/` and started automatically by the desktop application. It replaces the legacy in-app reporting screens and provides:
 
 - Interactive dashboards with live refresh
 - Dynamic filtering (date range + FBR sync status)
@@ -12,13 +12,13 @@ The Reporting Portal v2 is a web-based reporting system running locally at `http
 - Optional access token gate and role enforcement (admin/manager for configuration actions)
 
 ## URLs
-- Dashboard: `http://localhost:9000/dashboard`
-- Template Builder: `http://localhost:9000/builder`
-- Schedules: `http://localhost:9000/schedules`
+- Dashboard: `http://127.0.0.1:9000/dashboard`
+- Template Builder: `http://127.0.0.1:9000/builder`
+- Schedules: `http://127.0.0.1:9000/schedules`
 
 Backward compatibility:
-- Legacy CSV export: `http://localhost:9000/invoices.csv`
-- Root URL redirects to dashboard: `http://localhost:9000/`
+- Legacy CSV export: `http://127.0.0.1:9000/invoices.csv`
+- Root URL redirects to dashboard: `http://127.0.0.1:9000/`
 
 ## Data Sources
 The portal reads reporting data directly from the existing database through SQLAlchemy models:

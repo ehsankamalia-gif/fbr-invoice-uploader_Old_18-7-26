@@ -28,9 +28,9 @@ class ReportsFrame(ctk.CTkFrame):
         buttons = ctk.CTkFrame(container, fg_color="transparent")
         buttons.grid(row=2, column=0, sticky="w")
 
-        ctk.CTkButton(buttons, text="Open Dashboard", command=lambda: self._open_url("http://localhost:9000/dashboard")).pack(side="left", padx=(0, 10))
-        ctk.CTkButton(buttons, text="Template Builder", command=lambda: self._open_url("http://localhost:9000/builder")).pack(side="left", padx=(0, 10))
-        ctk.CTkButton(buttons, text="Schedules", command=lambda: self._open_url("http://localhost:9000/schedules")).pack(side="left")
+        ctk.CTkButton(buttons, text="Open Dashboard", command=lambda: self._open_url("http://127.0.0.1:9000/dashboard")).pack(side="left", padx=(0, 10))
+        ctk.CTkButton(buttons, text="Template Builder", command=lambda: self._open_url("http://127.0.0.1:9000/builder")).pack(side="left", padx=(0, 10))
+        ctk.CTkButton(buttons, text="Schedules", command=lambda: self._open_url("http://127.0.0.1:9000/schedules")).pack(side="left")
 
         help_box = ctk.CTkFrame(container)
         help_box.grid(row=3, column=0, sticky="ew", pady=(20, 0))

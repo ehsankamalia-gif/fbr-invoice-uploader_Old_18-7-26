@@ -2272,7 +2272,7 @@ class App(ctk.CTk):
 
     def open_reporting_portal(self):
         try:
-            webbrowser.open("http://localhost:9000/")
+            webbrowser.open("http://127.0.0.1:9000/")
         except Exception as e:
             messagebox.showerror("Error", f"Unable to open reporting portal: {e}")
 

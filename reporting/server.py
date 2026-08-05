@@ -1,9 +1,13 @@
 import threading
 import logging
 import socket
+import time
 
 
 logger = logging.getLogger(__name__)
+
+_start_lock = threading.Lock()
+_server_thread: threading.Thread | None = None
 
 
 def _is_port_in_use(host: str, port: int) -> bool:
@@ -25,23 +29,37 @@ def start_reporting_server(host: str = "127.0.0.1", port: int = 9000) -> None:
         )
         return
     except Exception as exc:
-        logger.error("Unexpected error while preparing reporting portal: %s", exc)
+        logger.exception("Unexpected error while preparing reporting portal: %s", exc)
         return
 
-    if _is_port_in_use(host, port):
-        logger.info("Reporting portal already running on %s:%s", host, port)
-        return
+    with _start_lock:
+        global _server_thread
 
-    def _run_server() -> None:
-        try:
-            config = uvicorn.Config(app, host=host, port=port, log_level="info")
-            server = uvicorn.Server(config)
-            server.run()
-        except OSError as exc:
-            logger.error("Failed to start reporting portal on %s:%s (%s)", host, port, exc)
-        except Exception as exc:
-            logger.exception("Unexpected error in reporting portal server: %s", exc)
+        if _server_thread and _server_thread.is_alive():
+            return
 
-    thread = threading.Thread(target=_run_server, daemon=True, name="ReportingPortalServer")
-    thread.start()
+        if _is_port_in_use(host, port):
+            logger.info("Reporting portal already running on %s:%s", host, port)
+            return
+
+        def _run_server() -> None:
+            try:
+                config = uvicorn.Config(app, host=host, port=port, log_level="info")
+                server = uvicorn.Server(config)
+                server.run()
+            except OSError as exc:
+                logger.error("Failed to start reporting portal on %s:%s (%s)", host, port, exc)
+            except Exception as exc:
+                logger.exception("Unexpected error in reporting portal server: %s", exc)
+
+        _server_thread = threading.Thread(target=_run_server, daemon=True, name="ReportingPortalServer")
+        _server_thread.start()
+
+    deadline = time.time() + 3.0
+    while time.time() < deadline:
+        if _is_port_in_use(host, port):
+            return
+        time.sleep(0.1)
+
+    logger.error("Reporting portal did not bind to %s:%s", host, port)
 
