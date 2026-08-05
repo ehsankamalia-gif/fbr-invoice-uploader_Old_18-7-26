@@ -3,11 +3,12 @@ from __future__ import annotations
 from collections import defaultdict
 
 from PyQt6.QtCore import QEvent, QObject, QPoint, Qt
-from PyQt6.QtGui import QAction, QKeySequence
+from PyQt6.QtGui import QAction, QKeySequence, QTextDocument
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QLabel,
+    QLineEdit,
     QMenu,
     QPlainTextEdit,
     QTableView,
@@ -17,7 +18,17 @@ from PyQt6.QtWidgets import (
 
 
 def _plain_label_text(label: QLabel) -> str:
-    return label.textFormat() and label.text() or label.text()
+    text = label.text() or ""
+    if not text:
+        return ""
+
+    if label.textFormat() == Qt.TextFormat.PlainText:
+        return text
+
+    document = QTextDocument()
+    document.setHtml(text)
+    plain_text = document.toPlainText().strip()
+    return plain_text or text
 
 
 def copy_text_to_clipboard(text: str) -> bool:
@@ -131,6 +142,9 @@ class CopySupportManager(QObject):
             widget.setTextInteractionFlags(flags)
             if widget.focusPolicy() == Qt.FocusPolicy.NoFocus:
                 widget.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+
+        if isinstance(widget, QLineEdit):
+            widget.setContextMenuPolicy(Qt.ContextMenuPolicy.DefaultContextMenu)
 
         if isinstance(widget, (QTextEdit, QPlainTextEdit)):
             widget.setContextMenuPolicy(Qt.ContextMenuPolicy.DefaultContextMenu)

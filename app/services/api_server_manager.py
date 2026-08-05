@@ -22,12 +22,19 @@ STATUS_FILE = RUNTIME_DIR / "api_server_status.json"
 LOG_FILE = RUNTIME_DIR / "api_server.log"
 STOP_FILE = RUNTIME_DIR / "api_server_stop.request"
 SUPERVISOR_SCRIPT = PROJECT_ROOT / "app" / "api" / "persistent_server.py"
+SUPERVISOR_MODULE = "app.api.persistent_server"
 
 API_HOST = "127.0.0.1"
 API_BIND_HOST = "0.0.0.0"
 API_PORT = 8000
 STALE_STATUS_SECONDS = 15
 STOP_WAIT_SECONDS = 10
+API_PROCESS_MARKERS = (
+    str(SUPERVISOR_SCRIPT).lower(),
+    SUPERVISOR_MODULE,
+    "app.api.server:app",
+    "start_api_server.bat",
+)
 
 
 def _ensure_runtime_dir() -> None:
@@ -73,10 +80,27 @@ def _is_status_stale(updated_at: Any, max_age_seconds: int = STALE_STATUS_SECOND
 
 
 def _resolve_python_command() -> list[str]:
-    candidates = [
-        PROJECT_ROOT / "venv" / "Scripts" / "python.exe",
-        Path(sys.executable),
-    ]
+    candidates: list[Path] = []
+
+    project_python = PROJECT_ROOT / "venv" / "Scripts" / "python.exe"
+    candidates.append(project_python)
+    if sys.platform == "win32":
+        candidates.append(project_python.with_name("pythonw.exe"))
+
+    sys_python = Path(sys.executable)
+    candidates.append(sys_python)
+    if sys.platform == "win32":
+        candidates.append(sys_python.with_name("pythonw.exe"))
+
+    if sys.platform == "win32":
+        reordered_candidates: list[Path] = []
+        for candidate in candidates:
+            if candidate.name.lower() == "pythonw.exe":
+                reordered_candidates.append(candidate)
+        for candidate in candidates:
+            if candidate.name.lower() != "pythonw.exe":
+                reordered_candidates.append(candidate)
+        candidates = reordered_candidates
 
     for candidate in candidates:
         if candidate and candidate.exists() and "python" in candidate.name.lower():
@@ -101,26 +125,94 @@ def _utc_now() -> str:
 
 
 def _find_port_pids(port: int = API_PORT) -> set[int]:
-    if psutil is None:
-        return set()
-
     pids: set[int] = set()
+    if psutil is not None:
+        try:
+            for connection in psutil.net_connections(kind="inet"):
+                local_addr = getattr(connection, "laddr", None)
+                conn_pid = getattr(connection, "pid", None)
+                if local_addr and getattr(local_addr, "port", None) == port and conn_pid:
+                    pids.add(int(conn_pid))
+        except Exception:
+            pids.clear()
+
+    if pids or sys.platform != "win32":
+        return pids
+
     try:
-        for connection in psutil.net_connections(kind="inet"):
-            local_addr = getattr(connection, "laddr", None)
-            conn_pid = getattr(connection, "pid", None)
-            if local_addr and getattr(local_addr, "port", None) == port and conn_pid:
-                pids.add(int(conn_pid))
+        result = subprocess.run(
+            ["netstat", "-ano", "-p", "tcp"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            if len(parts) < 5 or parts[0].upper() != "TCP":
+                continue
+            local_address = parts[1]
+            pid_text = parts[-1]
+            if not local_address.endswith(f":{port}") or not pid_text.isdigit():
+                continue
+            pids.add(int(pid_text))
     except Exception:
         return set()
     return pids
 
 
-def _wait_for_stopped(timeout_seconds: float = STOP_WAIT_SECONDS) -> bool:
+def _find_api_related_pids() -> set[int]:
+    if psutil is None:
+        return set()
+
+    pids: set[int] = set()
+    try:
+        for process in psutil.process_iter(attrs=["pid", "cmdline"]):
+            cmdline = " ".join(process.info.get("cmdline") or []).lower()
+            if not cmdline:
+                continue
+            if any(marker in cmdline for marker in API_PROCESS_MARKERS):
+                pids.add(int(process.info["pid"]))
+    except Exception:
+        return set()
+    return pids
+
+
+def _pid_exists(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if psutil is not None:
+        try:
+            return psutil.pid_exists(pid)
+        except Exception:
+            return False
+
+    if sys.platform == "win32":
+        result = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        return str(pid) in result.stdout
+
+    return False
+
+
+def _wait_for_stopped(
+    expected_pids: set[int] | None = None,
+    timeout_seconds: float = STOP_WAIT_SECONDS,
+) -> bool:
     deadline = time.time() + timeout_seconds
+    tracked_pids = {pid for pid in (expected_pids or set()) if pid > 0}
     while time.time() < deadline:
         status = get_api_server_status()
-        if not status.get("running") and status.get("state") == "stopped":
+        port_open = bool(status.get("running")) or _is_port_open()
+        pids_running = any(_pid_exists(pid) for pid in tracked_pids) if tracked_pids else False
+        if not port_open and not pids_running and status.get("state") == "stopped":
+            return True
+        if not port_open and not pids_running:
             return True
         time.sleep(0.5)
     return not _is_port_open()
@@ -177,7 +269,12 @@ def get_api_server_status() -> dict[str, Any]:
 
     if port_open:
         state = "running"
-        if not message:
+        if (
+            not message
+            or "crash" in message.lower()
+            or "not running" in message.lower()
+            or "stopped" in message.lower()
+        ):
             message = "API server is running on port 8000."
     elif status_is_stale or state not in {"starting", "restart_scheduled", "stopping"}:
         state = "stopped"
@@ -218,7 +315,8 @@ def start_api_server() -> dict[str, Any]:
 
     command = [
         *_resolve_python_command(),
-        str(SUPERVISOR_SCRIPT),
+        "-m",
+        SUPERVISOR_MODULE,
         "--host",
         API_BIND_HOST,
         "--port",
@@ -236,6 +334,7 @@ def start_api_server() -> dict[str, Any]:
 
         startupinfo = subprocess.STARTUPINFO()
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
 
     with LOG_FILE.open("a", encoding="utf-8") as log_stream:
         process = subprocess.Popen(
@@ -286,6 +385,7 @@ def stop_api_server() -> dict[str, Any]:
             pids_to_stop.add(int(value))
 
     pids_to_stop.update(_find_port_pids(API_PORT))
+    pids_to_stop.update(_find_api_related_pids())
 
     if not status.get("running") and not pids_to_stop:
         stopped_status = {
@@ -305,15 +405,24 @@ def stop_api_server() -> dict[str, Any]:
     _write_status_file(
         {
             "state": "stopping",
-            "message": "Stopping API server and closing active API processes...",
+            "message": "Stopping API server, closing active connections, and cleaning up background processes...",
             "updated_at": _utc_now(),
             "supervisor_pid": status.get("supervisor_pid"),
             "server_pid": status.get("server_pid"),
         }
     )
 
-    if _wait_for_stopped():
+    if _wait_for_stopped(expected_pids=pids_to_stop):
         STOP_FILE.unlink(missing_ok=True)
+        final_status = get_api_server_status()
+        if final_status.get("state") != "stopped":
+            _write_status_file(
+                {
+                    "state": "stopped",
+                    "message": "API server stopped successfully.",
+                    "updated_at": _utc_now(),
+                }
+            )
         return {
             "stopped": True,
             "already_stopped": False,

@@ -15,8 +15,14 @@ from typing import Any
 
 import uvicorn
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    # Detached launches execute this file directly, so add the project root
+    # before importing package modules like `app.db.session`.
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from app.db.session import close_all_db_connections
+
 RUNTIME_DIR = PROJECT_ROOT / "runtime"
 STATUS_FILE = RUNTIME_DIR / "api_server_status.json"
 LOG_FILE = RUNTIME_DIR / "api_server.log"
@@ -100,6 +106,14 @@ def clear_stop_request() -> None:
         pass
 
 
+def cleanup_server_resources() -> None:
+    try:
+        close_all_db_connections()
+        append_log("Closed API server database connections.")
+    except Exception as exc:
+        append_log(f"Database cleanup after API shutdown failed: {exc}")
+
+
 def _run_uvicorn_server(host: str, port: int, error_box: list[BaseException]) -> None:
     try:
         config = uvicorn.Config(
@@ -133,6 +147,7 @@ def _watch_for_stop_request(server: uvicorn.Server[Any]) -> None:
 
 def run_server_once(host: str, port: int) -> tuple[bool, str]:
     error_box: list[BaseException] = []
+    stop_status_written = False
     server_thread = threading.Thread(
         target=_run_uvicorn_server,
         args=(host, port, error_box),
@@ -146,6 +161,14 @@ def run_server_once(host: str, port: int) -> tuple[bool, str]:
     while server_thread.is_alive():
         if stop_requested():
             append_log("Stop request received while waiting for API server readiness.")
+            if not stop_status_written:
+                write_status(
+                    "stopping",
+                    "Stopping API server and closing active connections...",
+                    port=port,
+                    server_pid=os.getpid(),
+                )
+                stop_status_written = True
 
         if is_port_open(LOCAL_CHECK_HOST, port):
             if not running_status_written:
@@ -169,16 +192,18 @@ def run_server_once(host: str, port: int) -> tuple[bool, str]:
         time.sleep(0.25)
 
     while server_thread.is_alive():
-        if stop_requested() and not running_status_written:
+        if stop_requested() and not stop_status_written:
             write_status(
                 "stopping",
-                "Stopping API server and closing active API processes...",
+                "Stopping API server and closing active connections...",
                 port=port,
                 server_pid=os.getpid(),
             )
+            stop_status_written = True
         time.sleep(0.5)
 
     server_thread.join(timeout=1.0)
+    cleanup_server_resources()
 
     if error_box:
         raise error_box[0]

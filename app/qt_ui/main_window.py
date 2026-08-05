@@ -3300,8 +3300,16 @@ class MainWindow(QMainWindow):
 
     def _create_settings_page(self) -> QWidget:
         """Dashboard-style settings page with category launchers."""
-        page = QWidget(self)
-        root_layout = QVBoxLayout(page)
+        page = QScrollArea(self)
+        page.setWidgetResizable(True)
+        page.setFrameShape(QFrame.Shape.NoFrame)
+        page.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
+
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet("background-color: transparent;")
+        page.setWidget(scroll_content)
+
+        root_layout = QVBoxLayout(scroll_content)
         root_layout.setContentsMargins(40, 40, 40, 40)
         root_layout.setSpacing(30)
 
@@ -3432,6 +3440,8 @@ class MainWindow(QMainWindow):
             card = QFrame()
             card.setObjectName("formGroup")
             card.setCursor(Qt.CursorShape.PointingHandCursor)
+            card.setMinimumHeight(160)
+            card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
             card.setStyleSheet("""
                 QFrame#formGroup {
                     background-color: white;
@@ -3446,6 +3456,8 @@ class MainWindow(QMainWindow):
             """)
             
             card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(20, 20, 20, 20)
+            card_layout.setSpacing(8)
             
             icon_lbl = QLabel(icon)
             icon_lbl.setStyleSheet("font-size: 36px; margin-bottom: 5px;")
