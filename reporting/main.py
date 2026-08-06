@@ -388,7 +388,7 @@ def _render_dashboard_html() -> str:
         <div class="container-fluid">
           <span class="navbar-brand">Reporting Portal</span>
           <div class="d-flex gap-2">
-            <a class="btn btn-outline-light btn-sm" href="/builder">Template Builder</a>
+            <a class="btn btn-outline-light btn-sm" href="/builder">FastReport Studio</a>
             <a class="btn btn-outline-light btn-sm" href="/schedules">Schedules</a>
             <a class="btn btn-outline-light btn-sm" href="/lookup">Lookup</a>
           </div>
@@ -443,6 +443,58 @@ def _render_dashboard_html() -> str:
                   <button class="btn btn-outline-primary btn-sm" id="exportXlsx">Excel</button>
                   <button class="btn btn-outline-primary btn-sm" id="exportPdf">PDF</button>
                   <button class="btn btn-outline-primary btn-sm" id="exportPptx">PowerPoint</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="col-12">
+            <div class="card border-primary" id="frCard" style="display:none;">
+              <div class="card-header bg-primary text-white d-flex align-items-center justify-content-between">
+                <div>
+                  <strong>⚡ FastReport Powered Reports</strong>
+                  <span class="badge bg-light text-primary ms-2" id="frBadge">Detecting…</span>
+                </div>
+                <div>
+                  <span class="small opacity-75 me-3" id="frInfo"></span>
+                  <a class="btn btn-sm btn-outline-light" href="/builder">Manage Templates →</a>
+                </div>
+              </div>
+              <div class="card-body">
+                <div class="row g-3">
+                  <div class="col-12 col-md-5">
+                    <label class="form-label fw-bold">FastReport Template (.frx)</label>
+                    <select class="form-select" id="frTemplateSelect"></select>
+                    <div class="form-text" id="frTplInfo">Select a template to preview available formats.</div>
+                  </div>
+                  <div class="col-12 col-md-4">
+                    <label class="form-label fw-bold">Export Format</label>
+                    <select class="form-select" id="frFormatSelect">
+                      <option value="pdf">PDF (Recommended)</option>
+                      <option value="xlsx">Excel (.xlsx)</option>
+                      <option value="html">HTML</option>
+                      <option value="docx">Word (.docx)</option>
+                      <option value="csv">CSV</option>
+                      <option value="rtf">Rich Text (.rtf)</option>
+                      <option value="png">PNG Image</option>
+                      <option value="jpg">JPEG Image</option>
+                    </select>
+                    <div class="form-text">FastReport generates high-quality paginated exports.</div>
+                  </div>
+                  <div class="col-12 col-md-3 d-flex align-items-end">
+                    <div class="d-grid gap-2 w-100">
+                      <button class="btn btn-primary fw-bold" id="frGenerateBtn">
+                        🚀 Generate with FastReport
+                      </button>
+                      <button class="btn btn-outline-secondary btn-sm" id="frRefreshBtn" type="button">
+                        🔄 Refresh templates
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div class="mt-3">
+                  <div class="alert alert-info py-2 mb-0 small" role="alert" id="frAlert">
+                    ℹ️ When FastReport Desktop is installed, all export buttons above (CSV/Excel/PDF/PowerPoint) automatically prefer FastReport rendering with a fallback to the legacy Python renderer.
+                  </div>
                 </div>
               </div>
             </div>
@@ -883,10 +935,10 @@ def _render_dashboard_html() -> str:
             w.innerHTML = `
               <div class="col-12">
                 <div class="card border-warning">
-                  <div class="card-header fw-bold bg-warning-subtle">This template has no widgets yet.</div>
+                  <div class="card-header fw-bold bg-warning-subtle">Custom template (no preview widgets defined).</div>
                   <div class="card-body">
-                    <p class="mb-2">Go to <a class="fw-bold" href="/builder">Template Builder</a>, drag widgets from <b>Available Widgets</b> into the <b>Layout</b> area, and click <b>Save</b>.</p>
-                    <p class="mb-0 text-muted small">Or switch to the built-in <b>Default Dashboard</b> template from the dropdown above.</p>
+                    <p class="mb-2">Edit the layout visually in <a class="fw-bold" href="/builder">FastReport Studio</a> using the Designer. Exports always use FastReport templates regardless of dashboard preview widgets.</p>
+                    <p class="mb-0 text-muted small">Or switch to the built-in <b>Default Dashboard</b> template from the dropdown above for a dashboard preview.</p>
                   </div>
                 </div>
               </div>`;
@@ -1002,8 +1054,101 @@ def _render_dashboard_html() -> str:
               retryInvoice(t.getAttribute('data-invoice'), t);
             }
           });
+
+          // ---- FastReport integration ----
+          function headers() {
+            const h = {};
+            if (state.token) h['X-API-Key'] = state.token;
+            if (state.role)  h['X-User-Role'] = state.role;
+            return h;
+          }
+          function currentFilters() {
+            const from_ = document.getElementById('fromDate').dataset.iso || '';
+            const to = document.getElementById('toDate').dataset.iso || '';
+            const status = document.getElementById('status').value;
+            return { from_date: from_, to_date: to, status: status };
+          }
+          function downloadURL(template_name, fmt) {
+            const f = currentFilters();
+            const params = new URLSearchParams();
+            params.set('fmt', fmt);
+            if (f.from_date) params.set('from_date', f.from_date);
+            if (f.to_date)   params.set('to_date',   f.to_date);
+            if (f.status)    params.set('status',    f.status);
+            return `/api/fastreports/export/${encodeURIComponent(template_name)}?${params.toString()}`;
+          }
+          async function loadFastReportStatus() {
+            const card = document.getElementById('frCard');
+            const badge = document.getElementById('frBadge');
+            const info = document.getElementById('frInfo');
+            const tplSel = document.getElementById('frTemplateSelect');
+            const tplInfo = document.getElementById('frTplInfo');
+            if (!card) return;
+            try {
+              const res = await fetch('/api/fastreports/status', { headers: headers() });
+              if (!res.ok) { card.style.display = 'none'; return; }
+              const data = await res.json();
+              card.style.display = '';
+              if (data.available) {
+                badge.className = 'badge bg-success text-white ms-2';
+                badge.textContent = 'ACTIVE';
+                info.textContent = `Builder: ${(data.builder_exe || 'n/a').split('\\').pop()}`;
+              } else {
+                badge.className = 'badge bg-warning text-dark ms-2';
+                badge.textContent = 'NOT INSTALLED';
+                info.textContent = 'Set FASTREPORT_DESKTOP_DIR or install FastReport Desktop.';
+                document.getElementById('frAlert').className = 'alert alert-warning py-2 mb-0 small';
+                document.getElementById('frAlert').textContent = '⚠️ FastReport Desktop not detected. Legacy Python-native exports still work (reportlab/openpyxl). Install FastReport for higher-quality PDF/XLSX/DOCX output.';
+              }
+              tplSel.innerHTML = '';
+              const templates = data.templates || [];
+              if (!templates.length) {
+                tplSel.innerHTML = '<option value="">(no .frx templates found)</option>';
+                tplInfo.textContent = 'No .frx templates in exports/templates_frx/';
+              } else {
+                templates.forEach((t) => {
+                  const opt = document.createElement('option');
+                  opt.value = t.name;
+                  const sizeKB = Math.round(t.size_bytes / 1024);
+                  opt.textContent = t.name + ' (' + sizeKB + ' KB, ' + t.modified_at + ')';
+                  tplSel.appendChild(opt);
+                });
+                tplInfo.textContent = templates.length + ' .frx template(s) loaded from exports/templates_frx/';
+              }
+            } catch (e) {
+              card.style.display = 'none';
+            }
+          }
+          document.getElementById('frGenerateBtn')?.addEventListener('click', () => {
+            const tpl = document.getElementById('frTemplateSelect').value;
+            const fmt = document.getElementById('frFormatSelect').value;
+            if (!tpl) { alert('Please select a FastReport template.'); return; }
+            const btn = document.getElementById('frGenerateBtn');
+            const oldText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = '⏳ Generating…';
+            try {
+              const form = document.createElement('form');
+              form.method = 'POST';
+              form.action = downloadURL(tpl, fmt);
+              const token = state.token;
+              if (token) {
+                const tok = document.createElement('input');
+                tok.type = 'hidden'; tok.name = 'x_api_key'; tok.value = token;
+                form.appendChild(tok);
+              }
+              document.body.appendChild(form);
+              form.submit();
+              document.body.removeChild(form);
+            } finally {
+              setTimeout(() => { btn.disabled = false; btn.textContent = oldText; }, 1500);
+            }
+          });
+          document.getElementById('frRefreshBtn')?.addEventListener('click', loadFastReportStatus);
+
           setAuto(true);
           await loadDashboard();
+          await loadFastReportStatus();
         }
         init();
       </script>
@@ -1019,14 +1164,13 @@ def _render_builder_html() -> str:
     <head>
       <meta charset="utf-8"/>
       <meta name="viewport" content="width=device-width, initial-scale=1"/>
-      <title>Template Builder</title>
+      <title>FastReport Template Studio</title>
       <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
-      <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
     </head>
     <body class="bg-light">
       <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
         <div class="container-fluid">
-          <a class="navbar-brand" href="/dashboard">Reporting Portal</a>
+          <a class="navbar-brand" href="/dashboard">Reporting Portal · FastReport Studio</a>
           <div class="d-flex gap-2">
             <a class="btn btn-outline-light btn-sm" href="/dashboard">Dashboard</a>
             <a class="btn btn-outline-light btn-sm" href="/schedules">Schedules</a>
@@ -1035,150 +1179,323 @@ def _render_builder_html() -> str:
         </div>
       </nav>
       <main class="container py-3">
-        <div class="row g-3">
-          <div class="col-12 col-lg-4">
-            <div class="card">
-              <div class="card-header fw-bold">Templates</div>
+        <div class="row g-3 mb-3">
+          <div class="col-12 col-lg-6">
+            <div class="card border-primary h-100">
+              <div class="card-header bg-primary text-white fw-bold">
+                ⚡ FastReport Desktop Status
+              </div>
               <div class="card-body">
-                <div class="mb-2">
-                  <label class="form-label">Select</label>
-                  <select class="form-select" id="templateSelect"></select>
+                <div class="d-flex align-items-center gap-2 mb-2">
+                  <span class="spinner-border spinner-border-sm text-primary" id="frSpinner" role="status"></span>
+                  <span class="fw-bold" id="frStatusText">Detecting FastReport installation…</span>
                 </div>
-                <div class="mb-2">
-                  <label class="form-label">Name</label>
-                  <input class="form-control" id="name"/>
+                <div id="frDetails" class="small text-muted"></div>
+                <div class="mt-3 d-flex flex-wrap gap-2">
+                  <button class="btn btn-primary" id="openDesignerBlankBtn">
+                    🎨 Open Designer (Blank)
+                  </button>
+                  <button class="btn btn-outline-secondary btn-sm" id="refreshStatusBtn" type="button">
+                    🔄 Refresh
+                  </button>
                 </div>
-                <div class="mb-2">
-                  <label class="form-label">Description</label>
-                  <input class="form-control" id="description"/>
+                <div class="mt-3 small">
+                  <div class="fw-bold mb-1">Tips:</div>
+                  <ul class="mb-0 ps-3">
+                    <li>FastReport Designer edits <code>.frx</code> XML templates.</li>
+                    <li>Templates are stored in <code>exports/templates_frx/</code>.</li>
+                    <li>Data fields: <code>[Data.report_title]</code>, <code>[Data.invoices]</code>, <code>[Data.total_amount]</code>, etc.</li>
+                    <li>Design changes are saved locally to the <code>.frx</code> file instantly.</li>
+                  </ul>
                 </div>
-                <div class="d-flex gap-2">
-                  <button class="btn btn-primary" id="saveBtn">Save</button>
-                  <button class="btn btn-outline-secondary" id="newBtn">New</button>
+              </div>
+            </div>
+          </div>
+          <div class="col-12 col-lg-6">
+            <div class="card h-100">
+              <div class="card-header fw-bold">Quick Export Test</div>
+              <div class="card-body">
+                <div class="row g-2 mb-3">
+                  <div class="col-7">
+                    <label class="form-label fw-bold">Template</label>
+                    <select class="form-select" id="quickTemplateSelect"></select>
+                  </div>
+                  <div class="col-5">
+                    <label class="form-label fw-bold">Format</label>
+                    <select class="form-select" id="quickFormatSelect">
+                      <option value="pdf">PDF</option>
+                      <option value="xlsx">Excel (.xlsx)</option>
+                      <option value="html">HTML</option>
+                      <option value="docx">Word (.docx)</option>
+                      <option value="csv">CSV</option>
+                      <option value="rtf">RTF</option>
+                      <option value="png">PNG</option>
+                    </select>
+                  </div>
+                </div>
+                <button class="btn btn-success w-100 fw-bold" id="quickExportBtn">
+                  🚀 Render &amp; Download Now
+                </button>
+                <div class="form-text mt-2">Renders the selected template with live invoice data from the last 30 days.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="row g-3">
+          <div class="col-12 col-lg-5">
+            <div class="card">
+              <div class="card-header fw-bold d-flex align-items-center justify-content-between">
+                <span>FastReport Templates (.frx)</span>
+                <button class="btn btn-outline-primary btn-sm" id="refreshTemplatesBtn" type="button">🔄</button>
+              </div>
+              <div class="card-body">
+                <div class="small text-muted mb-2" id="tplCountInfo">Loading templates…</div>
+                <div class="table-responsive" style="max-height: 380px; overflow-y: auto;">
+                  <table class="table table-sm table-hover mb-0" id="frxTable">
+                    <thead class="table-light sticky-top">
+                      <tr>
+                        <th>Template</th>
+                        <th class="text-end">Size</th>
+                        <th>Modified</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="frxBody"><tr><td colspan="4" class="text-center text-muted py-3">(loading…)</td></tr></tbody>
+                  </table>
                 </div>
               </div>
             </div>
             <div class="card mt-3">
-              <div class="card-header fw-bold">Available Widgets</div>
-              <div class="card-body">
-                <div class="list-group" id="palette">
-                  <div class="list-group-item" data-type="kpi" data-metric="total_invoices" data-title="Total Invoices">KPI: Total Invoices</div>
-                  <div class="list-group-item" data-type="kpi" data-metric="total_amount" data-title="Total Amount">KPI: Total Amount</div>
-                  <div class="list-group-item" data-type="kpi" data-metric="avg_invoice_amount" data-title="Avg Invoice">KPI: Avg Invoice</div>
-                  <div class="list-group-item" data-type="chart" data-metric="daily_sales" data-title="Daily Sales">Chart: Daily Sales</div>
-                  <div class="list-group-item" data-type="chart" data-metric="status_breakdown" data-title="Status Breakdown">Chart: Status Breakdown</div>
-                  <div class="list-group-item" data-type="table" data-metric="invoices" data-title="Invoices">Table: Invoices</div>
-                </div>
-                <div class="text-muted small mt-2">Drag widgets into the layout.</div>
+              <div class="card-header fw-bold">Schedule Templates (DB)</div>
+              <div class="card-body small text-muted">
+                <div class="mb-2">The database stores which template is selected per Schedule entry. Edit Schedule templates on the <a href="/schedules" class="fw-bold">Schedules</a> page.</div>
+                <select class="form-select form-select-sm" id="dbTemplateSelect" size="6" aria-label="DB Templates list"></select>
               </div>
             </div>
           </div>
-          <div class="col-12 col-lg-8">
-            <div class="card">
-              <div class="card-header fw-bold">Layout</div>
+          <div class="col-12 col-lg-7">
+            <div class="card border-info h-100">
+              <div class="card-header bg-info-subtle fw-bold d-flex align-items-center justify-content-between">
+                <span>🛠️ Template: <span id="selectedTplName" class="text-info">— select one on the left —</span></span>
+                <span class="badge bg-info text-white" id="selectedTplBadge">idle</span>
+              </div>
               <div class="card-body">
-                <div class="list-group" id="layout"></div>
+                <div class="alert alert-info small py-2 mb-3">
+                  <strong>Workflow:</strong> Click <em>Open in Designer</em> to edit the template layout using FastReport Designer. After saving the <code>.frx</code> file, click <em>Preview / Export</em> to render it against live invoice data.
+                </div>
+                <div class="row g-3 mb-3">
+                  <div class="col-6 col-md-4">
+                    <label class="form-label fw-bold">File (.frx)</label>
+                    <input type="text" class="form-control form-control-sm" id="tplFile" readonly placeholder="—"/>
+                  </div>
+                  <div class="col-6 col-md-4">
+                    <label class="form-label fw-bold">Size</label>
+                    <input type="text" class="form-control form-control-sm" id="tplSize" readonly placeholder="—"/>
+                  </div>
+                  <div class="col-12 col-md-4">
+                    <label class="form-label fw-bold">Modified</label>
+                    <input type="text" class="form-control form-control-sm" id="tplModified" readonly placeholder="—"/>
+                  </div>
+                </div>
+                <div class="d-flex flex-wrap gap-2 mb-3">
+                  <button class="btn btn-primary" id="openInDesignerBtn" disabled>🎨 Open in Designer</button>
+                  <button class="btn btn-success" id="renderPdfBtn" disabled>📄 Preview PDF</button>
+                  <button class="btn btn-success" id="renderXlsxBtn" disabled>📊 Preview XLSX</button>
+                  <button class="btn btn-success" id="renderHtmlBtn" disabled>🌐 Preview HTML</button>
+                  <button class="btn btn-outline-success" id="renderAllBtn" disabled>📦 Render All</button>
+                </div>
+                <div>
+                  <label class="form-label fw-bold">Quick Custom Export</label>
+                  <div class="input-group">
+                    <select class="form-select" id="customFmtSelect">
+                      <option value="pdf">PDF</option>
+                      <option value="xlsx">Excel XLSX</option>
+                      <option value="html">HTML</option>
+                      <option value="docx">Word DOCX</option>
+                      <option value="csv">CSV</option>
+                      <option value="rtf">Rich Text (RTF)</option>
+                      <option value="png">Image PNG</option>
+                      <option value="jpg">Image JPG</option>
+                    </select>
+                    <button class="btn btn-outline-primary" id="customExportBtn" disabled>Download</button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         </div>
       </main>
       <script>
-        const state = { templateId: null, token: '', role: 'admin' };
+        const state = { token: '', role: 'admin', selectedTpl: null };
         function headers() {
           const h = { 'Content-Type': 'application/json', 'X-User-Role': state.role };
           if (state.token) h['X-API-Key'] = state.token;
           return h;
         }
-        function layoutItem(widget) {
-          const el = document.createElement('div');
-          el.className = 'list-group-item d-flex justify-content-between align-items-center';
-          el.dataset.type = widget.type;
-          el.dataset.metric = widget.metric;
-          el.dataset.title = widget.title;
-          el.innerHTML = `<div><div class="fw-bold">${widget.title}</div><div class="text-muted small">${widget.type} / ${widget.metric}</div></div><button class="btn btn-sm btn-outline-danger">Remove</button>`;
-          el.querySelector('button').addEventListener('click', () => el.remove());
-          return el;
+        function postHeaders() {
+          const h = { 'X-User-Role': state.role };
+          if (state.token) h['X-API-Key'] = state.token;
+          return h;
         }
-        function readLayout() {
-          const items = [];
-          document.querySelectorAll('#layout .list-group-item').forEach(el => {
-            items.push({ type: el.dataset.type, metric: el.dataset.metric, title: el.dataset.title });
+        function downloadViaForm(url, bodyFields) {
+          const form = document.createElement('form');
+          form.method = 'POST';
+          form.action = url;
+          Object.entries(bodyFields || {}).forEach(([k, v]) => {
+            const inp = document.createElement('input');
+            inp.type = 'hidden'; inp.name = k; inp.value = v;
+            form.appendChild(inp);
           });
-          return items;
+          document.body.appendChild(form);
+          form.submit();
+          document.body.removeChild(form);
         }
-        async function loadTemplates() {
-          const res = await fetch('/api/templates', { headers: headers() });
-          const data = await res.json();
-          const sel = document.getElementById('templateSelect');
-          sel.innerHTML = '';
-          data.items.forEach(t => {
-            const opt = document.createElement('option');
-            opt.value = t.id;
-            opt.textContent = t.name;
-            sel.appendChild(opt);
-          });
-          state.templateId = sel.value;
-          await loadTemplate();
+        async function loadDBTemplates() {
+          try {
+            const res = await fetch('/api/templates', { headers: headers() });
+            if (!res.ok) return;
+            const data = await res.json();
+            const sel = document.getElementById('dbTemplateSelect');
+            sel.innerHTML = '';
+            (data.items || []).forEach(t => {
+              const opt = document.createElement('option');
+              opt.value = t.id;
+              opt.textContent = t.name + (t.description ? ' — ' + t.description : '');
+              sel.appendChild(opt);
+            });
+          } catch (_) {}
         }
-        async function loadTemplate() {
-          const id = document.getElementById('templateSelect').value;
-          state.templateId = id;
-          const res = await fetch(`/api/templates/${id}`, { headers: headers() });
-          const t = await res.json();
-          document.getElementById('name').value = t.name;
-          document.getElementById('description').value = t.description || '';
-          const layout = document.getElementById('layout');
-          layout.innerHTML = '';
-          (t.definition.widgets || []).forEach(w => layout.appendChild(layoutItem(w)));
-        }
-        async function saveTemplate() {
-          const id = state.templateId;
-          const payload = {
-            name: document.getElementById('name').value.trim(),
-            description: document.getElementById('description').value.trim(),
-            definition: { version: 1, widgets: readLayout() }
-          };
-          if (!payload.name) return;
-          const res = await fetch(`/api/templates/${id}`, { method: 'PUT', headers: headers(), body: JSON.stringify(payload) });
-          if (!res.ok) return;
-          await loadTemplates();
-        }
-        async function newTemplate() {
-          const existing = [...document.querySelectorAll('#templateSelect option')].map(o => o.textContent);
-          let n = 1;
-          while (existing.includes(`New Template ${n}`)) n++;
-          const payload = {
-            name: `New Template ${n}`,
-            description: '',
-            definition: {
-              version: 1,
-              widgets: [
-                { type: "kpi", metric: "total_invoices", title: "Total Invoices" },
-                { type: "kpi", metric: "total_amount", title: "Total Amount" },
-                { type: "kpi", metric: "avg_invoice_amount", title: "Avg Invoice" },
-                { type: "chart", metric: "daily_sales", title: "Daily Sales" },
-                { type: "chart", metric: "status_breakdown", title: "Status Breakdown" },
-                { type: "table", metric: "invoices", title: "Invoices" },
-              ]
-            }
-          };
-          const res = await fetch('/api/templates', { method: 'POST', headers: headers(), body: JSON.stringify(payload) });
-          if (!res.ok) return;
-          await loadTemplates();
-        }
-        new Sortable(document.getElementById('palette'), { group: { name: 'shared', pull: 'clone', put: false }, sort: false });
-        new Sortable(document.getElementById('layout'), { group: { name: 'shared', pull: true, put: true }, animation: 150,
-          onAdd: (evt) => {
-            const el = evt.item;
-            const widget = { type: el.dataset.type, metric: el.dataset.metric, title: el.dataset.title };
-            evt.item.replaceWith(layoutItem(widget));
+        function renderTplBody(templates) {
+          const body = document.getElementById('frxBody');
+          const countInfo = document.getElementById('tplCountInfo');
+          if (!templates || !templates.length) {
+            body.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">No .frx templates found in exports/templates_frx/</td></tr>';
+            if (countInfo) countInfo.textContent = '0 templates available.';
+            return;
           }
+          countInfo.textContent = templates.length + ' .frx template(s) — click a row to select.';
+          body.innerHTML = '';
+          templates.forEach((t, idx) => {
+            const tr = document.createElement('tr');
+            tr.style.cursor = 'pointer';
+            tr.dataset.name = t.name;
+            const sizeKB = Math.round(t.size_bytes / 1024);
+            const sizeStr = sizeKB < 1 ? (t.size_bytes + ' B') : (sizeKB + ' KB');
+            tr.innerHTML = `<td class="fw-semibold">${t.name}</td><td class="text-end">${sizeStr}</td><td>${t.modified_at || '—'}</td><td><button class="btn btn-sm btn-outline-primary act-open" data-name="${t.name}">🎨</button> <button class="btn btn-sm btn-outline-success act-pdf" data-name="${t.name}">PDF</button></td>`;
+            tr.addEventListener('click', (ev) => {
+              if (ev.target && ev.target.classList && (ev.target.classList.contains('act-open') || ev.target.classList.contains('act-pdf'))) return;
+              selectTpl(t);
+            });
+            tr.querySelector('.act-open').addEventListener('click', (ev) => { ev.stopPropagation(); openInDesigner(t.name); });
+            tr.querySelector('.act-pdf').addEventListener('click', (ev) => { ev.stopPropagation(); renderTpl(t.name, 'pdf'); });
+            body.appendChild(tr);
+          });
+        }
+        function selectTpl(t) {
+          state.selectedTpl = t;
+          const rows = document.querySelectorAll('#frxBody tr');
+          rows.forEach(r => r.classList.remove('table-primary'));
+          const row = document.querySelector('#frxBody tr[data-name="' + t.name + '"]');
+          if (row) row.classList.add('table-primary');
+          document.getElementById('selectedTplName').textContent = t.name;
+          document.getElementById('selectedTplBadge').textContent = 'selected';
+          document.getElementById('selectedTplBadge').className = 'badge bg-success text-white';
+          document.getElementById('tplFile').value = t.name + '.frx';
+          document.getElementById('tplSize').value = Math.round(t.size_bytes / 1024) + ' KB (' + t.size_bytes + ' bytes)';
+          document.getElementById('tplModified').value = t.modified_at || '';
+          ['openInDesignerBtn','renderPdfBtn','renderXlsxBtn','renderHtmlBtn','renderAllBtn','customExportBtn'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.disabled = false;
+          });
+        }
+        async function refreshStatusAndTemplates() {
+          const spinner = document.getElementById('frSpinner');
+          const statusText = document.getElementById('frStatusText');
+          const details = document.getElementById('frDetails');
+          if (spinner) spinner.classList.remove('d-none');
+          try {
+            const res = await fetch('/api/fastreports/status', { headers: headers() });
+            if (!res.ok) throw new Error('status fetch failed');
+            const data = await res.json();
+            if (spinner) spinner.classList.add('d-none');
+            if (data.available) {
+              statusText.textContent = '✅ FastReport Desktop ACTIVE';
+              statusText.className = 'fw-bold text-success';
+              const parts = [];
+              if (data.builder_exe)   parts.push('Builder: <code>' + data.builder_exe.split('\\').pop() + '</code>');
+              if (data.designer_exe)  parts.push('Designer: <code>' + data.designer_exe.split('\\').pop() + '</code>');
+              if (data.templates_dir) parts.push('Templates: <code>' + data.templates_dir + '</code>');
+              details.innerHTML = parts.join('<br>') || '';
+            } else {
+              statusText.textContent = '⚠️ FastReport Desktop NOT INSTALLED';
+              statusText.className = 'fw-bold text-warning';
+              details.innerHTML = 'Legacy exports (reportlab/openpyxl) still work. Install FastReport Desktop and/or set <code>FASTREPORT_DESKTOP_DIR</code> env var to enable FRX rendering.';
+            }
+            renderTplBody(data.templates || []);
+            const quickSel = document.getElementById('quickTemplateSelect');
+            if (quickSel) {
+              quickSel.innerHTML = '';
+              (data.templates || []).forEach(t => {
+                const opt = document.createElement('option');
+                opt.value = t.name;
+                opt.textContent = t.name;
+                quickSel.appendChild(opt);
+              });
+            }
+          } catch (e) {
+            if (spinner) spinner.classList.add('d-none');
+            statusText.textContent = '❌ Could not reach /api/fastreports/status';
+            statusText.className = 'fw-bold text-danger';
+          }
+        }
+        function openInDesigner(templateName) {
+          if (!confirm('Open FastReport Designer for: ' + templateName + ' ?')) return;
+          fetch('/api/fastreports/designer/open', {
+            method: 'POST',
+            headers: headers(),
+            body: JSON.stringify({ template_name: templateName })
+          }).then(async (r) => {
+            const data = await r.json().catch(() => ({}));
+            if (!r.ok) { alert('Failed to open designer: ' + (data.detail || r.statusText)); return; }
+            const badge = document.getElementById('selectedTplBadge');
+            if (badge) { badge.textContent = 'designer launched'; badge.className = 'badge bg-primary text-white'; }
+            setTimeout(() => { if (badge && state.selectedTpl) { badge.textContent = 'selected'; badge.className = 'badge bg-success text-white'; } }, 2500);
+          }).catch(err => alert('Designer error: ' + err.message));
+        }
+        function renderTpl(templateName, fmt) {
+          const url = '/api/fastreports/export/' + encodeURIComponent(templateName) + '?fmt=' + encodeURIComponent(fmt || 'pdf');
+          const body = {};
+          if (state.token) body.x_api_key = state.token;
+          downloadViaForm(url, body);
+        }
+        document.getElementById('openDesignerBlankBtn')?.addEventListener('click', () => openInDesigner(''));
+        document.getElementById('refreshStatusBtn')?.addEventListener('click', refreshStatusAndTemplates);
+        document.getElementById('refreshTemplatesBtn')?.addEventListener('click', refreshStatusAndTemplates);
+        document.getElementById('openInDesignerBtn')?.addEventListener('click', () => {
+          if (state.selectedTpl) openInDesigner(state.selectedTpl.name);
         });
-        document.getElementById('templateSelect').addEventListener('change', loadTemplate);
-        document.getElementById('saveBtn').addEventListener('click', saveTemplate);
-        document.getElementById('newBtn').addEventListener('click', newTemplate);
-        loadTemplates();
+        document.getElementById('renderPdfBtn')?.addEventListener('click', () => { if (state.selectedTpl) renderTpl(state.selectedTpl.name, 'pdf'); });
+        document.getElementById('renderXlsxBtn')?.addEventListener('click', () => { if (state.selectedTpl) renderTpl(state.selectedTpl.name, 'xlsx'); });
+        document.getElementById('renderHtmlBtn')?.addEventListener('click', () => { if (state.selectedTpl) renderTpl(state.selectedTpl.name, 'html'); });
+        document.getElementById('renderAllBtn')?.addEventListener('click', () => {
+          if (!state.selectedTpl) return;
+          ['pdf','xlsx','docx','html'].forEach((fmt, i) => {
+            setTimeout(() => renderTpl(state.selectedTpl.name, fmt), i * 400);
+          });
+        });
+        document.getElementById('customExportBtn')?.addEventListener('click', () => {
+          if (!state.selectedTpl) return;
+          const fmt = document.getElementById('customFmtSelect').value;
+          renderTpl(state.selectedTpl.name, fmt);
+        });
+        document.getElementById('quickExportBtn')?.addEventListener('click', () => {
+          const tpl = document.getElementById('quickTemplateSelect').value;
+          const fmt = document.getElementById('quickFormatSelect').value;
+          if (!tpl) { alert('Select a template first.'); return; }
+          renderTpl(tpl, fmt);
+        });
+        refreshStatusAndTemplates();
+        loadDBTemplates();
       </script>
     </body>
     </html>
@@ -1201,12 +1518,19 @@ def _render_schedules_html() -> str:
           <a class="navbar-brand" href="/dashboard">Reporting Portal</a>
           <div class="d-flex gap-2">
             <a class="btn btn-outline-light btn-sm" href="/dashboard">Dashboard</a>
-            <a class="btn btn-outline-light btn-sm" href="/builder">Template Builder</a>
+            <a class="btn btn-outline-light btn-sm" href="/builder">FastReport Studio</a>
             <a class="btn btn-outline-light btn-sm" href="/lookup">Lookup</a>
           </div>
         </div>
       </nav>
       <main class="container py-3">
+        <div class="card border-info mb-3" id="frStatusCard">
+          <div class="card-header bg-info-subtle fw-bold">⚡ FastReport Scheduler Note</div>
+          <div class="card-body py-2 small">
+            <div id="frStatusLine">Detecting FastReport…</div>
+            <div class="mt-1 text-muted">Schedules always attempt FastReport first. DOCX/RTF/PNG/JPG require FastReport Desktop; PDF/XLSX/CSV will fallback to legacy renderers if FastReport is unavailable.</div>
+          </div>
+        </div>
         <div class="card">
           <div class="card-header fw-bold">Scheduled Reports</div>
           <div class="card-body">
@@ -1222,10 +1546,21 @@ def _render_schedules_html() -> str:
               <div class="col-6 col-md-2">
                 <label class="form-label">Format</label>
                 <select class="form-select" id="format">
-                  <option value="pdf">PDF</option>
-                  <option value="xlsx">Excel</option>
-                  <option value="csv">CSV</option>
-                  <option value="pptx">PowerPoint</option>
+                  <optgroup label="FastReport + Legacy Fallback">
+                    <option value="pdf" selected>PDF</option>
+                    <option value="xlsx">Excel (.xlsx)</option>
+                    <option value="csv">CSV</option>
+                  </optgroup>
+                  <optgroup label="FastReport Desktop Only">
+                    <option value="docx">Word (.docx)</option>
+                    <option value="html">HTML</option>
+                    <option value="rtf">RTF</option>
+                    <option value="png">PNG Image</option>
+                    <option value="jpg">JPG Image</option>
+                  </optgroup>
+                  <optgroup label="Legacy Only">
+                    <option value="pptx">PowerPoint (.pptx)</option>
+                  </optgroup>
                 </select>
               </div>
               <div class="col-12 col-md-4">
@@ -1293,7 +1628,23 @@ def _render_schedules_html() -> str:
           await loadSchedules();
         }
         document.getElementById('createBtn').addEventListener('click', createSchedule);
-        loadTemplates().then(loadSchedules);
+        async function loadFRStatus() {
+          const el = document.getElementById('frStatusLine');
+          if (!el) return;
+          try {
+            const res = await fetch('/api/fastreports/status', { headers: headers() });
+            if (!res.ok) throw new Error('status fetch failed');
+            const data = await res.json();
+            if (data.available) {
+              el.innerHTML = '✅ <strong class="text-success">FastReport Desktop ACTIVE</strong> — DOCX/RTF/PNG/JPG are all supported.';
+            } else {
+              el.innerHTML = '⚠️ <strong class="text-warning">FastReport Desktop NOT INSTALLED</strong> — DOCX/RTF/PNG/JPG formats will <em>not</em> work for scheduled reports. PDF/XLSX/CSV will use legacy fallbacks.';
+            }
+          } catch (e) {
+            el.textContent = '❌ Could not reach FastReport status endpoint.';
+          }
+        }
+        loadTemplates().then(loadSchedules).then(loadFRStatus);
       </script>
     </body>
     </html>
@@ -1322,7 +1673,7 @@ def _render_lookup_html() -> str:
           <a class="navbar-brand" href="/dashboard">Reporting Portal</a>
           <div class="d-flex gap-2">
             <a class="btn btn-outline-light btn-sm" href="/dashboard">Dashboard</a>
-            <a class="btn btn-outline-light btn-sm" href="/builder">Template Builder</a>
+            <a class="btn btn-outline-light btn-sm" href="/builder">FastReport Studio</a>
             <a class="btn btn-outline-light btn-sm" href="/schedules">Schedules</a>
           </div>
         </div>
@@ -2497,8 +2848,98 @@ def _export_pptx(template: ReportTemplate, metrics: Dict[str, Any]) -> bytes:
     return bio.getvalue()
 
 
+def _frx_template_for_format(fmt: str, template_name_hint: str = "") -> str:
+    """Pick the best .frx template name for a given export format/context."""
+    name = (template_name_hint or "").lower()
+    if "ledger" in name:
+        return "customer_ledger"
+    if "invoice" in name or "bill" in name:
+        return "invoice"
+    if "authority" in name:
+        return "authority_letter"
+    if "lookup" in name or "customer" in name:
+        return "customer_lookup_report"
+    return "sales_dashboard"
+
+
+def _try_fastreports_export(
+    fmt: str,
+    metrics: Dict[str, Any],
+    template: Optional[ReportTemplate] = None,
+) -> Optional[Tuple[bytes, str, str]]:
+    """Attempt FastReport Desktop export. Returns None if unavailable/fails."""
+    if _fr_available is None or not _fr_available():
+        return None
+
+    template_name = _frx_template_for_format(fmt, template.name if template else "")
+    report_data: Dict[str, Any] = {
+        "report_title": template.name if template else "Report",
+        "generated_at": datetime.utcnow().isoformat(sep=" "),
+        "total_invoices": metrics.get("total_invoices", 0),
+        "total_amount": float(metrics.get("total_amount", 0.0)),
+        "avg_invoice_amount": float(metrics.get("avg_invoice_amount", 0.0)),
+        "daily_sales": metrics.get("daily_sales", []),
+        "status_breakdown": metrics.get("status_breakdown", []),
+        "invoices": metrics.get("invoices", []),
+    }
+
+    suffix_map = {
+        "pdf": ".pdf",
+        "html": ".html",
+        "htm": ".html",
+        "xlsx": ".xlsx",
+        "excel": ".xlsx",
+        "csv": ".csv",
+        "docx": ".docx",
+        "rtf": ".rtf",
+        "pptx": ".pptx",
+        "png": ".png",
+        "jpg": ".jpg",
+    }
+    media_type_map = {
+        "pdf": "application/pdf",
+        "html": "text/html",
+        "htm": "text/html",
+        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "csv": "text/csv",
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "rtf": "application/rtf",
+        "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "png": "image/png",
+        "jpg": "image/jpeg",
+    }
+
+    fmt_lower = (fmt or "pdf").lower()
+    suffix = suffix_map.get(fmt_lower, f".{fmt_lower}")
+    media_type = media_type_map.get(fmt_lower, "application/octet-stream")
+
+    try:
+        result = _fr_build_report(
+            template_name_or_path=template_name,
+            data=report_data,
+            export_format=fmt_lower,
+        )
+        if not result.ok or not result.output_path:
+            logger.warning("FastReport render failed: %s", result.error)
+            return None
+        out_path = result.output_path
+        if not out_path.is_file():
+            return None
+        file_bytes = out_path.read_bytes()
+        filename = f"{template_name}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}{suffix}"
+        return (file_bytes, filename, media_type)
+    except Exception as exc:
+        logger.exception("FastReport export threw an exception (will fallback): %s", exc)
+        return None
+
+
 def _export_bytes(template: ReportTemplate, metrics: Dict[str, Any], fmt: str) -> Tuple[bytes, str, str]:
     fmt = (fmt or "").lower()
+    fr_result = _try_fastreports_export(fmt, metrics, template)
+    if fr_result is not None:
+        return fr_result
+
     if fmt == "csv":
         return _export_csv(metrics), "report.csv", "text/csv"
     if fmt == "xlsx":
@@ -3199,3 +3640,170 @@ async def credit_portal_payment_submit(
     tok = _get_valid_finance_token(db, token)
     # unreachable
     return RedirectResponse(f"/credit-portal/{token}", status_code=302)
+
+
+# ---------------------------------------------------------------------------
+# FastReport Integration Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/fastreports/status")
+def fastreports_status(
+    x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
+    x_user_role: Optional[str] = Header(default=None, alias="X-User-Role"),
+) -> JSONResponse:
+    """Return whether FastReport Desktop is available and list its templates."""
+    from app.services.fastreport_bridge import (
+        find_fastreports,
+        ensure_templates_dir,
+        default_template_path,
+    )
+
+    role = _get_role(x_user_role)
+    _require_auth(x_api_key, role)
+
+    info = find_fastreports()
+    available = info is not None
+    templates_dir = ensure_templates_dir()
+    templates = []
+    try:
+        for entry in sorted(templates_dir.glob("*.frx")):
+            templates.append({
+                "name": entry.stem,
+                "file_name": entry.name,
+                "size_bytes": entry.stat().st_size,
+                "modified_at": datetime.fromtimestamp(entry.stat().st_mtime).isoformat(sep=" "),
+            })
+    except Exception as exc:
+        logger.exception("Failed to list FastReport templates: %s", exc)
+
+    return JSONResponse({
+        "available": available,
+        "builder_exe": str(info.builder_exe) if info else None,
+        "designer_exe": str(info.designer_exe) if info and info.designer_exe else None,
+        "templates_dir": str(templates_dir),
+        "templates": templates,
+    })
+
+
+@app.post("/api/fastreports/designer/open")
+def fastreports_open_designer(
+    payload: Dict[str, Any],
+    request: Request,
+    db: Session = Depends(get_db),
+    x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
+    x_user_role: Optional[str] = Header(default=None, alias="X-User-Role"),
+) -> JSONResponse:
+    """Launch the FastReport Designer (FRDesigner.exe) for a .frx template."""
+    from app.services.fastreport_bridge import open_designer, is_fastreports_available
+
+    role = _get_role(x_user_role)
+    _require_auth(x_api_key, role, required_roles=["admin", "manager"])
+
+    if not is_fastreports_available():
+        raise HTTPException(status_code=400, detail="FastReport Desktop is not installed.")
+
+    template_name = (payload.get("template_name") or "").strip() or None
+    ok, err = open_designer(template_name)
+    if not ok:
+        raise HTTPException(status_code=500, detail=err or "Failed to launch FastReport Designer.")
+
+    _audit(
+        db,
+        action="OPEN_DESIGNER",
+        resource_type="FASTREPORT_TEMPLATE",
+        resource_id=0,
+        details={"template_name": template_name or "<blank>"},
+        request=request,
+    )
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/fastreports/export/{template_name}")
+def fastreports_direct_export(
+    template_name: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    fmt: str = Query("pdf"),
+    from_date: Optional[str] = Query(None),
+    to_date: Optional[str] = Query(None),
+    status: Optional[str] = Query("ALL"),
+    x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
+    x_user_role: Optional[str] = Header(default=None, alias="X-User-Role"),
+) -> StreamingResponse:
+    """Direct export via FastReport using a named .frx template + live metrics."""
+    from app.services.fastreport_bridge import (
+        build_report,
+        is_fastreports_available,
+    )
+
+    role = _get_role(x_user_role)
+    _require_auth(x_api_key, role)
+
+    if not is_fastreports_available():
+        raise HTTPException(status_code=400, detail="FastReport Desktop is not installed.")
+
+    start_dt, end_dt = _parse_dates(from_date, to_date)
+    metrics = _compute_metrics(db, start_dt, end_dt, status or "ALL")
+
+    report_data: Dict[str, Any] = {
+        "report_title": template_name,
+        "generated_at": datetime.utcnow().isoformat(sep=" "),
+        "period_from": start_dt.isoformat(sep=" ") if start_dt else "",
+        "period_to": end_dt.isoformat(sep=" ") if end_dt else "",
+        "status_filter": status or "ALL",
+        "total_invoices": metrics.get("total_invoices", 0),
+        "total_amount": float(metrics.get("total_amount", 0.0)),
+        "avg_invoice_amount": float(metrics.get("avg_invoice_amount", 0.0)),
+        "daily_sales": metrics.get("daily_sales", []),
+        "status_breakdown": metrics.get("status_breakdown", []),
+        "invoices": metrics.get("invoices", []),
+    }
+
+    fmt_lower = (fmt or "pdf").lower()
+    result = build_report(
+        template_name_or_path=template_name,
+        data=report_data,
+        export_format=fmt_lower,
+    )
+
+    if not result.ok or not result.output_path:
+        raise HTTPException(status_code=500, detail=result.error or "FastReport render failed.")
+
+    out_path = result.output_path
+    if not out_path.is_file():
+        raise HTTPException(status_code=500, detail="FastReport did not produce output file.")
+
+    suffix_map = {
+        "pdf": ".pdf", "html": ".html", "htm": ".html",
+        "xlsx": ".xlsx", "excel": ".xlsx", "csv": ".csv",
+        "docx": ".docx", "rtf": ".rtf", "pptx": ".pptx",
+        "png": ".png", "jpg": ".jpg",
+    }
+    media_type_map = {
+        "pdf": "application/pdf", "html": "text/html", "htm": "text/html",
+        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "csv": "text/csv",
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "rtf": "application/rtf",
+        "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "png": "image/png", "jpg": "image/jpeg",
+    }
+    suffix = suffix_map.get(fmt_lower, f".{fmt_lower}")
+    media_type = media_type_map.get(fmt_lower, "application/octet-stream")
+    filename = f"{template_name}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}{suffix}"
+    file_bytes = out_path.read_bytes()
+
+    _audit(
+        db,
+        action="FR_EXPORT",
+        resource_type="FASTREPORT_TEMPLATE",
+        resource_id=0,
+        details={"template_name": template_name, "fmt": fmt_lower, "filename": filename},
+        request=request,
+    )
+    return StreamingResponse(
+        BytesIO(file_bytes),
+        media_type=media_type,
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
