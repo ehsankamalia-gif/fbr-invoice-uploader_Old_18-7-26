@@ -2216,20 +2216,31 @@ class MainWindow(QMainWindow):
                             s.close()
 
                     if not _is_open():
-                        from reporting.server import start_reporting_server
+                        from reporting.server import (
+                            start_reporting_server,
+                            get_last_startup_error,
+                        )
 
-                        start_reporting_server()
+                        ok, detail = start_reporting_server()
 
-                        deadline = time.time() + 3.0
+                        deadline = time.time() + 5.0
                         while time.time() < deadline and not _is_open():
                             time.sleep(0.1)
 
                         if not _is_open():
+                            stored_err = get_last_startup_error()
+                            shown_detail = (
+                                stored_err
+                                if stored_err
+                                else (detail if not ok else "Reporting server did not become ready.")
+                            )
                             self._show_error(
                                 "Reporting Server",
                                 "Reporting server is not running on http://127.0.0.1:9000.\n\n"
+                                f"Details: {shown_detail}\n\n"
                                 "If you are using the EXE build, rebuild it with FastAPI/Uvicorn included.\n"
-                                "If you are running from source, install dependencies from requirements.txt.",
+                                "If you are running from source, install dependencies from requirements.txt.\n"
+                                "You can also run the app from a console (python.exe instead of pythonw.exe) to see full startup logs.",
                             )
                             return
 
