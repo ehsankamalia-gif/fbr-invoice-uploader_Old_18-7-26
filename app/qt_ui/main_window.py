@@ -2223,7 +2223,7 @@ class MainWindow(QMainWindow):
 
                         ok, detail = start_reporting_server()
 
-                        deadline = time.time() + 5.0
+                        deadline = time.time() + 15.0
                         while time.time() < deadline and not _is_open():
                             time.sleep(0.1)
 
@@ -2232,7 +2232,7 @@ class MainWindow(QMainWindow):
                             shown_detail = (
                                 stored_err
                                 if stored_err
-                                else (detail if not ok else "Reporting server did not become ready.")
+                                else (detail if not ok else "Reporting server did not become ready within 15 seconds. Check logs/reporting_portal.stderr.log.")
                             )
                             self._show_error(
                                 "Reporting Server",

@@ -54,7 +54,7 @@ class Bootstrapper:
     def verify_dependencies(self) -> bool:
         """Checks if critical required packages are importable."""
         critical_packages = [
-            "fastapi", "sqlalchemy", "pydantic", "requests", "PyQt6", 
+            "fastapi", "uvicorn", "sqlalchemy", "pydantic", "requests", "PyQt6",
             "cryptography", "pymysql", "openpyxl", "android_sms_gateway"
         ]
         
