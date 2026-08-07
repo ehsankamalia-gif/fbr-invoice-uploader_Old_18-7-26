@@ -467,8 +467,20 @@ class SMSConfiguration(Base):
     booking_template = Column(String(500), default="Dear {customer}, your booking for {model} ({color}) is confirmed. Booking #: {booking_no}. Paid: Rs. {paid}. Balance: Rs. {balance}.")
     otp_template = Column(String(500), default="Your verification code is {code}")
     owner_phone_number = Column(String(20), nullable=True)
-    spare_ledger_credit_template = Column(String(500), default="Spare Ledger: Credit received of Rs. {amount} via {source}. Reference: {reference}. Description: {description}")
-    spare_ledger_debit_template = Column(String(500), default="Spare Ledger: Debit/Order of Rs. {amount} via {source}. Reference: {reference}. Description: {description}")
+    spare_ledger_credit_template = Column(String(500), default="Spare Ledger: Credit received of Rs. {amount} via {source}. Reference: {reference}. Description: {description}. Balance: Rs. {balance}")
+    spare_ledger_debit_template = Column(String(500), default="Spare Ledger: Debit/Order of Rs. {amount} via {source}. Reference: {reference}. Description: {description}. Balance: Rs. {balance}")
+    credit_sale_template = Column(String(500), default="Dear {customer}, credit sale of {model} (Chassis: {chassis}) is confirmed. Credit: Rs. {credit_price}. Advance: Rs. {advance}. Balance: Rs. {balance}.")
+    credit_payment_template = Column(String(500), default="Dear {customer}, installment of Rs. {amount} received. Penalty: Rs. {penalty}. Discount: Rs. {discount}. Remaining balance: Rs. {balance}.")
+    finance_sale_template = Column(String(500), default="Dear {customer}, finance account {sale_id} for {model} (Chassis: {chassis}) is confirmed. Finance: Rs. {credit_price}. Down: Rs. {down}. Balance: Rs. {balance}.")
+    finance_installment_template = Column(String(500), default="Dear {customer}, installment of Rs. {amount} received for {sale_id}. New balance: Rs. {balance}.")
+
+    # Per-feature enable/disable toggles (all default True so existing production installs keep SMS flowing after upgrade)
+    invoice_sms_enabled = Column(Boolean, default=True)
+    booking_sms_enabled = Column(Boolean, default=True)
+    spare_credit_sms_enabled = Column(Boolean, default=True)
+    spare_debit_sms_enabled = Column(Boolean, default=True)
+    credit_sale_payment_sms_enabled = Column(Boolean, default=True)
+    finance_sale_installment_sms_enabled = Column(Boolean, default=True)
     
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
 

@@ -69,7 +69,11 @@ class AdvanceBookingService:
         booking_number: Optional[str] = None,
     ) -> AdvanceBooking:
         name = (customer_name or "").strip().upper()
-        phone = (customer_phone or "").strip()
+        raw_phone = (customer_phone or "").strip()
+
+        from app.services.sms_service import normalize_pk_mobile
+        phone = normalize_pk_mobile(raw_phone) if raw_phone else ""
+
         model = (motorcycle_model or "").strip().upper()
         clr = (color or "").strip().upper()
 
@@ -148,11 +152,22 @@ class AdvanceBookingService:
     def _send_booking_sms(self, db: Session, booking: AdvanceBooking) -> None:
         """Helper to queue/send SMS for a new booking with customizable template."""
         try:
-            from app.services.sms_service import sms_service
+            from app.services.sms_service import sms_service, normalize_pk_mobile
             from app.db.models import SMSConfiguration, SMSQueue, SMSStatus
             
             config = db.query(SMSConfiguration).filter(SMSConfiguration.is_enabled == True).first()
             if not config or not booking.customer_phone:
+                return
+
+            if not bool(getattr(config, "booking_sms_enabled", True)):
+                return
+
+            # Normalize customer phone number (handles 923/0092/+923/3XXXXXXXXX formats)
+            clean_phone = normalize_pk_mobile(booking.customer_phone)
+            if not clean_phone:
+                logger.warning(
+                    f"Booking {booking.booking_number}: Cannot send SMS; invalid phone after normalization: {booking.customer_phone!r}"
+                )
                 return
 
             # Use template if available, otherwise fallback to default
@@ -169,11 +184,11 @@ class AdvanceBookingService:
                 balance=f"{booking.balance_amount:,.0f}"
             )
             
-            logger.info(f"Queueing booking SMS for {booking.booking_number} to {booking.customer_phone}")
+            logger.info(f"Queueing booking SMS for {booking.booking_number} to {clean_phone} (raw={booking.customer_phone!r})")
             
             # Queue the message
             sms_entry = SMSQueue(
-                phone_number=booking.customer_phone,
+                phone_number=clean_phone,
                 recipient_name=booking.customer_name,
                 message=msg,
                 status=SMSStatus.PENDING,
@@ -188,7 +203,7 @@ class AdvanceBookingService:
                 success, reason = sms_service.send_sms_via_wifi(
                     ip=config.gateway_ip,
                     port=config.gateway_port or "8080",
-                    phone_number=booking.customer_phone,
+                    phone_number=clean_phone,
                     msg_content=msg,
                     api_key=config.api_key,
                     username=config.gateway_username,
@@ -228,7 +243,9 @@ class AdvanceBookingService:
         if customer_name:
             booking.customer_name = customer_name.strip().upper()
         if customer_phone is not None:
-            booking.customer_phone = customer_phone.strip()
+            raw_phone = (customer_phone or "").strip()
+            from app.services.sms_service import normalize_pk_mobile
+            booking.customer_phone = normalize_pk_mobile(raw_phone) if raw_phone else ""
         if motorcycle_model:
             booking.motorcycle_model = motorcycle_model.strip().upper()
         if color:

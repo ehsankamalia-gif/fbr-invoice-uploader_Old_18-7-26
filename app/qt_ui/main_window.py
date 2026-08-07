@@ -3500,22 +3500,69 @@ class MainWindow(QMainWindow):
             card_layout.setSpacing(8)
             
             icon_lbl = QLabel(icon)
+            icon_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
             icon_lbl.setStyleSheet("font-size: 36px; margin-bottom: 5px;")
             card_layout.addWidget(icon_lbl)
             
             title_lbl = QLabel(title)
+            title_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
             title_lbl.setStyleSheet("font-size: 16px; font-weight: bold; color: #2c3e50;")
             card_layout.addWidget(title_lbl)
             
             desc_lbl = QLabel(desc)
+            desc_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
             desc_lbl.setWordWrap(True)
             desc_lbl.setStyleSheet("color: #7f8c8d; font-size: 13px; margin-top: 5px;")
             card_layout.addWidget(desc_lbl)
             
             card_layout.addStretch(1)
-            
-            # Make card clickable
-            card.mousePressEvent = lambda e, cb=callback: cb()
+
+            # Wrap the callback so exceptions are surfaced (not swallowed silently in pythonw.exe)
+            def _safe_open(cb=callback, _title=title):
+                try:
+                    cb()
+                except Exception as _err:
+                    logger.error(f"Failed to open settings dialog '{_title}': {_err}", exc_info=True)
+                    try:
+                        from PyQt6.QtWidgets import QMessageBox
+                        QMessageBox.critical(
+                            card,
+                            "Settings Error",
+                            f"Could not open '{_title}' dialog.\n\n"
+                            f"Error: {type(_err).__name__}: {_err}\n\n"
+                            "Check application logs for full traceback."
+                        )
+                    except Exception:
+                        pass
+
+            # Make card AND all its visible children (icon, title, description labels)
+            # clickable using the EXACT same event-filter pattern used by the Ledger
+            # credit-card card (line ~8600): callback fires, event filter returns True.
+            from PyQt6.QtCore import QObject, QEvent
+
+            class _SettingsCardClickFilter(QObject):
+                def __init__(self, target_callback):
+                    super().__init__()
+                    self._target_cb = target_callback
+
+                def eventFilter(self, obj, event):
+                    if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+                        from PyQt6.QtCore import QTimer
+                        QTimer.singleShot(0, self._target_cb)
+                        return True
+                    return super().eventFilter(obj, event)
+
+            _click_filter = _SettingsCardClickFilter(_safe_open)
+            card.installEventFilter(_click_filter)
+            icon_lbl.installEventFilter(_click_filter)
+            title_lbl.installEventFilter(_click_filter)
+            desc_lbl.installEventFilter(_click_filter)
+
+            # IMPORTANT: keep the filter on MainWindow instance attributes so it's never GC'd.
+            # The working CreditCardClickFilter pattern stores on self._xxx (see ledger page).
+            if not hasattr(self, "_settings_card_click_filters"):
+                self._settings_card_click_filters = []
+            self._settings_card_click_filters.append(_click_filter)
             
             grid_layout.addWidget(card, i // 3, i % 3)
 
@@ -4280,7 +4327,25 @@ class MainWindow(QMainWindow):
         template_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #2c3e50;")
         template_layout.addWidget(template_title)
 
-        template_layout.addWidget(QLabel("Invoice SMS Template:"))
+        # Owner phone number (used for Spare Ledger alerts)
+        owner_phone_row = QHBoxLayout()
+        owner_phone_row.addWidget(QLabel("Owner Phone (Spare Ledger Alerts):"))
+        self.sms_owner_phone = QLineEdit()
+        self.sms_owner_phone.setPlaceholderText("03XXXXXXXXX (for Spare Ledger / internal alerts)")
+        owner_phone_row.addWidget(self.sms_owner_phone, 1)
+        template_layout.addLayout(owner_phone_row)
+
+        template_layout.addSpacing(8)
+
+        # INVOICE MESSAGE TEMPLATE — with enable checkbox
+        inv_header = QHBoxLayout()
+        inv_header.addWidget(QLabel("INVOICE MESSAGE TEMPLATE"))
+        inv_header.addStretch(1)
+        self.sms_invoice_enabled = QCheckBox("Enable Invoice SMS")
+        self.sms_invoice_enabled.setStyleSheet("font-weight: bold; color: #16a085;")
+        inv_header.addWidget(self.sms_invoice_enabled)
+        template_layout.addLayout(inv_header)
+
         self.sms_invoice_template = QTextEdit()
         self.sms_invoice_template.setMaximumHeight(80)
         self.sms_invoice_template.setPlaceholderText("Enter message template... (Placeholders: {customer}, {invoice_no})")
@@ -4301,9 +4366,16 @@ class MainWindow(QMainWindow):
         template_hint.setStyleSheet("color: #7f8c8d; font-size: 11px; font-style: italic;")
         template_layout.addWidget(template_hint)
 
-        # Booking SMS Template
+        # BOOKING MESSAGE TEMPLATE — with enable checkbox
         template_layout.addSpacing(10)
-        template_layout.addWidget(QLabel("Booking SMS Template:"))
+        bk_header = QHBoxLayout()
+        bk_header.addWidget(QLabel("BOOKING MESSAGE TEMPLATE"))
+        bk_header.addStretch(1)
+        self.sms_booking_enabled = QCheckBox("Enable Booking SMS")
+        self.sms_booking_enabled.setStyleSheet("font-weight: bold; color: #16a085;")
+        bk_header.addWidget(self.sms_booking_enabled)
+        template_layout.addLayout(bk_header)
+
         self.sms_booking_template = QTextEdit()
         self.sms_booking_template.setMaximumHeight(80)
         self.sms_booking_template.setPlaceholderText("Enter message template... (Placeholders: {customer}, {model}, {color}, {booking_no})")
@@ -4323,6 +4395,148 @@ class MainWindow(QMainWindow):
         booking_template_hint = QLabel("Placeholders: {customer}, {model}, {color}, {booking_no}, {paid}, {balance}")
         booking_template_hint.setStyleSheet("color: #7f8c8d; font-size: 11px; font-style: italic;")
         template_layout.addWidget(booking_template_hint)
+
+        # SPARE LEDGER CREDIT MESSAGE TEMPLATE — enable checkbox
+        template_layout.addSpacing(10)
+        spc_header = QHBoxLayout()
+        spc_header.addWidget(QLabel("SPARE LEDGER CREDIT MESSAGE TEMPLATE"))
+        spc_header.addStretch(1)
+        self.sms_spare_credit_enabled = QCheckBox("Enable Spare Ledger Credit SMS")
+        self.sms_spare_credit_enabled.setStyleSheet("font-weight: bold; color: #16a085;")
+        spc_header.addWidget(self.sms_spare_credit_enabled)
+        template_layout.addLayout(spc_header)
+
+        self.sms_spare_credit_template = QTextEdit()
+        self.sms_spare_credit_template.setMaximumHeight(80)
+        self.sms_spare_credit_template.setPlaceholderText("Placeholders: {amount}, {source}, {reference}, {description}")
+        self.sms_spare_credit_template.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self.sms_spare_credit_template.setStyleSheet("""
+            QTextEdit {
+                font-family: 'Jameel Noori Nastaleeq', 'Urdu Typesetting', 'Tahoma', 'Arial';
+                font-size: 18px; line-height: 1.6; padding: 10px;
+                border: 1px solid #ced4da; border-radius: 4px;
+            }
+        """)
+        template_layout.addWidget(self.sms_spare_credit_template)
+        spc_hint = QLabel("Placeholders: {amount}, {source}, {reference}, {description}, {balance}")
+        spc_hint.setStyleSheet("color: #7f8c8d; font-size: 11px; font-style: italic;")
+        template_layout.addWidget(spc_hint)
+
+        # SPARE LEDGER DEBIT/ORDER MESSAGE TEMPLATE — enable checkbox
+        template_layout.addSpacing(10)
+        spd_header = QHBoxLayout()
+        spd_header.addWidget(QLabel("SPARE LEDGER DEBIT/ORDER MESSAGE TEMPLATE"))
+        spd_header.addStretch(1)
+        self.sms_spare_debit_enabled = QCheckBox("Enable Spare Ledger Debit/Order SMS")
+        self.sms_spare_debit_enabled.setStyleSheet("font-weight: bold; color: #16a085;")
+        spd_header.addWidget(self.sms_spare_debit_enabled)
+        template_layout.addLayout(spd_header)
+
+        self.sms_spare_debit_template = QTextEdit()
+        self.sms_spare_debit_template.setMaximumHeight(80)
+        self.sms_spare_debit_template.setPlaceholderText("Placeholders: {amount}, {source}, {reference}, {description}")
+        self.sms_spare_debit_template.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self.sms_spare_debit_template.setStyleSheet("""
+            QTextEdit {
+                font-family: 'Jameel Noori Nastaleeq', 'Urdu Typesetting', 'Tahoma', 'Arial';
+                font-size: 18px; line-height: 1.6; padding: 10px;
+                border: 1px solid #ced4da; border-radius: 4px;
+            }
+        """)
+        template_layout.addWidget(self.sms_spare_debit_template)
+        spd_hint = QLabel("Placeholders: {amount}, {source}, {reference}, {description}, {balance}")
+        spd_hint.setStyleSheet("color: #7f8c8d; font-size: 11px; font-style: italic;")
+        template_layout.addWidget(spd_hint)
+
+        # CREDIT LEDGER (SALE + PAYMENT) MESSAGE TEMPLATES — enable checkbox
+        template_layout.addSpacing(10)
+        cred_header = QHBoxLayout()
+        cred_header.addWidget(QLabel("CREDIT LEDGER MESSAGE TEMPLATES (Sale + Installment)"))
+        cred_header.addStretch(1)
+        self.sms_credit_sale_payment_enabled = QCheckBox("Enable Credit Sale/Payment SMS")
+        self.sms_credit_sale_payment_enabled.setStyleSheet("font-weight: bold; color: #16a085;")
+        cred_header.addWidget(self.sms_credit_sale_payment_enabled)
+        template_layout.addLayout(cred_header)
+
+        template_layout.addWidget(QLabel("Credit Sale SMS Template:"))
+        self.sms_credit_sale_template = QTextEdit()
+        self.sms_credit_sale_template.setMaximumHeight(80)
+        self.sms_credit_sale_template.setPlaceholderText("Placeholders: {customer}, {model}, {chassis}, {credit_price}, {advance}, {balance}")
+        self.sms_credit_sale_template.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self.sms_credit_sale_template.setStyleSheet("""
+            QTextEdit {
+                font-family: 'Jameel Noori Nastaleeq', 'Urdu Typesetting', 'Tahoma', 'Arial';
+                font-size: 18px; line-height: 1.6; padding: 10px;
+                border: 1px solid #ced4da; border-radius: 4px;
+            }
+        """)
+        template_layout.addWidget(self.sms_credit_sale_template)
+        cred_hint1 = QLabel("Placeholders: {customer}, {model}, {chassis}, {credit_price}, {advance}, {balance}")
+        cred_hint1.setStyleSheet("color: #7f8c8d; font-size: 11px; font-style: italic;")
+        template_layout.addWidget(cred_hint1)
+
+        template_layout.addSpacing(6)
+        template_layout.addWidget(QLabel("Credit Installment Received SMS Template:"))
+        self.sms_credit_payment_template = QTextEdit()
+        self.sms_credit_payment_template.setMaximumHeight(80)
+        self.sms_credit_payment_template.setPlaceholderText("Placeholders: {customer}, {amount}, {penalty}, {discount}, {balance}")
+        self.sms_credit_payment_template.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self.sms_credit_payment_template.setStyleSheet("""
+            QTextEdit {
+                font-family: 'Jameel Noori Nastaleeq', 'Urdu Typesetting', 'Tahoma', 'Arial';
+                font-size: 18px; line-height: 1.6; padding: 10px;
+                border: 1px solid #ced4da; border-radius: 4px;
+            }
+        """)
+        template_layout.addWidget(self.sms_credit_payment_template)
+        cred_hint2 = QLabel("Placeholders: {customer}, {amount}, {penalty}, {discount}, {balance}")
+        cred_hint2.setStyleSheet("color: #7f8c8d; font-size: 11px; font-style: italic;")
+        template_layout.addWidget(cred_hint2)
+
+        # FINANCE LEDGER (SALE + INSTALLMENT) MESSAGE TEMPLATES — enable checkbox
+        template_layout.addSpacing(10)
+        fin_header = QHBoxLayout()
+        fin_header.addWidget(QLabel("FINANCE LEDGER MESSAGE TEMPLATES (Account + Installment)"))
+        fin_header.addStretch(1)
+        self.sms_finance_sale_installment_enabled = QCheckBox("Enable Finance Sale/Installment SMS")
+        self.sms_finance_sale_installment_enabled.setStyleSheet("font-weight: bold; color: #16a085;")
+        fin_header.addWidget(self.sms_finance_sale_installment_enabled)
+        template_layout.addLayout(fin_header)
+
+        template_layout.addWidget(QLabel("Finance Sale SMS Template:"))
+        self.sms_finance_sale_template = QTextEdit()
+        self.sms_finance_sale_template.setMaximumHeight(80)
+        self.sms_finance_sale_template.setPlaceholderText("Placeholders: {customer}, {sale_id}, {model}, {chassis}, {credit_price}, {down}, {balance}")
+        self.sms_finance_sale_template.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self.sms_finance_sale_template.setStyleSheet("""
+            QTextEdit {
+                font-family: 'Jameel Noori Nastaleeq', 'Urdu Typesetting', 'Tahoma', 'Arial';
+                font-size: 18px; line-height: 1.6; padding: 10px;
+                border: 1px solid #ced4da; border-radius: 4px;
+            }
+        """)
+        template_layout.addWidget(self.sms_finance_sale_template)
+        fin_hint1 = QLabel("Placeholders: {customer}, {sale_id}, {model}, {chassis}, {credit_price}, {down}, {balance}")
+        fin_hint1.setStyleSheet("color: #7f8c8d; font-size: 11px; font-style: italic;")
+        template_layout.addWidget(fin_hint1)
+
+        template_layout.addSpacing(6)
+        template_layout.addWidget(QLabel("Finance Installment Received SMS Template:"))
+        self.sms_finance_installment_template = QTextEdit()
+        self.sms_finance_installment_template.setMaximumHeight(80)
+        self.sms_finance_installment_template.setPlaceholderText("Placeholders: {customer}, {amount}, {sale_id}, {balance}")
+        self.sms_finance_installment_template.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self.sms_finance_installment_template.setStyleSheet("""
+            QTextEdit {
+                font-family: 'Jameel Noori Nastaleeq', 'Urdu Typesetting', 'Tahoma', 'Arial';
+                font-size: 18px; line-height: 1.6; padding: 10px;
+                border: 1px solid #ced4da; border-radius: 4px;
+            }
+        """)
+        template_layout.addWidget(self.sms_finance_installment_template)
+        fin_hint2 = QLabel("Placeholders: {customer}, {amount}, {sale_id}, {balance}")
+        fin_hint2.setStyleSheet("color: #7f8c8d; font-size: 11px; font-style: italic;")
+        template_layout.addWidget(fin_hint2)
 
         container_layout.addWidget(template_group)
 
@@ -4872,6 +5086,23 @@ class MainWindow(QMainWindow):
             self.sms_bulk_delay.setValue(config.delay_seconds or 5)
             self.sms_invoice_template.setPlainText(config.invoice_template)
             self.sms_booking_template.setPlainText(getattr(config, 'booking_template', '') or "")
+            # Owner phone
+            self.sms_owner_phone.setText(getattr(config, 'owner_phone_number', '') or "")
+            # Spare ledger templates
+            self.sms_spare_credit_template.setPlainText(getattr(config, 'spare_ledger_credit_template', '') or "")
+            self.sms_spare_debit_template.setPlainText(getattr(config, 'spare_ledger_debit_template', '') or "")
+            # Credit/finance templates
+            self.sms_credit_sale_template.setPlainText(getattr(config, 'credit_sale_template', '') or "")
+            self.sms_credit_payment_template.setPlainText(getattr(config, 'credit_payment_template', '') or "")
+            self.sms_finance_sale_template.setPlainText(getattr(config, 'finance_sale_template', '') or "")
+            self.sms_finance_installment_template.setPlainText(getattr(config, 'finance_installment_template', '') or "")
+            # Per-feature enable toggles (default True if column/row not yet set)
+            self.sms_invoice_enabled.setChecked(bool(getattr(config, 'invoice_sms_enabled', True)))
+            self.sms_booking_enabled.setChecked(bool(getattr(config, 'booking_sms_enabled', True)))
+            self.sms_spare_credit_enabled.setChecked(bool(getattr(config, 'spare_credit_sms_enabled', True)))
+            self.sms_spare_debit_enabled.setChecked(bool(getattr(config, 'spare_debit_sms_enabled', True)))
+            self.sms_credit_sale_payment_enabled.setChecked(bool(getattr(config, 'credit_sale_payment_sms_enabled', True)))
+            self.sms_finance_sale_installment_enabled.setChecked(bool(getattr(config, 'finance_sale_installment_sms_enabled', True)))
                     
         except Exception as e:
             logger.error(f"Error loading SMS config: {e}")
@@ -4899,6 +5130,23 @@ class MainWindow(QMainWindow):
             config.delay_seconds = self.sms_bulk_delay.value()
             config.invoice_template = self.sms_invoice_template.toPlainText().strip()
             config.booking_template = self.sms_booking_template.toPlainText().strip()
+            # Owner phone
+            config.owner_phone_number = self.sms_owner_phone.text().strip()
+            # Spare ledger templates
+            config.spare_ledger_credit_template = self.sms_spare_credit_template.toPlainText().strip()
+            config.spare_ledger_debit_template = self.sms_spare_debit_template.toPlainText().strip()
+            # Credit/finance templates
+            config.credit_sale_template = self.sms_credit_sale_template.toPlainText().strip()
+            config.credit_payment_template = self.sms_credit_payment_template.toPlainText().strip()
+            config.finance_sale_template = self.sms_finance_sale_template.toPlainText().strip()
+            config.finance_installment_template = self.sms_finance_installment_template.toPlainText().strip()
+            # Per-feature enable toggles
+            config.invoice_sms_enabled = bool(self.sms_invoice_enabled.isChecked())
+            config.booking_sms_enabled = bool(self.sms_booking_enabled.isChecked())
+            config.spare_credit_sms_enabled = bool(self.sms_spare_credit_enabled.isChecked())
+            config.spare_debit_sms_enabled = bool(self.sms_spare_debit_enabled.isChecked())
+            config.credit_sale_payment_sms_enabled = bool(self.sms_credit_sale_payment_enabled.isChecked())
+            config.finance_sale_installment_sms_enabled = bool(self.sms_finance_sale_installment_enabled.isChecked())
             db.commit()
             self._show_success("SMS Saved", "SMS Gateway configuration updated successfully.")
         except Exception as e:
@@ -8014,7 +8262,8 @@ class MainWindow(QMainWindow):
             return
         
         # Phone validation (optional but recommended for SMS)
-        if phone and not (phone.isdigit() and len(phone) >= 10):
+        import re
+        if phone and not re.match(r"^03\d{9}$", phone):
             self._show_error("Validation Error", "Please enter a valid phone number (e.g., 03001234567).")
             self.ab_customer_phone.setFocus()
             return
@@ -8805,6 +9054,7 @@ class MainWindow(QMainWindow):
                     
                     from app.services.sms_service import sms_service
                     sms_service.queue_spare_ledger_sms(db, txn)
+                    threading.Thread(target=sms_service.process_queue, daemon=True).start()
                     
                     db.commit()
                     self._show_success("Updated", "Transaction updated successfully.")
@@ -9027,6 +9277,7 @@ class MainWindow(QMainWindow):
                 
                 from app.services.sms_service import sms_service
                 sms_service.queue_spare_ledger_sms(db, new_txn)
+                threading.Thread(target=sms_service.process_queue, daemon=True).start()
                 
                 db.commit()
                 self._show_success("Transaction Added", f"Successfully recorded {txn_type} of {amount:,.2f}")

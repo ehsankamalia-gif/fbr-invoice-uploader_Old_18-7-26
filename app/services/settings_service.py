@@ -188,6 +188,7 @@ class SettingsService:
         """Initialize default configurations in DB if they don't exist."""
         db = SessionLocal()
         try:
+            from app.db.models import SMSConfiguration
             # Check for SANDBOX
             sandbox = db.query(FBRConfiguration).filter_by(environment="SANDBOX").first()
             if not sandbox:
@@ -233,6 +234,18 @@ class SettingsService:
                     logger.info("Auto-corrected Production API URL to https://gw.fbr.gov.pk/imsp/v1/api/Live")
                     # Ensure we don't overwrite user customizations if they are different, 
                     # but here we specifically target the known bad default we shipped.
+
+            # Ensure SMS configuration row exists so SMS features don't silently skip due to missing config.
+            sms_cfg = db.query(SMSConfiguration).first()
+            if not sms_cfg:
+                sms_cfg = SMSConfiguration(
+                    is_enabled=False,
+                    gateway_type="WIFI",
+                    gateway_port="8080",
+                    use_https=False,
+                    delay_seconds=5,
+                )
+                db.add(sms_cfg)
 
             # Initialize DMS settings from module .env if present
             app_cfg = db.query(AppConfiguration).first()
@@ -839,9 +852,19 @@ class SettingsService:
                     "use_https": False,
                     "invoice_template": "Hello {customer}, your invoice {invoice_no} for Rs. {amount} has been generated. FBR ID: {fbr_id}",
                     "booking_template": "Dear {customer}, your booking for {model} ({color}) is confirmed. Booking #: {booking_no}. Paid: Rs. {paid}. Balance: Rs. {balance}.",
+                    "invoice_sms_enabled": True,
+                    "booking_sms_enabled": True,
                     "owner_phone_number": "",
-                    "spare_ledger_credit_template": "Spare Ledger: Credit received of Rs. {amount} via {source}. Reference: {reference}. Description: {description}",
-                    "spare_ledger_debit_template": "Spare Ledger: Debit/Order of Rs. {amount} via {source}. Reference: {reference}. Description: {description}"
+                    "spare_ledger_credit_template": "Spare Ledger: Credit received of Rs. {amount} via {source}. Reference: {reference}. Description: {description}. Balance: Rs. {balance}",
+                    "spare_ledger_debit_template": "Spare Ledger: Debit/Order of Rs. {amount} via {source}. Reference: {reference}. Description: {description}. Balance: Rs. {balance}",
+                    "spare_credit_sms_enabled": True,
+                    "spare_debit_sms_enabled": True,
+                    "credit_sale_template": "Dear {customer}, credit sale of {model} (Chassis: {chassis}) is confirmed. Credit: Rs. {credit_price}. Advance: Rs. {advance}. Balance: Rs. {balance}.",
+                    "credit_payment_template": "Dear {customer}, installment of Rs. {amount} received. Penalty: Rs. {penalty}. Discount: Rs. {discount}. Remaining balance: Rs. {balance}.",
+                    "credit_sale_payment_sms_enabled": True,
+                    "finance_sale_template": "Dear {customer}, finance account {sale_id} for {model} (Chassis: {chassis}) is confirmed. Finance: Rs. {credit_price}. Down: Rs. {down}. Balance: Rs. {balance}.",
+                    "finance_installment_template": "Dear {customer}, installment of Rs. {amount} received for {sale_id}. New balance: Rs. {balance}.",
+                    "finance_sale_installment_sms_enabled": True
                 }
             
             return {
@@ -858,9 +881,19 @@ class SettingsService:
                 "api_key": config.api_key,
                 "invoice_template": config.invoice_template,
                 "booking_template": getattr(config, 'booking_template', ""),
+                "invoice_sms_enabled": getattr(config, 'invoice_sms_enabled', True),
+                "booking_sms_enabled": getattr(config, 'booking_sms_enabled', True),
                 "owner_phone_number": getattr(config, 'owner_phone_number', ""),
                 "spare_ledger_credit_template": getattr(config, 'spare_ledger_credit_template', ""),
-                "spare_ledger_debit_template": getattr(config, 'spare_ledger_debit_template', "")
+                "spare_ledger_debit_template": getattr(config, 'spare_ledger_debit_template', ""),
+                "spare_credit_sms_enabled": getattr(config, 'spare_credit_sms_enabled', True),
+                "spare_debit_sms_enabled": getattr(config, 'spare_debit_sms_enabled', True),
+                "credit_sale_template": getattr(config, 'credit_sale_template', ""),
+                "credit_payment_template": getattr(config, 'credit_payment_template', ""),
+                "credit_sale_payment_sms_enabled": getattr(config, 'credit_sale_payment_sms_enabled', True),
+                "finance_sale_template": getattr(config, 'finance_sale_template', ""),
+                "finance_installment_template": getattr(config, 'finance_installment_template', ""),
+                "finance_sale_installment_sms_enabled": getattr(config, 'finance_sale_installment_sms_enabled', True)
             }
         except Exception as e:
             logger.error(f"Error getting SMS config: {e}")

@@ -537,9 +537,26 @@ class SMSConfigDialog(BaseSettingsDialog):
         tmpl_group.setStyleSheet("background-color: #fcfcfc; border: 1px solid #dee2e6; border-radius: 4px;")
         tmpl_layout = QVBoxLayout(tmpl_group)
         
+        owner_phone_title = QLabel("OWNER'S PHONE NUMBER FOR SPARE LEDGER SMS")
+        owner_phone_title.setStyleSheet("color: #138496; font-size: 14px; border: none; font-weight: bold;")
+        tmpl_layout.addWidget(owner_phone_title)
+
+        owner_phone_layout = QHBoxLayout()
+        owner_phone_layout.addWidget(QLabel("Phone Number:"))
+        self.owner_phone = QLineEdit()
+        self.owner_phone.setPlaceholderText("e.g. 03001234567")
+        owner_phone_layout.addWidget(self.owner_phone)
+        tmpl_layout.addLayout(owner_phone_layout)
+
+        tmpl_layout.addSpacing(10)
+        invoice_header = QHBoxLayout()
         tmpl_title = QLabel("INVOICE MESSAGE TEMPLATE")
         tmpl_title.setStyleSheet("color: #e67e22; font-size: 14px; border: none; font-weight: bold;")
-        tmpl_layout.addWidget(tmpl_title)
+        invoice_header.addWidget(tmpl_title)
+        invoice_header.addStretch(1)
+        self.invoice_sms_enabled = QCheckBox("Enable Invoice SMS")
+        invoice_header.addWidget(self.invoice_sms_enabled)
+        tmpl_layout.addLayout(invoice_header)
         
         self.template_text = QTextEdit()
         self.template_text.setFixedHeight(80)
@@ -551,9 +568,14 @@ class SMSConfigDialog(BaseSettingsDialog):
 
         # Booking Template
         tmpl_layout.addSpacing(10)
+        booking_header = QHBoxLayout()
         booking_tmpl_title = QLabel("BOOKING MESSAGE TEMPLATE")
         booking_tmpl_title.setStyleSheet("color: #27ae60; font-size: 14px; border: none; font-weight: bold;")
-        tmpl_layout.addWidget(booking_tmpl_title)
+        booking_header.addWidget(booking_tmpl_title)
+        booking_header.addStretch(1)
+        self.booking_sms_enabled = QCheckBox("Enable Booking SMS")
+        booking_header.addWidget(self.booking_sms_enabled)
+        tmpl_layout.addLayout(booking_header)
         
         self.booking_template_text = QTextEdit()
         self.booking_template_text.setFixedHeight(80)
@@ -563,45 +585,99 @@ class SMSConfigDialog(BaseSettingsDialog):
         booking_help_text.setStyleSheet("font-size: 11px; color: #7f8c8d; border: none;")
         tmpl_layout.addWidget(booking_help_text)
         
-        # Owner's Phone Number for Spare Ledger SMS
         tmpl_layout.addSpacing(10)
-        owner_phone_title = QLabel("OWNER'S PHONE NUMBER FOR SPARE LEDGER SMS")
-        owner_phone_title.setStyleSheet("color: #138496; font-size: 14px; border: none; font-weight: bold;")
-        tmpl_layout.addWidget(owner_phone_title)
-        
-        owner_phone_layout = QHBoxLayout()
-        owner_phone_layout.addWidget(QLabel("Phone Number:"))
-        self.owner_phone = QLineEdit()
-        self.owner_phone.setPlaceholderText("e.g. 03001234567")
-        owner_phone_layout.addWidget(self.owner_phone)
-        tmpl_layout.addLayout(owner_phone_layout)
-        
-        # Spare Ledger Templates
-        tmpl_layout.addSpacing(10)
+        spare_credit_header = QHBoxLayout()
         spare_credit_tmpl_title = QLabel("SPARE LEDGER CREDIT MESSAGE TEMPLATE")
         spare_credit_tmpl_title.setStyleSheet("color: #9b59b6; font-size: 14px; border: none; font-weight: bold;")
-        tmpl_layout.addWidget(spare_credit_tmpl_title)
+        spare_credit_header.addWidget(spare_credit_tmpl_title)
+        spare_credit_header.addStretch(1)
+        self.spare_credit_sms_enabled = QCheckBox("Enable Spare Credit SMS")
+        spare_credit_header.addWidget(self.spare_credit_sms_enabled)
+        tmpl_layout.addLayout(spare_credit_header)
         
         self.spare_credit_template_text = QTextEdit()
         self.spare_credit_template_text.setFixedHeight(80)
         tmpl_layout.addWidget(self.spare_credit_template_text)
         
-        spare_credit_help_text = QLabel("Variables: {amount}, {source}, {reference}, {description}")
+        spare_credit_help_text = QLabel("Variables: {amount}, {source}, {reference}, {description}, {balance}")
         spare_credit_help_text.setStyleSheet("font-size: 11px; color: #7f8c8d; border: none;")
         tmpl_layout.addWidget(spare_credit_help_text)
         
         tmpl_layout.addSpacing(10)
+        spare_debit_header = QHBoxLayout()
         spare_debit_tmpl_title = QLabel("SPARE LEDGER DEBIT/ORDER MESSAGE TEMPLATE")
         spare_debit_tmpl_title.setStyleSheet("color: #e74c3c; font-size: 14px; border: none; font-weight: bold;")
-        tmpl_layout.addWidget(spare_debit_tmpl_title)
+        spare_debit_header.addWidget(spare_debit_tmpl_title)
+        spare_debit_header.addStretch(1)
+        self.spare_debit_sms_enabled = QCheckBox("Enable Spare Debit/Order SMS")
+        spare_debit_header.addWidget(self.spare_debit_sms_enabled)
+        tmpl_layout.addLayout(spare_debit_header)
         
         self.spare_debit_template_text = QTextEdit()
         self.spare_debit_template_text.setFixedHeight(80)
         tmpl_layout.addWidget(self.spare_debit_template_text)
         
-        spare_debit_help_text = QLabel("Variables: {amount}, {source}, {reference}, {description}")
+        spare_debit_help_text = QLabel("Variables: {amount}, {source}, {reference}, {description}, {balance}")
         spare_debit_help_text.setStyleSheet("font-size: 11px; color: #7f8c8d; border: none;")
         tmpl_layout.addWidget(spare_debit_help_text)
+
+        tmpl_layout.addSpacing(10)
+        credit_header = QHBoxLayout()
+        credit_tmpl_title = QLabel("CREDIT LEDGER MESSAGE TEMPLATES")
+        credit_tmpl_title.setStyleSheet("color: #8e44ad; font-size: 14px; border: none; font-weight: bold;")
+        credit_header.addWidget(credit_tmpl_title)
+        credit_header.addStretch(1)
+        self.credit_sale_payment_sms_enabled = QCheckBox("Enable Credit Sale/Payment SMS")
+        credit_header.addWidget(self.credit_sale_payment_sms_enabled)
+        tmpl_layout.addLayout(credit_header)
+
+        tmpl_layout.addWidget(QLabel("Credit Sale SMS Template:"))
+        self.credit_sale_template_text = QTextEdit()
+        self.credit_sale_template_text.setFixedHeight(80)
+        tmpl_layout.addWidget(self.credit_sale_template_text)
+
+        credit_sale_help_text = QLabel("Variables: {customer}, {model}, {chassis}, {credit_price}, {advance}, {balance}")
+        credit_sale_help_text.setStyleSheet("font-size: 11px; color: #7f8c8d; border: none;")
+        tmpl_layout.addWidget(credit_sale_help_text)
+
+        tmpl_layout.addSpacing(6)
+        tmpl_layout.addWidget(QLabel("Credit Installment Received SMS Template:"))
+        self.credit_payment_template_text = QTextEdit()
+        self.credit_payment_template_text.setFixedHeight(80)
+        tmpl_layout.addWidget(self.credit_payment_template_text)
+
+        credit_payment_help_text = QLabel("Variables: {customer}, {amount}, {penalty}, {discount}, {balance}")
+        credit_payment_help_text.setStyleSheet("font-size: 11px; color: #7f8c8d; border: none;")
+        tmpl_layout.addWidget(credit_payment_help_text)
+
+        tmpl_layout.addSpacing(10)
+        finance_header = QHBoxLayout()
+        finance_tmpl_title = QLabel("FINANCE LEDGER MESSAGE TEMPLATES")
+        finance_tmpl_title.setStyleSheet("color: #16a085; font-size: 14px; border: none; font-weight: bold;")
+        finance_header.addWidget(finance_tmpl_title)
+        finance_header.addStretch(1)
+        self.finance_sale_installment_sms_enabled = QCheckBox("Enable Finance Sale/Installment SMS")
+        finance_header.addWidget(self.finance_sale_installment_sms_enabled)
+        tmpl_layout.addLayout(finance_header)
+
+        tmpl_layout.addWidget(QLabel("Finance Sale SMS Template:"))
+        self.finance_sale_template_text = QTextEdit()
+        self.finance_sale_template_text.setFixedHeight(80)
+        tmpl_layout.addWidget(self.finance_sale_template_text)
+
+        finance_sale_help_text = QLabel("Variables: {customer}, {sale_id}, {model}, {chassis}, {credit_price}, {down}, {balance}")
+        finance_sale_help_text.setStyleSheet("font-size: 11px; color: #7f8c8d; border: none;")
+        tmpl_layout.addWidget(finance_sale_help_text)
+
+        tmpl_layout.addSpacing(6)
+        tmpl_layout.addWidget(QLabel("Finance Installment Received SMS Template:"))
+        self.finance_installment_template_text = QTextEdit()
+        self.finance_installment_template_text.setFixedHeight(80)
+        tmpl_layout.addWidget(self.finance_installment_template_text)
+
+        finance_installment_help_text = QLabel("Variables: {customer}, {amount}, {sale_id}, {balance}")
+        finance_installment_help_text.setStyleSheet("font-size: 11px; color: #7f8c8d; border: none;")
+        tmpl_layout.addWidget(finance_installment_help_text)
         
         layout.addWidget(tmpl_group)
         
@@ -623,6 +699,17 @@ class SMSConfigDialog(BaseSettingsDialog):
         self.owner_phone.setText(config.get("owner_phone_number", ""))
         self.spare_credit_template_text.setPlainText(config.get("spare_ledger_credit_template", ""))
         self.spare_debit_template_text.setPlainText(config.get("spare_ledger_debit_template", ""))
+        self.credit_sale_template_text.setPlainText(config.get("credit_sale_template", ""))
+        self.credit_payment_template_text.setPlainText(config.get("credit_payment_template", ""))
+        self.finance_sale_template_text.setPlainText(config.get("finance_sale_template", ""))
+        self.finance_installment_template_text.setPlainText(config.get("finance_installment_template", ""))
+
+        self.invoice_sms_enabled.setChecked(bool(config.get("invoice_sms_enabled", True)))
+        self.booking_sms_enabled.setChecked(bool(config.get("booking_sms_enabled", True)))
+        self.spare_credit_sms_enabled.setChecked(bool(config.get("spare_credit_sms_enabled", True)))
+        self.spare_debit_sms_enabled.setChecked(bool(config.get("spare_debit_sms_enabled", True)))
+        self.credit_sale_payment_sms_enabled.setChecked(bool(config.get("credit_sale_payment_sms_enabled", True)))
+        self.finance_sale_installment_sms_enabled.setChecked(bool(config.get("finance_sale_installment_sms_enabled", True)))
 
     def _on_test_sms(self):
         ip = self.sms_ip.text().strip()
@@ -688,9 +775,19 @@ class SMSConfigDialog(BaseSettingsDialog):
                 api_key=self.sms_api_key.text().strip(),
                 invoice_template=self.template_text.toPlainText().strip(),
                 booking_template=self.booking_template_text.toPlainText().strip(),
+                invoice_sms_enabled=self.invoice_sms_enabled.isChecked(),
+                booking_sms_enabled=self.booking_sms_enabled.isChecked(),
                 owner_phone_number=self.owner_phone.text().strip(),
                 spare_ledger_credit_template=self.spare_credit_template_text.toPlainText().strip(),
-                spare_ledger_debit_template=self.spare_debit_template_text.toPlainText().strip()
+                spare_ledger_debit_template=self.spare_debit_template_text.toPlainText().strip(),
+                spare_credit_sms_enabled=self.spare_credit_sms_enabled.isChecked(),
+                spare_debit_sms_enabled=self.spare_debit_sms_enabled.isChecked(),
+                credit_sale_template=self.credit_sale_template_text.toPlainText().strip(),
+                credit_payment_template=self.credit_payment_template_text.toPlainText().strip(),
+                credit_sale_payment_sms_enabled=self.credit_sale_payment_sms_enabled.isChecked(),
+                finance_sale_template=self.finance_sale_template_text.toPlainText().strip(),
+                finance_installment_template=self.finance_installment_template_text.toPlainText().strip(),
+                finance_sale_installment_sms_enabled=self.finance_sale_installment_sms_enabled.isChecked()
             )
             self._show_success("Saved", "Configuration updated.")
             self.accept()

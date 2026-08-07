@@ -233,6 +233,20 @@ class CreditLedgerService:
                 )
             except Exception as e:
                 logger.error(f"Error creating portal account during credit sale: {e}", exc_info=True)
+
+            # Queue SMS to buyer for each chassis in the new credit sale
+            try:
+                from app.services.sms_service import sms_service
+                sms_service.queue_credit_sale_sms(
+                    db,
+                    sale_id=sale.id,
+                    items=db.query(CreditSaleItem).filter(CreditSaleItem.sale_id == sale.id).all(),
+                    advance_payment=float(sale.advance_payment or 0.0),
+                    customer_id=sale.buyer_id,
+                    fallback_phone=sale_data.get('buyer_phone')
+                )
+            except Exception as e:
+                logger.error(f"Error queueing credit sale SMS for sale {sale.id}: {e}", exc_info=True)
             
             db.commit()
             db.refresh(sale)
@@ -328,6 +342,28 @@ class CreditLedgerService:
                 # Update status if fully paid
                 if sale.remaining_amount <= 0:
                     sale.status = "CLOSED"
+
+            # 5. Queue installment-received SMS to buyer
+            try:
+                from app.services.sms_service import sms_service
+                # Grab latest balance after applying payment, penalty and discount
+                final_balance = None
+                last_entry = db.query(BuyerLedger).filter(
+                    BuyerLedger.buyer_id == payment.buyer_id
+                ).order_by(desc(BuyerLedger.id)).first()
+                if last_entry is not None:
+                    final_balance = float(getattr(last_entry, "balance", 0.0) or 0.0)
+                sms_service.queue_credit_payment_sms(
+                    db,
+                    payment_id=payment.id,
+                    buyer_id=payment.buyer_id,
+                    amount=float(payment.amount or 0.0),
+                    penalty_amount=float(payment.penalty_amount or 0.0),
+                    discount_amount=float(payment.discount_amount or 0.0),
+                    new_balance=final_balance
+                )
+            except Exception as e:
+                logger.error(f"Error queueing credit payment SMS for payment {payment.id}: {e}", exc_info=True)
             
             db.commit()
             db.refresh(payment)
@@ -448,6 +484,18 @@ class CreditLedgerService:
                 )
             except Exception as e:
                 logger.error(f"Error creating portal account during finance sale: {e}", exc_info=True)
+
+            # Queue SMS to customer for the new finance account + down payment
+            try:
+                from app.services.sms_service import sms_service
+                sms_service.queue_finance_sale_sms(
+                    db,
+                    sale=finance_sale,
+                    customer_id=finance_sale.customer_id,
+                    fallback_phone=sale_data.get('customer_phone')
+                )
+            except Exception as e:
+                logger.error(f"Error queueing finance sale SMS for {finance_sale.sale_id}: {e}", exc_info=True)
             
             db.commit()
             db.refresh(finance_sale)
@@ -502,6 +550,18 @@ class CreditLedgerService:
                 entry_date=installment.payment_date
             )
             db.add(ledger_entry)
+
+            # 4. Queue installment-received SMS to finance customer
+            try:
+                from app.services.sms_service import sms_service
+                sms_service.queue_finance_installment_sms(
+                    db,
+                    installment=installment,
+                    sale=sale,
+                    customer_id=int(installment.customer_id)
+                )
+            except Exception as e:
+                logger.error(f"Error queueing finance installment SMS for {installment.payment_id}: {e}", exc_info=True)
             
             db.commit()
             db.refresh(installment)
