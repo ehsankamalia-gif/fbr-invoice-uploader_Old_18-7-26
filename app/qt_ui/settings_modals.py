@@ -292,45 +292,224 @@ class BusinessPreferencesDialog(BaseSettingsDialog):
     """Modal for Business Rules and Tax preferences."""
     def __init__(self, parent=None):
         super().__init__("Business Rules & Preferences", parent)
+        self.setMinimumWidth(620)
         self._init_ui()
         self._load_data()
 
     def _init_ui(self):
         layout = QGridLayout()
         layout.setSpacing(15)
-        
+
         layout.addWidget(QLabel("Business Name:"), 0, 0)
         self.business_name = QLineEdit()
         layout.addWidget(self.business_name, 0, 1)
-        
+
         layout.addWidget(QLabel("Default Sales Tax (%):"), 1, 0)
         self.tax_rate = QDoubleSpinBox()
         self.tax_rate.setRange(0, 100)
         layout.addWidget(self.tax_rate, 1, 1)
-        
+
         layout.addWidget(QLabel("PCT Code:"), 2, 0)
         self.pct_code = QLineEdit()
         layout.addWidget(self.pct_code, 2, 1)
-        
+
         layout.addWidget(QLabel("Item Code Prefix:"), 3, 0)
         self.item_code = QLineEdit()
         layout.addWidget(self.item_code, 3, 1)
-        
+
         layout.addWidget(QLabel("Default Item Name:"), 4, 0)
         self.item_name = QLineEdit()
         layout.addWidget(self.item_name, 4, 1)
-        
+
         layout.addWidget(QLabel("Default Invoice Type:"), 5, 0)
         self.invoice_type = QComboBox()
         self.invoice_type.addItems(["Standard", "Debit Note", "Credit Note"])
         layout.addWidget(self.invoice_type, 5, 1)
-        
+
         layout.addWidget(QLabel("Default Discount (%):"), 6, 0)
         self.discount = QDoubleSpinBox()
         self.discount.setRange(0, 100)
         layout.addWidget(self.discount, 6, 1)
-        
+
         self.content_layout.addLayout(layout)
+
+        # -------------------- Invoice Logo Section --------------------
+        logo_frame = QFrame()
+        logo_frame.setObjectName("formGroup")
+        logo_layout_v = QVBoxLayout(logo_frame)
+        logo_layout_v.setContentsMargins(16, 14, 16, 14)
+        logo_layout_v.setSpacing(10)
+
+        logo_title = QLabel("Invoice Logo (Optional default logo on print)")
+        logo_title.setStyleSheet("font-size:14px; font-weight:700; color:#1f2937;")
+        logo_layout_v.addWidget(logo_title)
+
+        logo_body = QHBoxLayout()
+        logo_body.setSpacing(14)
+
+        # Preview box (placeholder / actual preview)
+        self.logo_preview = QLabel()
+        self.logo_preview.setFixedSize(160, 120)
+        self.logo_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.logo_preview.setStyleSheet("""
+            QLabel {
+                background: #f8fafc;
+                border: 1px dashed #94a3b8;
+                border-radius: 8px;
+                color: #64748b;
+                font-size: 12px;
+                font-weight: 500;
+            }
+        """)
+        self.logo_preview.setText("(no logo)")
+        self.logo_preview.setScaledContents(False)
+        logo_body.addWidget(self.logo_preview)
+
+        # Right column: caption + buttons
+        logo_right = QVBoxLayout()
+        logo_right.setSpacing(8)
+
+        logo_caption = QLabel(
+            "Adds a default logo to every newly-generated invoice. "
+            "You can reposition / resize / remove the logo inside the "
+            "print preview dialog per invoice if needed.\n"
+            "Supported: PNG, JPG, JPEG, GIF, SVG, WebP."
+        )
+        logo_caption.setStyleSheet("color:#475569; font-size:12px; font-weight:400;")
+        logo_caption.setWordWrap(True)
+        logo_right.addWidget(logo_caption)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        self.browse_logo_btn = QPushButton("Browse…")
+        self.browse_logo_btn.setObjectName("secondaryButton")
+        self.browse_logo_btn.clicked.connect(self._browse_logo)
+        btn_row.addWidget(self.browse_logo_btn)
+
+        self.clear_logo_btn = QPushButton("Remove")
+        self.clear_logo_btn.setObjectName("secondaryButton")
+        self.clear_logo_btn.setStyleSheet("""
+            QPushButton#secondaryButton {
+                background: #fef2f2;
+                color: #991b1b;
+                border: 1px solid #fecaca;
+            }
+            QPushButton#secondaryButton:hover {
+                background: #fee2e2;
+            }
+            QPushButton#secondaryButton:disabled {
+                opacity: 0.45;
+            }
+        """)
+        self.clear_logo_btn.clicked.connect(self._clear_logo)
+        btn_row.addWidget(self.clear_logo_btn)
+        btn_row.addStretch(1)
+
+        logo_right.addLayout(btn_row)
+
+        self.logo_filename_lbl = QLabel("")
+        self.logo_filename_lbl.setStyleSheet("color:#475569; font-size:12px;")
+        self.logo_filename_lbl.setWordWrap(True)
+        logo_right.addWidget(self.logo_filename_lbl)
+        logo_right.addStretch(1)
+
+        logo_body.addLayout(logo_right, 1)
+        logo_layout_v.addLayout(logo_body)
+        self.content_layout.addWidget(logo_frame)
+
+        # Runtime state for logo (not yet persisted until Save)
+        self._pending_logo_data_url: str = ""
+        self._pending_logo_name: str = ""
+
+    # ---------- Logo helpers ----------
+    def _refresh_logo_preview(self) -> None:
+        data_url = (self._pending_logo_data_url or "").strip()
+        name = (self._pending_logo_name or "").strip()
+        if not data_url:
+            self.logo_preview.clear()
+            self.logo_preview.setText("(no logo)")
+            self.logo_preview.setPixmap(QPixmap())
+            self.logo_filename_lbl.setText("")
+            self.clear_logo_btn.setEnabled(False)
+            return
+        self.clear_logo_btn.setEnabled(True)
+        pm = QPixmap()
+        ok = False
+        try:
+            if data_url.startswith("data:image/") and "base64," in data_url:
+                b64part = data_url.split("base64,", 1)[1]
+                import base64 as _b64
+                raw = _b64.b64decode(b64part, validate=False)
+                img = QImage.fromData(raw)
+                if not img.isNull():
+                    pm = QPixmap.fromImage(img)
+                    ok = True
+            if not ok:
+                ok = pm.loadFromData(data_url.encode("utf-8", errors="ignore"))
+        except Exception:
+            ok = False
+        if ok and not pm.isNull():
+            scaled = pm.scaled(
+                self.logo_preview.width(),
+                self.logo_preview.height(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self.logo_preview.setPixmap(scaled)
+            self.logo_preview.setText("")
+        else:
+            self.logo_preview.clear()
+            self.logo_preview.setText("(preview not available)")
+            self.logo_preview.setPixmap(QPixmap())
+        self.logo_filename_lbl.setText(f"File: {name}" if name else "")
+
+    def _browse_logo(self) -> None:
+        filters = "Images (*.png *.jpg *.jpeg *.gif *.svg *.webp *.bmp)"
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Choose Invoice Logo Image",
+            "",
+            filters,
+        )
+        if not path:
+            return
+        p = Path(path)
+        if not p.exists() or not p.is_file():
+            self._show_error("Invalid file", "Selected file could not be read.")
+            return
+        try:
+            raw = p.read_bytes()
+        except Exception as e:
+            self._show_error("Read error", f"Could not read file: {e}")
+            return
+        if len(raw) > 4 * 1024 * 1024:  # 4MB cap to keep DB row size sane
+            self._show_error(
+                "File too large",
+                "Logo image is too large. Please use an image smaller than 4 MB.",
+            )
+            return
+        import base64 as _b64
+        ext = (p.suffix or "").lower().lstrip(".")
+        mime = "image/png"
+        if ext in ("jpg", "jpeg"):
+            mime = "image/jpeg"
+        elif ext == "gif":
+            mime = "image/gif"
+        elif ext == "svg":
+            mime = "image/svg+xml"
+        elif ext == "webp":
+            mime = "image/webp"
+        elif ext == "bmp":
+            mime = "image/bmp"
+        b64 = _b64.b64encode(raw).decode("ascii")
+        self._pending_logo_data_url = f"data:{mime};base64,{b64}"
+        self._pending_logo_name = p.name
+        self._refresh_logo_preview()
+
+    def _clear_logo(self) -> None:
+        self._pending_logo_data_url = ""
+        self._pending_logo_name = ""
+        self._refresh_logo_preview()
 
     def _load_data(self):
         env = settings_service.get_active_environment()
@@ -343,6 +522,15 @@ class BusinessPreferencesDialog(BaseSettingsDialog):
             self.item_name.setText(data.get("item_name", "Honda"))
             self.invoice_type.setCurrentText(data.get("invoice_type", "Standard"))
             self.discount.setValue(float(data.get("discount", 0.0)))
+        try:
+            logo = settings_service.get_invoice_logo() or {}
+            self._pending_logo_data_url = str(logo.get("data_url") or "")
+            self._pending_logo_name = str(logo.get("name") or "")
+        except Exception as e:
+            logger.warning(f"Could not load invoice logo in settings dialog: {e}")
+            self._pending_logo_data_url = ""
+            self._pending_logo_name = ""
+        self._refresh_logo_preview()
 
     def save_settings(self):
         env = settings_service.get_active_environment()
@@ -362,7 +550,15 @@ class BusinessPreferencesDialog(BaseSettingsDialog):
                 item_name=self.item_name.text().strip(),
                 business_name=self.business_name.text().strip()
             )
-            self._show_success("Preferences Saved", "Business rules and preferences updated.")
+            try:
+                settings_service.set_invoice_logo(
+                    self._pending_logo_data_url or "",
+                    self._pending_logo_name or "",
+                )
+            except Exception as e:
+                logger.warning(f"Could not save invoice logo from settings dialog: {e}")
+                # Non-fatal: still accept the rest of save
+            self._show_success("Preferences Saved", "Business rules, preferences, and invoice logo updated.")
             self.accept()
         except Exception as e:
             logger.error(f"Failed to save preferences: {e}")

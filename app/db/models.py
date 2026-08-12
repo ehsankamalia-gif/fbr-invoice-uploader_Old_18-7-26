@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Boolean, JSON, Index, Enum
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Boolean, JSON, Index, Enum, Text
 from sqlalchemy.orm import relationship, declarative_base
 import datetime as dt
 import enum
@@ -521,7 +521,11 @@ class AppConfiguration(Base):
     dms_portal_url = Column(String(255), default="https://dms.ahlportal.com/login")
     dms_username = Column(String(100), nullable=True)
     dms_password = Column(String(100), nullable=True)
-    
+
+    # Invoice Print Template: user-supplied default logo (persisted as base64 data URL)
+    invoice_logo_data_url = Column(Text, nullable=True)
+    invoice_logo_name = Column(String(200), nullable=True)
+
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
 
 

@@ -742,6 +742,62 @@ class SettingsService:
         finally:
             db.close()
 
+    def get_invoice_logo(self) -> Dict[str, Any]:
+        """Return the default invoice logo stored in AppConfiguration.
+
+        Returns dict with keys:
+            data_url: str (base64 data URL or "")
+            name: str (original filename or "")
+        """
+        db = SessionLocal()
+        try:
+            config = db.query(AppConfiguration).first()
+            if not config:
+                return {"data_url": "", "name": ""}
+            data_url = str(getattr(config, "invoice_logo_data_url", None) or "")
+            name = str(getattr(config, "invoice_logo_name", None) or "")
+            return {"data_url": data_url, "name": name}
+        except Exception as e:
+            logger.error(f"Error getting invoice logo from AppConfiguration: {e}")
+            return {"data_url": "", "name": ""}
+        finally:
+            db.close()
+
+    def set_invoice_logo(self, data_url: str, name: str = "") -> None:
+        """Save (or clear) the default invoice logo.
+
+        Pass empty strings to clear/remove the saved logo.
+        """
+        data_url = str(data_url or "")
+        name = str(name or "")
+        db = SessionLocal()
+        try:
+            config = db.query(AppConfiguration).first()
+            if not config:
+                config = AppConfiguration(auto_push_enabled=False, auto_push_interval=5)
+                db.add(config)
+                db.flush()
+            try:
+                config.invoice_logo_data_url = data_url if data_url else None
+            except Exception:
+                # Column may not exist yet (pre-migration); swallow so rest of app works.
+                pass
+            try:
+                config.invoice_logo_name = name if name else None
+            except Exception:
+                pass
+            db.commit()
+            self._invalidate_cache()
+            self._bump_revision()
+            self._notify({"type": "invoice_logo_updated", "name": name, "has_logo": bool(data_url)})
+            logger.info(f"Updated invoice logo (name={name!r}, size={len(data_url)} chars)")
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error saving invoice logo to AppConfiguration: {e}")
+            raise
+        finally:
+            db.close()
+
     def set_urdu_font_config(
         self,
         enabled: bool,

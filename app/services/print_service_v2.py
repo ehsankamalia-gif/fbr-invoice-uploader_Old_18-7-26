@@ -8,7 +8,7 @@ import datetime as dt
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from jinja2 import Environment, FileSystemLoader
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QPushButton, QHBoxLayout, QMessageBox, QApplication, QWidget, QSizePolicy
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QPushButton, QHBoxLayout, QMessageBox, QApplication, QWidget, QSizePolicy, QFileDialog
 from PyQt6.QtCore import Qt, QUrl, QObject, QCoreApplication, QTimer, pyqtSlot
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 
@@ -152,6 +152,25 @@ class _InvoiceLayoutFileBridge(QObject):
             return True
         except Exception as exc:
             logger.warning(f"Failed to save invoice layout positions to file: {exc}")
+            return False
+
+    @pyqtSlot(result=bool)
+    def download_current_page_pdf(self) -> bool:
+        try:
+            obj = self.parent()
+            while obj is not None:
+                dl = getattr(obj, "_handle_download_pdf", None)
+                if callable(dl):
+                    try:
+                        dl()
+                        return True
+                    except Exception as exc2:
+                        logger.error(f"Bridge: Download PDF handler error: {exc2}", exc_info=True)
+                        return False
+                obj = obj.parent() if hasattr(obj, "parent") else None
+            return False
+        except Exception as exc:
+            logger.error(f"Bridge: Download PDF failed: {exc}", exc_info=True)
             return False
 
 
@@ -509,6 +528,32 @@ class PrintServiceV2:
                 f"src=\"data:image/png;base64,{esc(qr_base64)}\" />"
             )
 
+        settings_logo_html = ""
+        try:
+            from app.services.settings_service import settings_service
+            logo_cfg = settings_service.get_invoice_logo() or {}
+            logo_data_url = str(logo_cfg.get("data_url") or "").strip()
+            logo_name = str(logo_cfg.get("name") or "").strip()
+            if logo_data_url:
+                settings_logo_html = (
+                    '<div id="settingsLogo1" class="draggable" '
+                    'data-pos-key="custom_logo_settings_1" '
+                    'data-default-left="0.25in" data-default-top="1.05in" '
+                    'data-default-width="1.35in" data-default-height="auto" '
+                    'draggable="false" '
+                    'style="position:absolute; left: 0.25in; top: 1.05in; width: 1.35in; height: auto; '
+                    'background: transparent; user-select: none; -webkit-user-select: none; '
+                    '-webkit-user-drag: none; touch-action: none;">'
+                    f'<img src="{esc(logo_data_url)}" alt="{esc(logo_name or "logo")}" '
+                    'draggable="false" '
+                    'style="pointer-events: none; display: block; width: 100%; height: auto; max-width: 100%; '
+                    'user-select: none; -webkit-user-select: none;" />'
+                    '</div>'
+                )
+        except Exception as e:
+            logger.warning(f"Could not load settings invoice logo for render_invoice: {e}")
+            settings_logo_html = ""
+
         html = f"""
 <!DOCTYPE html>
 <html lang="en">
@@ -546,12 +591,21 @@ class PrintServiceV2:
       font-weight: 600;
       white-space: nowrap;
     }}
+    .label {{
+      position: absolute;
+      display: inline-block;
+      font-size: 9pt;
+      font-weight: 500;
+      color: #555;
+      white-space: nowrap;
+    }}
     .mono {{
       font-family: Consolas, 'Courier New', monospace;
       font-weight: 700;
     }}
     .draggable {{
-      outline: 1px dashed rgba(220, 53, 69, 0.75);
+      /* Always-on red outline removed: shows ONLY on hover, or when .selected (active edit) */
+      outline: none;
       outline-offset: 2px;
       touch-action: none;
       will-change: left, top, transform;
@@ -560,8 +614,16 @@ class PrintServiceV2:
       -webkit-user-select: none;
       cursor: grab;
     }}
+    .draggable:hover {{
+      outline: 1px dashed rgba(37, 99, 235, 0.55);
+      outline-offset: 2px;
+    }}
+    .draggable.selected {{
+      outline: 1px dashed rgba(220, 53, 69, 0.85);
+      outline-offset: 2px;
+    }}
     .dragging {{
-      outline: 2px solid rgba(220, 53, 69, 0.95);
+      outline: 2px solid rgba(220, 53, 69, 0.95) !important;
       transform: scale(1.02);
       box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
       cursor: grabbing;
@@ -600,11 +662,179 @@ class PrintServiceV2:
       opacity: 0.15;
       text-decoration: line-through;
     }}
+    .style-toolbar {{
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      z-index: 99998;
+      background: rgba(30, 34, 41, 0.96);
+      color: #fff;
+      font: 12px/1.3 Arial, sans-serif;
+      padding: 10px 12px;
+      border-radius: 10px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-width: 290px;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }}
+    .style-toolbar .st-title {{
+      font-weight: 700;
+      font-size: 12px;
+      color: #dbeafe;
+      margin-bottom: 2px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }}
+    .style-toolbar .st-title .st-target {{
+      font-weight: 600;
+      color: #facc15;
+      max-width: 170px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }}
+    .style-toolbar .st-row {{
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }}
+    .style-toolbar label.st-lbl {{
+      min-width: 70px;
+      color: #cbd5e1;
+      font-weight: 600;
+      font-size: 11px;
+    }}
+    .style-toolbar button {{
+      background: #334155;
+      border: 1px solid #475569;
+      color: #fff;
+      padding: 5px 9px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 120ms ease, transform 80ms ease, border-color 120ms ease;
+      line-height: 1;
+    }}
+    .style-toolbar button:hover {{
+      background: #475569;
+      border-color: #64748b;
+    }}
+    .style-toolbar button:active {{
+      transform: translateY(1px);
+    }}
+    .style-toolbar button.active {{
+      background: #2563eb;
+      border-color: #3b82f6;
+      color: #fff;
+    }}
+    .style-toolbar button.danger {{
+      background: #7f1d1d;
+      border-color: #991b1b;
+    }}
+    .style-toolbar button.danger:hover {{
+      background: #991b1b;
+    }}
+    .style-toolbar input[type="range"] {{
+      flex: 1;
+      min-width: 110px;
+      accent-color: #3b82f6;
+    }}
+    .style-toolbar .st-val {{
+      min-width: 38px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      color: #e2e8f0;
+      font-weight: 600;
+    }}
+    .style-toolbar select,
+    .style-toolbar input[type="color"] {{
+      background: #1e293b;
+      color: #f1f5f9;
+      border: 1px solid #475569;
+      border-radius: 6px;
+      padding: 4px 6px;
+      font-size: 12px;
+      font-weight: 600;
+    }}
+    .style-toolbar input[type="color"] {{
+      padding: 2px;
+      width: 38px;
+      height: 28px;
+      cursor: pointer;
+    }}
+    .style-toolbar .st-divider {{
+      height: 1px;
+      background: rgba(148, 163, 184, 0.22);
+      margin: 2px 0;
+    }}
+    .style-toolbar .st-actions {{
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }}
+    .style-toolbar .st-actions button {{
+      font-size: 11px;
+      padding: 6px 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+    }}
+    .style-toolbar button.add-logo {{
+      background: #065f46;
+      border-color: #047857;
+    }}
+    .style-toolbar button.add-logo:hover {{ background: #047857; border-color: #059669; }}
+    .style-toolbar button.delete-selection {{
+      background: #7f1d1d;
+      border-color: #991b1b;
+    }}
+    .style-toolbar button.delete-selection:hover {{ background: #991b1b; border-color: #b91c1c; }}
+    .style-toolbar button.delete-selection:disabled,
+    .style-toolbar button:disabled {{
+      opacity: 0.45;
+      cursor: not-allowed;
+      background: #334155 !important;
+      border-color: #475569 !important;
+    }}
+    #stSizeSliderRow label.st-lbl {{ min-width: 78px; }}
+    .resize-handle {{
+      position: absolute;
+      z-index: 100000;
+      width: 14px;
+      height: 14px;
+      background: #ffffff;
+      border: 2px solid #2563eb;
+      border-radius: 50%;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+      box-sizing: border-box;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }}
+    .resize-handle:hover {{ background: #dbeafe; border-color: #1d4ed8; }}
+    .resize-handle.nw {{ left: -8px; top: -8px; cursor: nwse-resize; }}
+    .resize-handle.n  {{ left: calc(50% - 7px); top: -8px; cursor: ns-resize; }}
+    .resize-handle.ne {{ right: -8px; top: -8px; cursor: nesw-resize; }}
+    .resize-handle.e  {{ right: -8px; top: calc(50% - 7px); cursor: ew-resize; }}
+    .resize-handle.se {{ right: -8px; bottom: -8px; cursor: nwse-resize; }}
+    .resize-handle.s  {{ left: calc(50% - 7px); bottom: -8px; cursor: ns-resize; }}
+    .resize-handle.sw {{ left: -8px; bottom: -8px; cursor: nesw-resize; }}
+    .resize-handle.w  {{ left: -8px; top: calc(50% - 7px); cursor: ew-resize; }}
     @media print {{
+      .resize-handle {{ display: none !important; }}
       .draggable {{ outline: none !important; box-shadow: none !important; }}
       .pos-hud {{ display: none !important; }}
       .hidden-field {{ display: none !important; }}
       .sub-hidden {{ display: none !important; }}
+      .style-toolbar {{ display: none !important; }}
       body {{ background: #fff !important; }}
       .page-wrap {{ height: auto !important; overflow: visible !important; padding: 0 !important; }}
       .page-shell {{ width: auto !important; height: auto !important; }}
@@ -616,31 +846,162 @@ class PrintServiceV2:
   <div class="page-wrap">
     <div id="pageShell" class="page-shell">
       <div id="invoicePage" class="page">
+        <div id="hondaLogo" class="draggable" data-pos-key="honda_logo" data-default-left="0.25in" data-default-top="0.18in" data-default-width="1.20in" data-default-height="0.80in" style="position:absolute; left: 0.25in; top: 0.18in; width: 1.20in; height: 0.80in; background: transparent; user-select: none; -webkit-user-select: none; -webkit-user-drag: none; touch-action: none;">
+          <svg draggable="false" viewBox="0 0 240 160" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" style="pointer-events: none; display: block; user-select: none; -webkit-user-select: none;">
+            <g fill="#C20000">
+              <path d="M30,132 Q20,102 38,76 Q50,58 72,50 Q94,42 118,38 Q142,36 166,40 Q190,46 208,58 L200,70 Q180,60 162,56 Q140,52 118,54 Q96,56 78,64 Q62,72 52,88 Q44,104 42,122 Z"/>
+              <path d="M42,142 Q34,116 48,94 Q60,76 82,68 Q108,58 134,56 Q160,56 184,62 Q204,68 220,80 L212,92 Q194,82 178,78 Q158,72 138,72 Q116,72 96,78 Q76,84 62,98 Q52,112 48,128 Z"/>
+              <path d="M54,150 Q48,126 60,108 Q72,90 94,82 Q120,74 146,74 Q172,74 194,82 Q214,88 230,102 L222,112 Q208,104 192,98 Q172,92 154,92 Q132,92 110,96 Q88,102 74,114 Q64,126 60,138 Z"/>
+              <path d="M66,156 Q62,138 72,122 Q84,106 106,100 Q132,94 158,96 Q182,98 202,108 Q218,116 236,130 L230,138 Q216,130 202,124 Q184,118 166,116 Q144,114 122,116 Q102,120 86,130 Q74,140 70,150 Z"/>
+            </g>
+            <g fill="#C20000" font-family="Arial Black, Arial, sans-serif" font-weight="900" text-anchor="middle">
+              <text x="120" y="152" font-size="44" letter-spacing="2">HONDA</text>
+            </g>
+          </svg>
+        </div>
+        <div id="fbrPosLogo" class="draggable" data-pos-key="fbr_pos_logo" data-default-left="6.70in" data-default-top="0.15in" data-default-width="1.25in" data-default-height="0.88in" style="position:absolute; left: 6.70in; top: 0.15in; width: 1.25in; height: 0.88in; background: transparent; user-select: none; -webkit-user-select: none; -webkit-user-drag: none; touch-action: none;">
+          <svg draggable="false" viewBox="0 0 260 180" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" style="pointer-events: none; display: block; user-select: none; -webkit-user-select: none;">
+            <defs>
+              <linearGradient id="rainbowArc" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="#2ca02c"/>
+                <stop offset="50%" stop-color="#d4af37"/>
+                <stop offset="100%" stop-color="#2ca02c"/>
+              </linearGradient>
+            </defs>
+            <path d="M20,46 Q130,4 240,46" fill="none" stroke="url(#rainbowArc)" stroke-width="8" stroke-linecap="round"/>
+            <polygon points="130,4 136,24 156,30 136,36 130,56 124,36 104,30 124,24" fill="#d4af37" stroke="#b8941f" stroke-width="1"/>
+            <g font-family="Arial Black, Arial, sans-serif" font-weight="900" fill="#0047AB" text-anchor="middle">
+              <text x="80" y="94" font-size="44">F</text>
+              <text x="130" y="94" font-size="44">B</text>
+              <text x="180" y="94" font-size="44">R</text>
+            </g>
+            <rect x="12" y="104" width="236" height="68" rx="14" fill="#0047AB"/>
+            <g font-family="Arial Black, Arial, sans-serif" font-weight="900" fill="#FFFFFF" text-anchor="middle">
+              <text x="52" y="158" font-size="60">P</text>
+              <text x="130" y="158" font-size="60">O</text>
+              <text x="208" y="158" font-size="60">S</text>
+            </g>
+            <g font-family="Arial, sans-serif" font-weight="700" fill="#E6EDF5" text-anchor="middle" letter-spacing="1.4">
+              <text x="130" y="178" font-size="14">INVOICING SYSTEM</text>
+            </g>
+          </svg>
+        </div>
+        {settings_logo_html}
+
+        <div id="businessName" class="field draggable" data-pos-key="business_name" data-default-left="2.40in" data-default-top="0.22in" style="left: 2.40in; top: 0.22in; font-size: 16pt; font-weight: 800; text-align: center; white-space: nowrap;">EHSAN TRADERS</div>
+        <div id="businessAddress" class="field draggable" data-pos-key="business_address" data-default-left="1.70in" data-default-top="0.52in" style="left: 1.70in; top: 0.52in; font-size: 10pt; font-weight: 600; text-align: center; white-space: nowrap;">NEAR BUS STAND RAJANA ROAD KAMALIA</div>
+        <div id="businessNtn" class="field draggable" data-pos-key="business_ntn" data-default-left="3.30in" data-default-top="0.78in" style="left: 3.30in; top: 0.78in; font-size: 10pt; font-weight: 700; text-align: center; white-space: nowrap;">NTN: 2755340</div>
+
+        <div id="lblDate" class="label draggable" data-pos-key="lbl_date" data-default-left="0.20in" data-default-top="1.05in" style="left: 0.20in; top: 1.05in;">Date:</div>
         <div id="invoiceDate" class="field mono draggable" data-pos-key="invoice_date" data-default-left="0.95in" data-default-top="1.05in" style="left: 0.95in; top: 1.05in;">{esc(date_str)}</div>
+
+        <div id="lblInvoiceNumber" class="label draggable" data-pos-key="lbl_invoice_number" data-default-left="0.20in" data-default-top="1.45in" style="left: 0.20in; top: 1.45in;">Invoice #:</div>
         <div id="invoiceNumber" class="field mono draggable" data-pos-key="invoice_number" data-default-left="0.95in" data-default-top="1.45in" style="left: 0.95in; top: 1.45in;">{esc(data.get("invoice_number") or "")}</div>
+
+        <div id="lblCustomerName" class="label draggable" data-pos-key="lbl_customer_name" data-default-left="0.20in" data-default-top="1.95in" style="left: 0.20in; top: 1.95in;">Customer:</div>
         <div id="customerName" class="field draggable" data-pos-key="customer_name" data-default-left="0.95in" data-default-top="1.95in" style="left: 0.95in; top: 1.95in;">{esc(customer_name_line)}</div>
+
+        <div id="lblCustomerAddress" class="label draggable" data-pos-key="lbl_customer_address" data-default-left="0.20in" data-default-top="2.35in" style="left: 0.20in; top: 2.35in;">Address:</div>
         <div id="customerAddress" class="field draggable" data-pos-key="customer_address" data-default-left="0.95in" data-default-top="2.35in" style="left: 0.95in; top: 2.35in;">{esc(data.get("customer_address") or "")}</div>
 
+        <div id="lblItemDesc" class="label draggable" data-pos-key="lbl_item_desc" data-default-left="0.20in" data-default-top="4.65in" style="left: 0.20in; top: 4.65in;">Item:</div>
         <div id="itemDesc1" class="field draggable" data-pos-key="item_desc_1" data-default-left="0.95in" data-default-top="4.65in" style="left: 0.95in; top: 4.65in;">{esc(primary.get("model") or primary.get("description") or "")}</div>
-        <div id="saleValue1" class="field mono draggable" data-pos-key="sale_value_1" data-default-left="3.75in" data-default-top="4.65in" style="left: 3.75in; top: 4.65in; text-align: right;">{esc(primary.get("sale_value") or "")}</div>
-        <div id="salesTax1" class="field mono draggable" data-pos-key="sales_tax_1" data-default-left="4.65in" data-default-top="4.65in" style="left: 4.65in; top: 4.65in; text-align: right;">{esc(primary.get("sales_tax") or "")}</div>
-        <div id="levy1" class="field mono draggable" data-pos-key="levy_1" data-default-left="5.55in" data-default-top="4.65in" style="left: 5.55in; top: 4.65in; text-align: right;">{esc(primary.get("levy") or "")}</div>
-        <div id="totalLine1" class="field mono draggable" data-pos-key="total_line_1" data-default-left="6.45in" data-default-top="4.65in" style="left: 6.45in; top: 4.65in; text-align: right;">{esc(primary.get("total_line") or primary.get("price") or "")}</div>
 
+        <div id="lblSaleValue" class="label draggable" data-pos-key="lbl_sale_value" data-default-left="3.15in" data-default-top="4.42in" style="left: 3.15in; top: 4.42in;">Sale Value</div>
+        <div id="saleValue1" class="field mono draggable" data-pos-key="sale_value_1" data-default-left="3.75in" data-default-top="4.65in" style="left: 3.75in; top: 4.65in; text-align: right;">Rs. {esc(primary.get("sale_value") or "")}</div>
+
+        <div id="lblSalesTax" class="label draggable" data-pos-key="lbl_sales_tax" data-default-left="4.15in" data-default-top="4.42in" style="left: 4.15in; top: 4.42in;">Sales Tax</div>
+        <div id="salesTax1" class="field mono draggable" data-pos-key="sales_tax_1" data-default-left="4.65in" data-default-top="4.65in" style="left: 4.65in; top: 4.65in; text-align: right;">Rs. {esc(primary.get("sales_tax") or "")}</div>
+
+        <div id="lblLevy" class="label draggable" data-pos-key="lbl_levy" data-default-left="5.15in" data-default-top="4.42in" style="left: 5.15in; top: 4.42in;">Levy</div>
+        <div id="levy1" class="field mono draggable" data-pos-key="levy_1" data-default-left="5.55in" data-default-top="4.65in" style="left: 5.55in; top: 4.65in; text-align: right;">Rs. {esc(primary.get("levy") or "")}</div>
+
+        <div id="lblTotalLine" class="label draggable" data-pos-key="lbl_total_line" data-default-left="6.05in" data-default-top="4.42in" style="left: 6.05in; top: 4.42in;">Total</div>
+        <div id="totalLine1" class="field mono draggable" data-pos-key="total_line_1" data-default-left="6.45in" data-default-top="4.65in" style="left: 6.45in; top: 4.65in; text-align: right;">Rs. {esc(primary.get("total_line") or primary.get("price") or "")}</div>
+
+        <div id="lblEngineNo" class="label draggable" data-pos-key="lbl_engine_no" data-default-left="0.20in" data-default-top="5.85in" style="left: 0.20in; top: 5.85in;">Engine #:</div>
         <div id="engineNo" class="field mono draggable" data-pos-key="engine_no" data-default-left="0.95in" data-default-top="5.85in" style="left: 0.95in; top: 5.85in;">{esc(primary.get("engine") or "")}</div>
+
+        <div id="lblChassisNo" class="label draggable" data-pos-key="lbl_chassis_no" data-default-left="0.20in" data-default-top="6.25in" style="left: 0.20in; top: 6.25in;">Chassis #:</div>
         <div id="chassisNo" class="field mono draggable" data-pos-key="chassis_no" data-default-left="0.95in" data-default-top="6.25in" style="left: 0.95in; top: 6.25in;">{esc(primary.get("chassis") or "")}</div>
+
+        <div id="lblModel" class="label draggable" data-pos-key="lbl_model" data-default-left="0.20in" data-default-top="6.65in" style="left: 0.20in; top: 6.65in;">Model:</div>
         <div id="model" class="field draggable" data-pos-key="model" data-default-left="0.95in" data-default-top="6.65in" style="left: 0.95in; top: 6.65in;">{esc(primary.get("model") or "")}</div>
+
+        <div id="lblColor" class="label draggable" data-pos-key="lbl_color" data-default-left="0.20in" data-default-top="7.05in" style="left: 0.20in; top: 7.05in;">Color:</div>
         <div id="color" class="field draggable" data-pos-key="color" data-default-left="0.95in" data-default-top="7.05in" style="left: 0.95in; top: 7.05in;">{esc(primary.get("color") or "")}</div>
 
+        <div id="lblRegLetter" class="label draggable" data-pos-key="lbl_registration_letter_no" data-default-left="0.20in" data-default-top="7.65in" style="left: 0.20in; top: 7.65in;">Reg Letter #:</div>
         <div id="regLetter" class="field mono draggable" data-pos-key="registration_letter_no" data-default-left="0.95in" data-default-top="7.65in" style="left: 0.95in; top: 7.65in;">{esc(data.get("registration_letter_no") or "")}</div>
 
-        <div id="totalAmount" class="field mono draggable" data-pos-key="total_amount" data-default-left="6.55in" data-default-top="9.90in" style="left: 6.55in; top: 9.90in; text-align: right;">{esc(data.get("total_amount") or "")}</div>
+        <div id="lblFbrInvoice" class="label draggable" data-pos-key="lbl_invoice_fbr_id" data-default-left="2.55in" data-default-top="3.15in" style="left: 2.55in; top: 3.15in;">FBR Invoice #:</div>
+
+        <div id="lblPosServiceFee" class="label draggable" data-pos-key="lbl_pos_service_fee" data-default-left="5.55in" data-default-top="9.55in" style="left: 5.55in; top: 9.55in;">POS Service Fee:</div>
+        <div id="posServiceFee" class="field mono draggable" data-pos-key="pos_service_fee" data-default-left="6.55in" data-default-top="9.55in" style="left: 6.55in; top: 9.55in; text-align: right;">Rs. 1</div>
+
+        <div id="lblTotalAmount" class="label draggable" data-pos-key="lbl_total_amount" data-default-left="5.55in" data-default-top="9.90in" style="left: 5.55in; top: 9.90in;">Grand Total:</div>
+        <div id="totalAmount" class="field mono draggable" data-pos-key="total_amount" data-default-left="6.55in" data-default-top="9.90in" style="left: 6.55in; top: 9.90in; text-align: right;">Rs. {esc(data.get("total_amount") or "")}</div>
 
         {qr_img_html}
         <div id="invoiceFbrId" class="field mono draggable" data-pos-key="invoice_fbr_id" data-default-left="2.55in" data-default-top="3.35in" style="left: 2.55in; top: 3.35in; font-size: 10pt;">{esc(data.get("fbr_invoice_number") or "")}</div>
       </div>
     </div>
   </div>
+
+  <div id="styleToolbar" class="style-toolbar" style="display:none;">
+    <div class="st-title">
+      <span>Styling Toolbar</span>
+      <span id="stTarget" class="st-target">—</span>
+    </div>
+    <div class="st-divider"></div>
+    <div class="st-row st-actions">
+      <button id="stAddLogo" class="add-logo" type="button" title="Add a custom logo / image (PNG / JPG / SVG / GIF)">＋ Add Logo</button>
+      <button id="stDelete" class="delete-selection" type="button" title="Delete selected logo or field (Delete / Backspace)">🗑 Delete</button>
+    </div>
+    <div class="st-row" style="margin-top:4px;">
+      <button id="stDownloadPdf" type="button" title="Download this invoice as a PDF file (Ctrl+S)" style="flex:1; background:#0369a1; border:1px solid #075985; color:#fff; font-weight:700; padding:6px 8px; display:flex; align-items:center; justify-content:center; gap:5px; border-radius:6px;">⬇ Download Invoice as PDF</button>
+    </div>
+    <div id="stSizeSliderRow" class="st-row" style="margin-top:4px;">
+      <label class="st-lbl">Size</label>
+      <input id="stSize" type="range" min="20" max="600" step="1" value="120" />
+      <input id="stLockAspect" type="checkbox" title="Lock aspect ratio" checked style="accent-color:#3b82f6; margin:0 0 0 4px;" />
+    </div>
+    <div class="st-divider"></div>
+    <div class="st-row">
+      <label class="st-lbl">Font Size</label>
+      <input id="stFontSize" type="range" min="6" max="48" step="1" value="11" />
+      <span id="stFontSizeVal" class="st-val">11px</span>
+    </div>
+    <div class="st-row">
+      <label class="st-lbl">Font Family</label>
+      <select id="stFontFamily" style="flex:1;">
+        <option value="Arial, sans-serif">Arial</option>
+        <option value="Calibri, Arial, sans-serif">Calibri</option>
+        <option value="Times New Roman, serif">Times New Roman</option>
+        <option value="Georgia, serif">Georgia</option>
+        <option value="Verdana, Geneva, sans-serif">Verdana</option>
+        <option value="Consolas, &quot;Courier New&quot;, monospace">Consolas (Mono)</option>
+        <option value="'Courier New', Courier, monospace">Courier New</option>
+      </select>
+    </div>
+    <div class="st-row">
+      <label class="st-lbl">Style</label>
+      <button id="stBold" type="button" title="Bold (B)"><b>B</b></button>
+      <button id="stItalic" type="button" title="Italic (I)"><i>I</i></button>
+      <button id="stUnderline" type="button" title="Underline (U)"><u>U</u></button>
+      <label class="st-lbl" style="min-width:auto;margin-left:8px;">Color</label>
+      <input id="stColor" type="color" value="#000000" title="Text Color" />
+      <button id="stResetColor" type="button" title="Reset color to default" style="padding:5px 7px;">R</button>
+    </div>
+    <div class="st-divider"></div>
+    <div class="st-row">
+      <button id="stHide" type="button" title="Hide / Show (H)">Hide</button>
+      <button id="stWrap" type="button" title="Word Wrap (W)">Wrap</button>
+      <button id="stEdit" type="button" title="Edit Text (F2)">Edit</button>
+      <button id="stReset" class="danger" type="button" title="Reset this field's style & position (dbl-click)">Reset</button>
+    </div>
+  </div>
+  <input id="stFileInput" type="file" accept="image/png, image/jpeg, image/jpg, image/gif, image/svg+xml, image/webp" style="display:none;" />
 
   <div id="posHud" class="pos-hud"></div>
   <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
@@ -731,6 +1092,12 @@ class PrintServiceV2:
           el.classList.remove('wrap-field');
           el.style.maxWidth = '';
         }}
+        if (typeof entry.w === 'number' && Number.isFinite(entry.w) && entry.w > 0) {{
+          el.style.width = `${{entry.w}}px`;
+        }}
+        if (typeof entry.h === 'number' && Number.isFinite(entry.h) && entry.h > 0) {{
+          el.style.height = `${{entry.h}}px`;
+        }}
         if (typeof entry.font_px === 'number' && Number.isFinite(entry.font_px) && !isImg(el)) {{
           el.style.fontSize = `${{entry.font_px}}px`;
         }}
@@ -742,6 +1109,16 @@ class PrintServiceV2:
         }}
         if (typeof entry.font_style === 'string' && entry.font_style.trim() && !isImg(el)) {{
           el.style.fontStyle = entry.font_style;
+        }}
+        if (typeof entry.color === 'string' && entry.color.trim() && !isImg(el)) {{
+          el.style.color = entry.color;
+        }} else if (typeof entry.color === 'string' && entry.color === '' && !isImg(el)) {{
+          el.style.color = '';
+        }}
+        if (typeof entry.text_decoration === 'string' && entry.text_decoration.trim() && !isImg(el)) {{
+          el.style.textDecoration = entry.text_decoration;
+        }} else if (typeof entry.text_decoration === 'string' && entry.text_decoration === '' && !isImg(el)) {{
+          el.style.textDecoration = '';
         }}
       }}
       function applyEntryContent(el, entry) {{
@@ -884,6 +1261,31 @@ class PrintServiceV2:
         return null;
       }}
       function sleep(ms) {{ return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms || 0))); }}
+
+      function clearSelectedClass() {{
+        try {{
+          const list = document.querySelectorAll('.draggable.selected');
+          for (let i = 0; i < list.length; i++) {{
+            try {{ list[i].classList.remove('selected'); }} catch (_) {{}}
+          }}
+        }} catch (_) {{}}
+      }}
+
+      function setSelected(nextEl) {{
+        const prev = (typeof selected !== 'undefined') ? selected : null;
+        const el = (nextEl && nextEl instanceof Element) ? nextEl : null;
+        if (prev && prev !== el && prev instanceof Element) {{
+          try {{ prev.classList.remove('selected'); }} catch (_) {{}}
+        }}
+        if (!el) {{
+          selected = null;
+          // Clear any leftover resize handles when selection is dropped
+          try {{ clearResizeHandles(); }} catch (_) {{}}
+          return;
+        }}
+        try {{ el.classList.add('selected'); }} catch (_) {{}}
+        selected = el;
+      }}
       async function loadFromBackendWithRetry(maxAttempts, baseDelayMs) {{
         await initQtBridge();
         if (qtBridge && typeof qtBridge.load_positions === 'function') {{
@@ -955,19 +1357,53 @@ class PrintServiceV2:
       function applyDefaultsIfMissing(el, pageRect) {{
         const left = (el.getAttribute('data-default-left') || '').trim();
         const top = (el.getAttribute('data-default-top') || '').trim();
+        const dw = (el.getAttribute('data-default-width') || '').trim();
+        const dh = (el.getAttribute('data-default-height') || '').trim();
         if (!left || !top) return;
         const tmp = document.createElement('div');
         tmp.style.position = 'absolute';
         tmp.style.left = left;
         tmp.style.top = top;
-        tmp.style.width = '0px';
-        tmp.style.height = '0px';
+        tmp.style.width = dw || '0px';
+        tmp.style.height = dh || '0px';
         page.appendChild(tmp);
         const r = tmp.getBoundingClientRect();
         tmp.remove();
         const s = pageRect && pageRect.scale ? pageRect.scale : 1;
         el.style.left = `${{(r.left - pageRect.left) / s}}px`;
         el.style.top = `${{(r.top - pageRect.top) / s}}px`;
+        if (dw) {{
+          try {{
+            const tmpW = document.createElement('div');
+            tmpW.style.position = 'absolute';
+            tmpW.style.visibility = 'hidden';
+            tmpW.style.pointerEvents = 'none';
+            tmpW.style.width = dw;
+            tmpW.style.height = '1px';
+            page.appendChild(tmpW);
+            const rw = tmpW.getBoundingClientRect();
+            tmpW.remove();
+            if (rw.width > 0) el.style.width = `${{rw.width / s}}px`;
+          }} catch (_) {{}}
+        }} else {{
+          el.style.width = '';
+        }}
+        if (dh) {{
+          try {{
+            const tmpH = document.createElement('div');
+            tmpH.style.position = 'absolute';
+            tmpH.style.visibility = 'hidden';
+            tmpH.style.pointerEvents = 'none';
+            tmpH.style.height = dh;
+            tmpH.style.width = '1px';
+            page.appendChild(tmpH);
+            const rh = tmpH.getBoundingClientRect();
+            tmpH.remove();
+            if (rh.height > 0) el.style.height = `${{rh.height / s}}px`;
+          }} catch (_) {{}}
+        }} else {{
+          el.style.height = '';
+        }}
       }}
 
       function applyAllPositions() {{
@@ -1010,7 +1446,6 @@ class PrintServiceV2:
           const seed = Array.from(document.querySelectorAll('[data-pos-key]'));
           for (const el of seed) {{
             if (!(el instanceof HTMLElement)) continue;
-            if (isImg(el)) continue;
             if (!el.dataset.originalHtml) el.dataset.originalHtml = el.innerHTML || '';
           }}
         }} catch (_) {{}}
@@ -1045,9 +1480,50 @@ class PrintServiceV2:
           const localCount = localDoc && localDoc.elements ? Object.keys(localDoc.elements).length : 0;
           const backendCount = backend && backend.elements ? Object.keys(backend.elements).length : 0;
           if (backendCount > 0 && (localCount === 0 || backendUpdated >= localUpdated)) {{
-            try {{ writeSaved(backend); }} catch (_) {{}}
-            applyAllPositions();
-            updateFitScale();
+            try {{
+              // Merge backend into local while preserving LOCAL DELETIONS: any key missing
+              // from a previously-modified local doc stays deleted.
+              const localKeys = (localDoc && localDoc.elements && typeof localDoc.elements === 'object')
+                ? Object.keys(localDoc.elements)
+                : [];
+              const isFreshLocal = localUpdated === 0 || localCount === 0;
+              const mergedElements = {{}};
+              const be = (backend && backend.elements && typeof backend.elements === 'object') ? backend.elements : {{}};
+              const le = (localDoc && localDoc.elements && typeof localDoc.elements === 'object') ? localDoc.elements : {{}};
+              if (isFreshLocal) {{
+                // No local history yet -> trust backend completely
+                for (const k of Object.keys(be)) mergedElements[k] = be[k];
+              }} else {{
+                // Import backend keys only if they were NOT explicitly removed from local
+                for (const k of Object.keys(be)) {{
+                  if (k in le) {{
+                    // Prefer the newer entry
+                    const leT = Number(le[k] && le[k].updated_at ? le[k].updated_at : 0);
+                    const beT = Number(be[k] && be[k].updated_at ? be[k].updated_at : 0);
+                    mergedElements[k] = (beT >= leT) ? be[k] : le[k];
+                  }}
+                  // else: k is NOT in local doc → user deleted it locally → DON'T import, keep deleted
+                }}
+                // Also keep any keys that only exist in local (newly-created logos the backend hadn't seen yet)
+                for (const k of Object.keys(le)) {{
+                  if (!(k in mergedElements)) mergedElements[k] = le[k];
+                }}
+              }}
+              const merged = {{
+                version: 2,
+                updated_at: Math.max(backendUpdated, localUpdated),
+                elements: mergedElements,
+              }};
+              writeSaved(merged);
+              applyAllPositions();
+              // After applyAllPositions + sync, re-run restoreDynamicCustomLogos in case
+              // backend had custom_logo_* entries local DOM was missing (server-pushed logo)
+              try {{
+                const rdcl = window.__restoreDynamicCustomLogos;
+                if (typeof rdcl === 'function') rdcl();
+              }} catch (_) {{}}
+              updateFitScale();
+            }} catch (_) {{}}
           }}
         }})();
       }})();
@@ -1064,7 +1540,8 @@ class PrintServiceV2:
         const hidden = el.classList.contains('hidden-field');
         const fontPart = (fontPx !== null && !isImg(el)) ? `, font ${{Math.round(fontPx)}}px` : '';
         const hiddenPart = hidden ? ' (hidden)' : '';
-        hud.textContent = `${{key}}: x ${{Math.round(rel.x)}}px, y ${{Math.round(rel.y)}}px${{fontPart}}${{hiddenPart}} [F2 edit, W wrap, +/- font, H hide/show, double-click reset]`;
+        const sizePart = (typeof rel.w === 'number' && typeof rel.h === 'number') ? `, ${{Math.round(rel.w)}}×${{Math.round(rel.h)}}px` : '';
+        hud.textContent = `${{key}}: x ${{Math.round(rel.x)}}px, y ${{Math.round(rel.y)}}px${{sizePart}}${{fontPart}}${{hiddenPart}} · Drag to move · Drag corner handles to resize · [Del to remove, +/= bigger, - smaller]`;
         hud.style.display = 'block';
       }}
       function hideHud() {{ hud.style.display = 'none'; }}
@@ -1084,6 +1561,8 @@ class PrintServiceV2:
         let font_family = null;
         let font_weight = null;
         let font_style = null;
+        let color = null;
+        let text_decoration = null;
         if (!isImg(el)) {{
           try {{
             const cur = el.innerHTML || '';
@@ -1096,6 +1575,15 @@ class PrintServiceV2:
             font_family = cs && cs.fontFamily ? String(cs.fontFamily) : null;
             font_weight = cs && cs.fontWeight ? String(cs.fontWeight) : null;
             font_style = cs && cs.fontStyle ? String(cs.fontStyle) : null;
+            const curColor = cs && cs.color ? String(cs.color) : '';
+            if (curColor && curColor !== 'rgb(0, 0, 0)' && curColor.toLowerCase() !== '#000000' && curColor.toLowerCase() !== 'black') {{
+              color = curColor;
+            }}
+            const curDeco = cs && cs.textDecoration ? String(cs.textDecoration) : '';
+            const decoLine = (curDeco || '').trim().split(/\\s+/)[0] || '';
+            if (decoLine && decoLine !== 'none') {{
+              text_decoration = curDeco;
+            }}
           }} catch (_) {{}}
         }}
         doc.elements[key] = {{
@@ -1111,6 +1599,10 @@ class PrintServiceV2:
           ...(font_family ? {{ font_family: font_family }} : {{}}),
           ...(font_weight ? {{ font_weight: font_weight }} : {{}}),
           ...(font_style ? {{ font_style: font_style }} : {{}}),
+          ...(color ? {{ color: color }} : {{}}),
+          ...(text_decoration ? {{ text_decoration: text_decoration }} : {{}}),
+          ...((typeof rel.w === 'number' && Number.isFinite(rel.w) && rel.w > 0) ? {{ w: rel.w }} : {{}}),
+          ...((typeof rel.h === 'number' && Number.isFinite(rel.h) && rel.h > 0) ? {{ h: rel.h }} : {{}}),
           ...(extras || {{}}),
         }};
         writeSaved(doc);
@@ -1174,10 +1666,10 @@ class PrintServiceV2:
 
       page.addEventListener('pointerdown', (ev) => {{
         const target = ev.target;
-        if (!(target instanceof HTMLElement)) return;
+        if (!(target instanceof Element)) return;
         const el = target.closest('.draggable[data-pos-key]');
         if (!el) return;
-        selected = el;
+        setSelected(el);
         if (el.classList.contains('edit-mode') && !isImg(el)) return;
         startDragPointer(ev, el);
         ev.preventDefault();
@@ -1193,13 +1685,34 @@ class PrintServiceV2:
 
       document.addEventListener('dblclick', (ev) => {{
         const target = ev.target;
-        if (!(target instanceof HTMLElement)) return;
+        if (!(target instanceof Element)) return;
         const el = target.closest('.draggable[data-pos-key]');
         if (!el) return;
-        selected = el;
+        setSelected(el);
         const key = el.getAttribute('data-pos-key') || '';
         const pageRect = getPageRect();
         applyDefaultsIfMissing(el, pageRect);
+        // Full factory-style reset (mirrors the toolbar Reset button)
+        try {{
+          el.style.color = '';
+          el.classList.remove('hidden-field');
+          el.classList.remove('wrap-field');
+          el.style.maxWidth = '';
+          el.classList.remove('edit-mode');
+          if (typeof el.contentEditable !== 'undefined') el.contentEditable = 'false';
+          if (el.dataset && el.dataset.originalHtml) {{
+            el.innerHTML = el.dataset.originalHtml;
+          }}
+        }} catch (_) {{}}
+        if (!isImg(el)) {{
+          try {{
+            el.style.fontSize = '';
+            el.style.fontFamily = '';
+            el.style.fontWeight = '';
+            el.style.fontStyle = '';
+            el.style.textDecoration = '';
+          }} catch (_) {{}}
+        }}
         if (key) {{
           const doc = readSaved();
           if (doc.elements && typeof doc.elements === 'object') delete doc.elements[key];
@@ -1207,12 +1720,13 @@ class PrintServiceV2:
           writeSaved(doc);
           saveToBackend(doc).catch(() => {{}});
         }}
+        syncToolbarFromSelected();
         showHud(el);
         ev.preventDefault();
       }});
 
       document.addEventListener('keydown', (ev) => {{
-        if (selected && (ev.key === 'b' || ev.key === 'B' || ev.key === 'i' || ev.key === 'I' || ev.key === 'f' || ev.key === 'F')) {{
+        if (selected && (ev.key === 'b' || ev.key === 'B' || ev.key === 'i' || ev.key === 'I' || ev.key === 'f' || ev.key === 'F' || ev.key === 'u' || ev.key === 'U')) {{
           const el = selected;
           const key = (el.getAttribute('data-pos-key') || '').trim();
           if (!key || isImg(el)) return;
@@ -1223,6 +1737,7 @@ class PrintServiceV2:
             const next = (cur === '700' || cur === '800' || cur === '900' || cur.toLowerCase() === 'bold') ? '400' : '700';
             el.style.fontWeight = next;
             persistEntry(el, {{ font_weight: next }});
+            syncToolbarFromSelected();
             showHud(el);
             ev.preventDefault();
             return;
@@ -1232,6 +1747,19 @@ class PrintServiceV2:
             const next = cur.toLowerCase() === 'italic' ? 'normal' : 'italic';
             el.style.fontStyle = next;
             persistEntry(el, {{ font_style: next }});
+            syncToolbarFromSelected();
+            showHud(el);
+            ev.preventDefault();
+            return;
+          }}
+          if (ev.key === 'u' || ev.key === 'U') {{
+            const cur = String(prev.text_decoration || getComputedStyle(el).textDecoration || 'none');
+            const firstPart = (cur || '').trim().split(/\\s+/)[0] || 'none';
+            const isUnderline = firstPart === 'underline';
+            const next = isUnderline ? 'none' : 'underline';
+            el.style.textDecoration = next;
+            persistEntry(el, {{ text_decoration: next }});
+            syncToolbarFromSelected();
             showHud(el);
             ev.preventDefault();
             return;
@@ -1243,6 +1771,7 @@ class PrintServiceV2:
             const next = fonts[(idx + 1) % fonts.length];
             el.style.fontFamily = next;
             persistEntry(el, {{ font_family: next }});
+            syncToolbarFromSelected();
             showHud(el);
             ev.preventDefault();
             return;
@@ -1332,23 +1861,711 @@ class PrintServiceV2:
             selected.classList.remove('edit-mode');
             selected.contentEditable = 'false';
           }}
-          selected = null;
+          setSelected(null);
           if (drag) endDragPointer();
         }}
       }});
 
       document.addEventListener('click', (ev) => {{
         const target = ev.target;
-        if (!(target instanceof HTMLElement)) return;
+        if (!(target instanceof Element)) return;
         const hit = target.closest('.draggable[data-pos-key]');
         if (hit) {{
-          selected = hit;
+          setSelected(hit);
           showHud(hit);
+          syncToolbarFromSelected();
           return;
         }}
+        // Clicked empty area: drop selection → hides outline AND resize handles
         hideHud();
-        selected = null;
+        setSelected(null);
+        syncToolbarFromSelected();
       }});
+
+      // -------- Styling Toolbar wiring --------
+      const toolbar = document.getElementById('styleToolbar');
+      const stTarget = document.getElementById('stTarget');
+      const stFontSize = document.getElementById('stFontSize');
+      const stFontSizeVal = document.getElementById('stFontSizeVal');
+      const stFontFamily = document.getElementById('stFontFamily');
+      const stBold = document.getElementById('stBold');
+      const stItalic = document.getElementById('stItalic');
+      const stUnderline = document.getElementById('stUnderline');
+      const stColor = document.getElementById('stColor');
+      const stResetColor = document.getElementById('stResetColor');
+      const stHide = document.getElementById('stHide');
+      const stWrap = document.getElementById('stWrap');
+      const stEdit = document.getElementById('stEdit');
+      const stReset = document.getElementById('stReset');
+
+      function rgbToHex(rgbStr) {{
+        try {{
+          const s = String(rgbStr || '').trim();
+          if (s.startsWith('#')) return s.length === 4 ? s.split('').map((c,i) => i === 0 ? c : c+c).join('') : s;
+          const m = s.match(/rgba?\\(([^)]+)\\)/i);
+          if (!m) return '#000000';
+          const parts = m[1].split(',').map(p => parseInt((p || '').trim(), 10));
+          const [r=0, g=0, b=0] = parts;
+          const toHex = (n) => clamp(n|0, 0, 255).toString(16).padStart(2, '0');
+          return `#${{toHex(r)}}${{toHex(g)}}${{toHex(b)}}`;
+        }} catch (_) {{
+          return '#000000';
+        }}
+      }}
+
+      function syncToolbarFromSelected() {{
+        if (!toolbar) return;
+        const el = selected;
+        if (!el || !(el instanceof HTMLElement) || isImg(el)) {{
+          toolbar.style.display = 'none';
+          if (stTarget) stTarget.textContent = '—';
+          return;
+        }}
+        toolbar.style.display = 'flex';
+        const key = (el.getAttribute('data-pos-key') || '').trim();
+        if (stTarget) stTarget.textContent = key || 'field';
+        const doc = readSaved();
+        const prev = (doc.elements && doc.elements[key] && typeof doc.elements[key] === 'object') ? doc.elements[key] : {{}};
+        const cs = getComputedStyle(el);
+        // Font size
+        const fontPx = (typeof prev.font_px === 'number' && Number.isFinite(prev.font_px)) ? prev.font_px : getFontPx(el);
+        if (stFontSize) {{
+          const rounded = Math.round(fontPx || 11);
+          stFontSize.value = String(clamp(rounded, 6, 48));
+          if (stFontSizeVal) stFontSizeVal.textContent = `${{rounded}}px`;
+        }}
+        // Font family
+        if (stFontFamily) {{
+          const curFam = String(prev.font_family || (cs && cs.fontFamily) || 'Arial, sans-serif').toLowerCase();
+          let matchIdx = 0;
+          for (let i = 0; i < stFontFamily.options.length; i++) {{
+            const v = String(stFontFamily.options[i].value || '').toLowerCase().split(',')[0].trim();
+            if (v && curFam.indexOf(v) >= 0) {{ matchIdx = i; break; }}
+          }}
+          stFontFamily.selectedIndex = matchIdx;
+        }}
+        // Bold
+        if (stBold) {{
+          const fw = String(prev.font_weight || (cs && cs.fontWeight) || '400').toLowerCase();
+          const isBold = fw === '700' || fw === '800' || fw === '900' || fw === 'bold';
+          stBold.classList.toggle('active', isBold);
+        }}
+        // Italic
+        if (stItalic) {{
+          const fs = String(prev.font_style || (cs && cs.fontStyle) || 'normal').toLowerCase();
+          stItalic.classList.toggle('active', fs === 'italic' || fs === 'oblique');
+        }}
+        // Underline
+        if (stUnderline) {{
+          const td = String(prev.text_decoration || (cs && cs.textDecoration) || 'none').trim();
+          const first = (td.split(/\\s+/)[0] || 'none').toLowerCase();
+          stUnderline.classList.toggle('active', first === 'underline');
+        }}
+        // Color
+        if (stColor) {{
+          const cc = typeof prev.color === 'string' && prev.color ? prev.color : ((cs && cs.color) || '#000000');
+          stColor.value = rgbToHex(cc);
+        }}
+        // Hide/Show button label
+        if (stHide) {{
+          const hidden = el.classList.contains('hidden-field') || prev.hidden === true;
+          stHide.textContent = hidden ? 'Show' : 'Hide';
+          stHide.classList.toggle('active', hidden);
+        }}
+        // Wrap button
+        if (stWrap) {{
+          const wrapped = el.classList.contains('wrap-field') || prev.wrap === true;
+          stWrap.classList.toggle('active', wrapped);
+        }}
+        // Edit button
+        if (stEdit) {{
+          const editing = el.classList.contains('edit-mode');
+          stEdit.classList.toggle('active', editing);
+          stEdit.textContent = editing ? 'Save' : 'Edit';
+        }}
+      }}
+
+      if (toolbar) {{
+        // Font size slider
+        stFontSize && stFontSize.addEventListener('input', (e) => {{
+          if (!selected || isImg(selected)) return;
+          const px = clamp(parseInt(e.target.value || '11', 10), 6, 48);
+          selected.style.fontSize = `${{px}}px`;
+          if (stFontSizeVal) stFontSizeVal.textContent = `${{px}}px`;
+          persistEntry(selected, {{ font_px: px }});
+          showHud(selected);
+        }});
+
+        // Font family
+        stFontFamily && stFontFamily.addEventListener('change', (e) => {{
+          if (!selected || isImg(selected)) return;
+          const fam = e.target.value || 'Arial, sans-serif';
+          selected.style.fontFamily = fam;
+          persistEntry(selected, {{ font_family: fam }});
+          showHud(selected);
+        }});
+
+        // Bold toggle
+        stBold && stBold.addEventListener('click', () => {{
+          if (!selected || isImg(selected)) return;
+          const key = (selected.getAttribute('data-pos-key') || '').trim();
+          const doc = readSaved();
+          const prev = (doc.elements && doc.elements[key] && typeof doc.elements[key] === 'object') ? doc.elements[key] : {{}};
+          const cur = String(prev.font_weight || getComputedStyle(selected).fontWeight || '400');
+          const isBold = cur === '700' || cur === '800' || cur === '900' || cur.toLowerCase() === 'bold';
+          const next = isBold ? '400' : '700';
+          selected.style.fontWeight = next;
+          persistEntry(selected, {{ font_weight: next }});
+          syncToolbarFromSelected();
+          showHud(selected);
+        }});
+
+        // Italic toggle
+        stItalic && stItalic.addEventListener('click', () => {{
+          if (!selected || isImg(selected)) return;
+          const key = (selected.getAttribute('data-pos-key') || '').trim();
+          const doc = readSaved();
+          const prev = (doc.elements && doc.elements[key] && typeof doc.elements[key] === 'object') ? doc.elements[key] : {{}};
+          const cur = String(prev.font_style || getComputedStyle(selected).fontStyle || 'normal');
+          const next = cur.toLowerCase() === 'italic' ? 'normal' : 'italic';
+          selected.style.fontStyle = next;
+          persistEntry(selected, {{ font_style: next }});
+          syncToolbarFromSelected();
+          showHud(selected);
+        }});
+
+        // Underline toggle
+        stUnderline && stUnderline.addEventListener('click', () => {{
+          if (!selected || isImg(selected)) return;
+          const key = (selected.getAttribute('data-pos-key') || '').trim();
+          const doc = readSaved();
+          const prev = (doc.elements && doc.elements[key] && typeof doc.elements[key] === 'object') ? doc.elements[key] : {{}};
+          const cur = String(prev.text_decoration || getComputedStyle(selected).textDecoration || 'none');
+          const first = (cur || '').trim().split(/\\s+/)[0] || 'none';
+          const isUnderline = first === 'underline';
+          const next = isUnderline ? 'none' : 'underline';
+          selected.style.textDecoration = next;
+          persistEntry(selected, {{ text_decoration: next }});
+          syncToolbarFromSelected();
+          showHud(selected);
+        }});
+
+        // Color picker
+        stColor && stColor.addEventListener('input', (e) => {{
+          if (!selected || isImg(selected)) return;
+          const col = e.target.value || '#000000';
+          selected.style.color = col;
+          persistEntry(selected, {{ color: col }});
+          showHud(selected);
+        }});
+
+        // Reset color
+        stResetColor && stResetColor.addEventListener('click', () => {{
+          if (!selected || isImg(selected)) return;
+          selected.style.color = '';
+          persistEntry(selected, {{ color: '' }});
+          syncToolbarFromSelected();
+          showHud(selected);
+        }});
+
+        // Hide / Show
+        stHide && stHide.addEventListener('click', () => {{
+          if (!selected) return;
+          const key = (selected.getAttribute('data-pos-key') || '').trim();
+          if (!key) return;
+          const doc = readSaved();
+          const prev = (doc.elements && doc.elements[key] && typeof doc.elements[key] === 'object') ? doc.elements[key] : {{}};
+          const nextHidden = !(prev.hidden === true || selected.classList.contains('hidden-field'));
+          if (nextHidden) selected.classList.add('hidden-field');
+          else selected.classList.remove('hidden-field');
+          persistEntry(selected, {{ hidden: nextHidden }});
+          syncToolbarFromSelected();
+          showHud(selected);
+        }});
+
+        // Word wrap toggle
+        stWrap && stWrap.addEventListener('click', () => {{
+          if (!selected) return;
+          const key = (selected.getAttribute('data-pos-key') || '').trim();
+          if (!key) return;
+          const doc = readSaved();
+          const prev = (doc.elements && doc.elements[key] && typeof doc.elements[key] === 'object') ? doc.elements[key] : {{}};
+          const nextWrap = !(prev.wrap === true || selected.classList.contains('wrap-field'));
+          if (nextWrap) {{
+            selected.classList.add('wrap-field');
+            if (typeof prev.wrap_max_px !== 'number' || !Number.isFinite(prev.wrap_max_px)) {{
+              selected.style.maxWidth = '280px';
+            }}
+            persistEntry(selected, {{ wrap: true, wrap_max_px: (typeof prev.wrap_max_px === 'number' && Number.isFinite(prev.wrap_max_px)) ? prev.wrap_max_px : 280 }});
+          }} else {{
+            selected.classList.remove('wrap-field');
+            selected.style.maxWidth = '';
+            persistEntry(selected, {{ wrap: false }});
+          }}
+          syncToolbarFromSelected();
+          showHud(selected);
+        }});
+
+        // Edit mode toggle
+        stEdit && stEdit.addEventListener('click', () => {{
+          if (!selected || isImg(selected)) return;
+          const isEditing = selected.classList.contains('edit-mode');
+          if (isEditing) {{
+            selected.classList.remove('edit-mode');
+            selected.contentEditable = 'false';
+            persistEntry(selected, null);
+          }} else {{
+            selected.classList.add('edit-mode');
+            selected.contentEditable = 'true';
+            selected.setAttribute('spellcheck', 'false');
+            try {{
+              const r = document.createRange();
+              r.selectNodeContents(selected);
+              r.collapse(false);
+              const sel = window.getSelection();
+              if (sel) {{
+                sel.removeAllRanges();
+                sel.addRange(r);
+              }}
+            }} catch (_) {{}}
+          }}
+          syncToolbarFromSelected();
+          showHud(selected);
+        }});
+
+        // Reset (remove stored entry, restore defaults, reapply visuals)
+        stReset && stReset.addEventListener('click', () => {{
+          if (!selected) return;
+          const key = (selected.getAttribute('data-pos-key') || '').trim();
+          const pageRect = getPageRect();
+          applyDefaultsIfMissing(selected, pageRect);
+          // Always clear universal overrides (for text fields AND logos)
+          try {{
+            selected.style.color = '';
+            selected.classList.remove('hidden-field');
+            selected.classList.remove('wrap-field');
+            selected.style.maxWidth = '';
+            selected.classList.remove('edit-mode');
+            if (typeof selected.contentEditable !== 'undefined') selected.contentEditable = 'false';
+            if (selected.dataset && selected.dataset.originalHtml) {{
+              selected.innerHTML = selected.dataset.originalHtml;
+            }}
+          }} catch (_) {{}}
+          // Text-field-only resets
+          if (!isImg(selected)) {{
+            selected.style.fontSize = '';
+            selected.style.fontFamily = '';
+            selected.style.fontWeight = '';
+            selected.style.fontStyle = '';
+            selected.style.textDecoration = '';
+          }}
+          // Logo/image wrapper size already reset by applyDefaultsIfMissing -> data-default-width/height
+          if (key) {{
+            const doc = readSaved();
+            if (doc.elements && typeof doc.elements === 'object') delete doc.elements[key];
+            doc.updated_at = nowMs();
+            writeSaved(doc);
+            saveToBackend(doc).catch(() => {{}});
+          }}
+          syncToolbarFromSelected();
+          showHud(selected);
+        }});
+
+        // Stop clicks inside toolbar from being interpreted by the page handler
+        toolbar.addEventListener('click', (e) => {{ e.stopPropagation(); }});
+        toolbar.addEventListener('pointerdown', (e) => {{ e.stopPropagation(); }});
+        // Initial sync
+        try {{ syncToolbarFromSelected(); }} catch (_) {{}}
+      }}
+      // -------- End Styling Toolbar wiring --------
+
+      // -------- Logo / Resize / Add-Delete wiring --------
+      const stAddLogo = document.getElementById('stAddLogo');
+      const stDelete = document.getElementById('stDelete');
+      const stFileInput = document.getElementById('stFileInput');
+      const stSize = document.getElementById('stSize');
+      const stLockAspect = document.getElementById('stLockAspect');
+      const HANDLE_TYPES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+      let resizeHandles = [];
+      let resizeDrag = null;
+
+      function clearResizeHandles() {{
+        for (const h of resizeHandles) {{
+          try {{ if (h.parentNode) h.parentNode.removeChild(h); }} catch (_) {{}}
+        }}
+        resizeHandles = [];
+      }}
+
+      function buildResizeHandles(el) {{
+        clearResizeHandles();
+        if (!el || !(el instanceof HTMLElement)) return;
+        for (const t of HANDLE_TYPES) {{
+          const h = document.createElement('div');
+          h.className = `resize-handle ${{t}}`;
+          h.dataset.handle = t;
+          h.setAttribute('draggable', 'false');
+          el.appendChild(h);
+          resizeHandles.push(h);
+          h.addEventListener('pointerdown', (ev) => {{
+            ev.stopPropagation();
+            ev.preventDefault();
+            startResizeDrag(ev, el, t);
+          }});
+        }}
+      }}
+
+      function startResizeDrag(ev, el, handleType) {{
+        if (!ev.isPrimary) return;
+        const pageRect = getPageRect();
+        const rel = getRelPx(el, pageRect);
+        resizeDrag = {{
+          el,
+          handle: handleType,
+          pointerId: ev.pointerId,
+          startClientX: ev.clientX,
+          startClientY: ev.clientY,
+          startX: rel.x,
+          startY: rel.y,
+          startW: typeof rel.w === 'number' && rel.w > 0 ? rel.w : (el.offsetWidth || 100),
+          startH: typeof rel.h === 'number' && rel.h > 0 ? rel.h : (el.offsetHeight || 80),
+          scale: getFitScale(),
+          lockAspect: !!(stLockAspect && stLockAspect.checked),
+        }};
+        if (resizeDrag.startW && resizeDrag.startH) {{
+          resizeDrag.aspect = resizeDrag.startW / resizeDrag.startH;
+        }} else {{
+          resizeDrag.aspect = null;
+        }}
+        try {{ el.setPointerCapture(ev.pointerId); }} catch (_) {{}}
+        try {{ document.body && document.body.setPointerCapture(ev.pointerId); }} catch (_) {{}}
+        el.classList.add('dragging');
+        selected = el;
+      }}
+
+      function moveResizeDrag(ev) {{
+        if (!resizeDrag || ev.pointerId !== resizeDrag.pointerId) return;
+        const {{ startClientX, startClientY, startX, startY, startW, startH, handle, scale, lockAspect, aspect }} = resizeDrag;
+        const s = typeof scale === 'number' && scale > 0 ? scale : 1;
+        const dx = (ev.clientX - startClientX) / s;
+        const dy = (ev.clientY - startClientY) / s;
+        let x = startX;
+        let y = startY;
+        let w = startW;
+        let h = startH;
+        if (handle.indexOf('e') >= 0) w = Math.max(10, startW + dx);
+        if (handle.indexOf('s') >= 0) h = Math.max(10, startH + dy);
+        if (handle.indexOf('w') >= 0) {{
+          const newW = Math.max(10, startW - dx);
+          x = startX + (startW - newW);
+          w = newW;
+        }}
+        if (handle.indexOf('n') >= 0) {{
+          const newH = Math.max(10, startH - dy);
+          y = startY + (startH - newH);
+          h = newH;
+        }}
+        if (lockAspect && aspect && aspect > 0) {{
+          // Keep the changed-dominant axis; scale the other
+          if (handle === 'e' || handle === 'w') {{
+            h = Math.max(10, Math.round(w / aspect));
+          }} else if (handle === 'n' || handle === 's') {{
+            w = Math.max(10, Math.round(h * aspect));
+          }} else {{
+            // Corner: keep largest proportional
+            const rw = w / startW;
+            const rh = h / startH;
+            const r = Math.max(rw, rh);
+            w = Math.max(10, Math.round(startW * r));
+            h = Math.max(10, Math.round(startH * r));
+            // Adjust x/y for top-left corners too
+            if (handle.indexOf('w') >= 0) x = startX + (startW - w);
+            if (handle.indexOf('n') >= 0) y = startY + (startH - h);
+          }}
+        }}
+        const el2 = resizeDrag.el;
+        el2.style.left = `${{x}}px`;
+        el2.style.top = `${{y}}px`;
+        el2.style.width = `${{w}}px`;
+        el2.style.height = `${{h}}px`;
+        syncSizeSliderFromElement(el2);
+        showHud(el2);
+      }}
+
+      function endResizeDrag(ev) {{
+        if (!resizeDrag) return;
+        if (ev && ev.pointerId !== resizeDrag.pointerId) return;
+        const el2 = resizeDrag.el;
+        resizeDrag = null;
+        el2.classList.remove('dragging');
+        persistEntry(el2, null);
+        syncToolbarFromSelected();
+        showHud(el2);
+      }}
+
+      document.addEventListener('pointermove', (ev) => {{
+        if (resizeDrag) {{
+          moveResizeDrag(ev);
+          ev.preventDefault();
+        }}
+      }});
+      document.addEventListener('pointerup', (ev) => {{ endResizeDrag(ev); }});
+      document.addEventListener('pointercancel', (ev) => {{ endResizeDrag(ev); }});
+
+      function syncSizeSliderFromElement(el) {{
+        if (!stSize || !el || !(el instanceof HTMLElement)) return;
+        const w = el.offsetWidth || 0;
+        if (w <= 0) return;
+        const minV = parseInt(stSize.min || '20', 10);
+        const maxV = parseInt(stSize.max || '600', 10);
+        stSize.value = String(clamp(w, minV, maxV));
+      }}
+
+      function deleteSelectedField() {{
+        if (!selected || !(selected instanceof HTMLElement)) return;
+        const key = (selected.getAttribute('data-pos-key') || '').trim();
+        if (!key) return;
+        // Guard: don't allow deleting FBR invoice #, grand total, core labels/values unless custom/logo
+        const isCustom = key.indexOf('custom_logo_') === 0;
+        const confirmName = selected.dataset && selected.dataset.originalHtml ? '' : (selected.textContent || '').slice(0, 40);
+        const ok = confirm(`Delete selected "${{key}}" from invoice?${{confirmName ? `\\n("${{confirmName}}")` : ''}}${{isCustom ? '' : '\\n\\n⚠️ This is a built-in field — it will return on Reset or page reload.'}}`);
+        if (!ok) return;
+        userTouched = true;
+        // Remove from DOM
+        try {{ selected.parentNode && selected.parentNode.removeChild(selected); }} catch (_) {{}}
+        // Remove from saved doc
+        const doc = readSaved();
+        let changed = false;
+        if (doc.elements && typeof doc.elements === 'object' && key in doc.elements) {{
+          delete doc.elements[key];
+          changed = true;
+        }}
+        doc.version = 2;
+        doc.updated_at = nowMs();
+        if (changed) {{
+          writeSaved(doc);
+          // Persist backend twice (async fire-and-forget; retries help if first post was dropped)
+          saveToBackend(doc).catch(() => {{}});
+          setTimeout(() => {{ saveToBackend(readSaved()).catch(() => {{}}); }}, 350);
+        }} else {{
+          writeSaved(doc);
+          saveToBackend(doc).catch(() => {{}});
+        }}
+        // Clear selected & UI
+        clearResizeHandles();
+        setSelected(null);
+        hideHud();
+        syncToolbarFromSelected();
+      }}
+
+      function addLogoFromDataUrl(dataUrl, fileName) {{
+        const pageEl = document.getElementById('invoicePage');
+        if (!pageEl) return;
+        const doc = readSaved();
+        let idx = 1;
+        let newKey = `custom_logo_1`;
+        const ex = (doc.elements && typeof doc.elements === 'object') ? Object.keys(doc.elements) : [];
+        while (ex.indexOf(newKey) >= 0 || document.querySelector(`[data-pos-key="${{newKey}}"]`)) {{
+          idx += 1;
+          newKey = `custom_logo_${{idx}}`;
+        }}
+        const wrap = document.createElement('div');
+        wrap.id = newKey;
+        wrap.className = 'draggable';
+        wrap.setAttribute('data-pos-key', newKey);
+        wrap.setAttribute('data-default-left', '2.00in');
+        wrap.setAttribute('data-default-top', '1.50in');
+        wrap.setAttribute('draggable', 'false');
+        wrap.style.cssText = `position:absolute; left: 2.00in; top: 1.50in; width: 140px; height: auto; background: transparent; user-select: none; -webkit-user-select: none; -webkit-user-drag: none; touch-action: none;`;
+        const img = document.createElement('img');
+        img.src = dataUrl;
+        img.alt = fileName || newKey;
+        img.setAttribute('draggable', 'false');
+        img.style.cssText = `pointer-events: none; display: block; width: 100%; height: auto; max-width: 100%; user-select: none; -webkit-user-select: none;`;
+        wrap.appendChild(img);
+        pageEl.appendChild(wrap);
+        // Store original html for reset
+        wrap.dataset.originalHtml = wrap.innerHTML || '';
+        // Apply defaults
+        try {{ applyDefaultsIfMissing(wrap, getPageRect()); }} catch (_) {{}}
+        setSelected(wrap);
+        showHud(wrap);
+        syncToolbarFromSelected();
+        buildResizeHandles(wrap);
+        // Explicitly persist with html (containing data URL) for restore
+        persistEntry(wrap, {{ html: wrap.innerHTML || '' }});
+      }}
+
+      // Delete shortcut
+      document.addEventListener('keydown', (ev) => {{
+        if (!selected) return;
+        if (ev.key === 'Delete' || ev.key === 'Backspace') {{
+          // Don't fire if currently editing text in a contentEditable
+          const ae = document.activeElement;
+          if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || (ae instanceof HTMLElement && ae.isContentEditable && ae !== selected))) return;
+          deleteSelectedField();
+          ev.preventDefault();
+        }}
+      }});
+
+      // Size slider input
+      stSize && stSize.addEventListener('input', (e) => {{
+        if (!selected || !(selected instanceof HTMLElement)) return;
+        const newW = clamp(parseInt(e.target.value || '100', 10), 20, 600);
+        const lock = !!(stLockAspect && stLockAspect.checked);
+        const oldW = selected.offsetWidth || 1;
+        const oldH = selected.offsetHeight || 1;
+        selected.style.width = `${{newW}}px`;
+        if (lock && oldW > 0 && oldH > 0) {{
+          const aspect = oldW / oldH;
+          const newH = Math.max(10, Math.round(newW / aspect));
+          selected.style.height = `${{newH}}px`;
+        }}
+        persistEntry(selected, null);
+        showHud(selected);
+      }});
+
+      // Lock aspect change -> recompute if possible
+      stLockAspect && stLockAspect.addEventListener('change', () => {{
+        if (selected && selected instanceof HTMLElement) syncSizeSliderFromElement(selected);
+      }});
+
+      // Delete button
+      stDelete && stDelete.addEventListener('click', () => {{ deleteSelectedField(); }});
+
+      // Download PDF button
+      const stDownloadPdf = document.getElementById('stDownloadPdf');
+      function doDownloadPdf() {{
+        // 1. Prefer the Qt bridge (inside PrintPreviewDialog) -> opens native save dialog
+        if (qtBridge && typeof qtBridge.download_current_page_pdf === 'function') {{
+          try {{
+            const r = qtBridge.download_current_page_pdf();
+            if (r === true) return;
+          }} catch (_) {{}}
+        }}
+        // 2. Otherwise fall back to browser's native print dialog (user picks "Save as PDF")
+        try {{
+          if (window.__pdf_download_lock) return;
+          window.__pdf_download_lock = true;
+          try {{
+            // Temporarily hide any runtime-only UI (drag outlines, HUD, resize handles, toolbar already removed in @media print)
+            window.focus();
+            window.print();
+          }} finally {{
+            setTimeout(() => {{ window.__pdf_download_lock = false; }}, 1000);
+          }}
+        }} catch (exc) {{
+          alert('Unable to open print dialog: ' + (exc && exc.message ? exc.message : exc));
+        }}
+      }}
+      stDownloadPdf && stDownloadPdf.addEventListener('click', () => {{ doDownloadPdf(); }});
+
+      // Ctrl+S / Cmd+S shortcut = download PDF (don't trigger Save-As-HTML browser feature)
+      document.addEventListener('keydown', (ev) => {{
+        const ctrl = (ev.ctrlKey === true) || (ev.metaKey === true);
+        if (ctrl && !ev.shiftKey && !ev.altKey && (ev.key === 's' || ev.key === 'S')) {{
+          ev.preventDefault();
+          doDownloadPdf();
+        }}
+      }});
+
+      // Add logo button -> click file input
+      stAddLogo && stAddLogo.addEventListener('click', () => {{
+        if (!stFileInput) return;
+        try {{ stFileInput.value = ''; }} catch (_) {{}}
+        stFileInput.click();
+      }});
+
+      // File input change -> read file as data URL, create logo element
+      stFileInput && stFileInput.addEventListener('change', (ev) => {{
+        const f = ev.target && ev.target.files && ev.target.files[0];
+        if (!f) return;
+        const reader = new FileReader();
+        reader.onload = () => {{
+          const url = String(reader.result || '');
+          if (!url) return;
+          addLogoFromDataUrl(url, f.name || '');
+        }};
+        reader.onerror = () => {{ alert('Failed to read the image file.'); }};
+        reader.readAsDataURL(f);
+      }});
+
+      // Intercept selection updates: rebuild/clear resize handles & sync Size slider + Delete enabled
+      (function wrapSelection() {{
+        const origSync = syncToolbarFromSelected;
+        syncToolbarFromSelected = function() {{
+          try {{ origSync(); }} catch (_) {{}}
+          const el = selected;
+          if (stDelete) stDelete.disabled = !(el && el instanceof HTMLElement);
+          if (el && el instanceof HTMLElement) {{
+            buildResizeHandles(el);
+            syncSizeSliderFromElement(el);
+            if (stSize) stSize.disabled = false;
+          }} else {{
+            clearResizeHandles();
+            if (stSize) stSize.disabled = true;
+          }}
+        }};
+      }})();
+
+      // Re-create any dynamically-added custom logos that exist in saved layout but missing from DOM
+      function restoreDynamicCustomLogos() {{
+        try {{
+          const doc = readSaved();
+          if (!doc || !doc.elements || typeof doc.elements !== 'object') return;
+          const pageEl = document.getElementById('invoicePage');
+          if (!pageEl) return;
+          const keys = Object.keys(doc.elements);
+          let anyAdded = false;
+          for (const key of keys) {{
+            if (!key || typeof key !== 'string') continue;
+            if (!(key === 'honda_logo' || key === 'fbr_pos_logo' || key.indexOf('custom_logo_') === 0)) continue;
+            if (document.querySelector(`[data-pos-key="${{key}}"]`)) continue; // already present
+            const entry = doc.elements[key];
+            if (!entry || typeof entry !== 'object') continue;
+            if (key === 'honda_logo' || key === 'fbr_pos_logo') continue; // these are static HTML, skip if removed
+            const innerHtml = typeof entry.html === 'string' && entry.html ? entry.html : '';
+            if (!innerHtml) continue; // needs stored html to restore
+            anyAdded = true;
+            const wrap = document.createElement('div');
+            wrap.id = key;
+            wrap.className = 'draggable';
+            wrap.setAttribute('data-pos-key', key);
+            wrap.setAttribute('data-default-left', '2.00in');
+            wrap.setAttribute('data-default-top', '1.50in');
+            wrap.setAttribute('draggable', 'false');
+            wrap.style.cssText = `position:absolute; left: 2.00in; top: 1.50in; width: 140px; height: auto; background: transparent; user-select: none; -webkit-user-select: none; -webkit-user-drag: none; touch-action: none;`;
+            wrap.innerHTML = innerHtml;
+            const images = wrap.querySelectorAll('img, svg');
+            for (const im of images) {{
+              if (im.tagName === 'IMG') {{
+                im.setAttribute('draggable', 'false');
+                im.style.cssText = `${{im.style.cssText || ''}} pointer-events: none; display: block; width: 100%; height: auto; max-width: 100%; user-select: none; -webkit-user-select: none;`;
+              }} else {{
+                im.setAttribute('draggable', 'false');
+                im.style.cssText = `${{im.style.cssText || ''}} pointer-events: none; display: block; user-select: none; -webkit-user-select: none;`;
+              }}
+            }}
+            pageEl.appendChild(wrap);
+            wrap.dataset.originalHtml = innerHtml;
+            applyDefaultsIfMissing(wrap, getPageRect());
+            const pageRect2 = getPageRect();
+            const elRect = wrap.getBoundingClientRect();
+            const s = pageRect2 && pageRect2.scale ? pageRect2.scale : 1;
+            const normalized = validateAndNormalizeEntry(entry, pageRect2, {{ width: elRect.width / s, height: elRect.height / s }});
+            if (normalized) {{
+              wrap.style.left = `${{normalized.x}}px`;
+              wrap.style.top = `${{normalized.y}}px`;
+            }}
+            applyEntryVisuals(wrap, entry);
+          }}
+          if (anyAdded) {{
+            try {{ applyAllPositions(); }} catch (_) {{}}
+            try {{ updateFitScale(); }} catch (_) {{}}
+          }}
+        }} catch (_) {{}}
+      }}
+      try {{ window.__restoreDynamicCustomLogos = restoreDynamicCustomLogos; }} catch (_) {{}}
+      restoreDynamicCustomLogos();
 
       window.addEventListener('resize', () => {{ updateFitScale(); }});
     }})();
@@ -1649,7 +2866,21 @@ class PrintPreviewDialog(QDialog):
             QPushButton:hover { background-color: #2980b9; }
         """)
         self.print_btn.clicked.connect(self._handle_print)
-        
+
+        self.download_pdf_btn = QPushButton("⬇ Download PDF")
+        self.download_pdf_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #27ae60;
+                color: white;
+                font-weight: bold;
+                padding: 4px 12px;
+                border: none;
+                border-radius: 4px;
+            }
+            QPushButton:hover { background-color: #1e8449; }
+        """)
+        self.download_pdf_btn.clicked.connect(self._handle_download_pdf)
+
         self.close_btn = QPushButton("Close")
         self.close_btn.setStyleSheet("""
             QPushButton {
@@ -1661,8 +2892,9 @@ class PrintPreviewDialog(QDialog):
             QPushButton:hover { background-color: #f0f2f4; }
         """)
         self.close_btn.clicked.connect(self.close)
-        
+
         toolbar_layout.addStretch(1)
+        toolbar_layout.addWidget(self.download_pdf_btn)
         toolbar_layout.addWidget(self.print_btn)
         toolbar_layout.addWidget(self.close_btn)
         toolbar_layout.addSpacing(8)
@@ -1903,6 +3135,176 @@ class PrintPreviewDialog(QDialog):
         except Exception as exc:
             logger.error(f"Print initialization failed: {exc}", exc_info=True)
             fail(f"Printing failed: {exc}")
+
+    def _handle_download_pdf(self):
+        if not self.web_view:
+            QMessageBox.critical(self, "Download PDF", "Preview is not available on this system.")
+            return
+        self.download_pdf_btn.setEnabled(False)
+        try:
+            default_name = f"Invoice_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            suggested_dir = str(Path.home() / "Documents" / default_name)
+            target_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save Invoice as PDF",
+                suggested_dir,
+                "PDF Documents (*.pdf);;All Files (*)",
+            )
+            if not target_path:
+                self.download_pdf_btn.setEnabled(True)
+                return
+            if not target_path.lower().endswith(".pdf"):
+                target_path = target_path + ".pdf"
+        except Exception as exc:
+            logger.error(f"PDF file dialog failed: {exc}", exc_info=True)
+            self.download_pdf_btn.setEnabled(True)
+            QMessageBox.critical(self, "Download PDF", f"Save location error: {exc}")
+            return
+
+        def fail(msg: str) -> None:
+            self.download_pdf_btn.setEnabled(True)
+            QMessageBox.critical(self, "Download PDF", msg)
+
+        try:
+            page = self.web_view.page()
+            page_print_to_pdf = getattr(page, "printToPdf", None)
+            if not callable(page_print_to_pdf):
+                fail("PDF export is not supported by this QtWebEngine build. Please install PyQt6-WebEngine properly.")
+                return
+
+            try:
+                from PyQt6.QtGui import QPageLayout, QPageSize
+                from PyQt6.QtCore import QMarginsF
+                layout = QPageLayout(
+                    QPageSize(QPageSize.PageSizeId.A4),
+                    QPageLayout.Orientation.Portrait,
+                    QMarginsF(0, 0, 0, 0),
+                )
+            except Exception:
+                layout = None
+
+            finished_signal = getattr(page, "pdfPrintingFinished", None)
+
+            def _write_to_target(pdf_bytes_or_path: Any, _is_path: bool) -> None:
+                try:
+                    if _is_path:
+                        src = str(pdf_bytes_or_path)
+                        if not os.path.exists(src):
+                            fail("PDF file was not created.")
+                            return
+                        import shutil
+                        if os.path.abspath(src) != os.path.abspath(target_path):
+                            try:
+                                shutil.copyfile(src, target_path)
+                            finally:
+                                try:
+                                    if os.path.exists(src):
+                                        os.unlink(src)
+                                except Exception:
+                                    pass
+                        else:
+                            # src already at target; nothing to do
+                            pass
+                    else:
+                        raw = bytes(pdf_bytes_or_path) if pdf_bytes_or_path else b""
+                        if not raw:
+                            fail("PDF generation produced empty output.")
+                            return
+                        with open(target_path, "wb") as f:
+                            f.write(raw)
+                    if os.path.exists(target_path):
+                        sz = os.path.getsize(target_path)
+                        logger.info(f"PDF saved: {target_path} ({sz} bytes)")
+                        self.download_pdf_btn.setEnabled(True)
+                        QMessageBox.information(
+                            self,
+                            "Download PDF",
+                            f"PDF saved successfully:\n{target_path}\n\nSize: {sz:,} bytes",
+                        )
+                    else:
+                        fail("File was not written to the selected location.")
+                except Exception as exc:
+                    logger.error(f"PDF save failed: {exc}", exc_info=True)
+                    fail(f"Failed to save PDF: {exc}")
+
+            from tempfile import NamedTemporaryFile
+            tmp = NamedTemporaryFile(delete=False, suffix=".pdf")
+            tmp_path = tmp.name
+            tmp.close()
+
+            if hasattr(finished_signal, "connect"):
+                def _on_pdf_printing_finished(file_path: str, success: bool) -> None:
+                    try:
+                        try:
+                            finished_signal.disconnect(_on_pdf_printing_finished)
+                        except Exception:
+                            pass
+                        if not success:
+                            try:
+                                if os.path.exists(tmp_path):
+                                    os.unlink(tmp_path)
+                            except Exception:
+                                pass
+                            fail("Failed to generate PDF.")
+                            return
+                        actual_path = file_path or tmp_path
+                        _write_to_target(actual_path, True)
+                    except Exception as exc:
+                        logger.error(f"PDF download finished handler failed: {exc}", exc_info=True)
+                        fail(f"PDF download failed: {exc}")
+                finished_signal.connect(_on_pdf_printing_finished)
+                try:
+                    if layout is not None:
+                        try:
+                            page_print_to_pdf(tmp_path, layout)
+                        except TypeError:
+                            page_print_to_pdf(layout, tmp_path)
+                    else:
+                        page_print_to_pdf(tmp_path)
+                except Exception as exc:
+                    try:
+                        finished_signal.disconnect(_on_pdf_printing_finished)
+                    except Exception:
+                        pass
+                    try:
+                        if os.path.exists(tmp_path):
+                            os.unlink(tmp_path)
+                    except Exception:
+                        pass
+                    fail(f"PDF generation failed: {exc}")
+                return
+
+            def on_pdf_ready(data) -> None:
+                try:
+                    _write_to_target(data, False)
+                except Exception as exc:
+                    logger.error(f"PDF callback download failed: {exc}", exc_info=True)
+                    fail(f"Failed to generate PDF: {exc}")
+                finally:
+                    try:
+                        if os.path.exists(tmp_path):
+                            os.unlink(tmp_path)
+                    except Exception:
+                        pass
+
+            try:
+                if layout is not None:
+                    try:
+                        page_print_to_pdf(on_pdf_ready, layout)
+                    except TypeError:
+                        page_print_to_pdf(layout, on_pdf_ready)
+                else:
+                    page_print_to_pdf(on_pdf_ready)
+            except Exception as exc:
+                try:
+                    if os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
+                except Exception:
+                    pass
+                fail(f"PDF generation failed: {exc}")
+        except Exception as exc:
+            logger.error(f"PDF download init failed: {exc}", exc_info=True)
+            fail(f"Download failed: {exc}")
 
     def _on_pdf_ready(self, data):
         # This can be used to auto-save a copy if needed

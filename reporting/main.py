@@ -153,6 +153,268 @@ def print_preview_page(preview_id: str) -> str:
     return str(entry.get("html") or "")
 
 
+def _render_html_to_pdf_via_qt(html: str) -> Optional[bytes]:
+    """Render A4 PDF from HTML using PyQt6 QWebEngineView.printToPdf().
+
+    Returns PDF bytes on success, None if WebEngine unavailable / failed.
+    Runs synchronously inside the Qt event loop via a local QEventLoop.
+    """
+    try:
+        from PyQt6.QtCore import QUrl, QEventLoop, QTimer, QMarginsF
+        from PyQt6.QtGui import QPageLayout, QPageSize
+    except Exception:
+        return None
+    try:
+        from PyQt6.QtWebEngineWidgets import QWebEngineView
+    except Exception:
+        return None
+    try:
+        loop = QEventLoop()
+        result_box: Dict[str, Any] = {}
+        view = QWebEngineView()
+        view.setAttribute(view.setAttribute if False else True)  # no-op; keep instance ref alive
+
+        try:
+            layout = QPageLayout(
+                QPageSize(QPageSize.PageSizeId.A4),
+                QPageLayout.Orientation.Portrait,
+                QMarginsF(0, 0, 0, 0),
+            )
+        except Exception:
+            layout = None
+        base = QUrl("http://127.0.0.1:9000/")
+        view.setHtml(html, base)
+
+        page = view.page()
+        print_fn = getattr(page, "printToPdf", None)
+        if not callable(print_fn):
+            return None
+
+        def _on_finished(path: str, ok: bool) -> None:
+            result_box["path"] = path
+            result_box["ok"] = bool(ok)
+            try:
+                loop.quit()
+            except Exception:
+                pass
+
+        def _on_load(ok: bool) -> None:
+            try:
+                finished_signal = getattr(page, "pdfPrintingFinished", None)
+                has_signal = hasattr(finished_signal, "connect")
+                if has_signal:
+                    finished_signal.connect(_on_finished)
+                    from tempfile import NamedTemporaryFile
+                    tmp = NamedTemporaryFile(delete=False, suffix=".pdf")
+                    tmp_path = tmp.name
+                    tmp.close()
+                    result_box["tmp"] = tmp_path
+                    QTimer.singleShot(400, lambda: _do_print(tmp_path, layout, print_fn, finished_signal))
+                    return
+                # Fallback callback version
+                def _cb(data) -> None:
+                    try:
+                        raw = bytes(data) if data else b""
+                    except Exception:
+                        raw = b""
+                    result_box["bytes"] = raw
+                    try:
+                        loop.quit()
+                    except Exception:
+                        pass
+                QTimer.singleShot(400, lambda: _do_print_cb(_cb, layout, print_fn))
+            except Exception as exc2:
+                result_box["error"] = str(exc2)
+                try:
+                    loop.quit()
+                except Exception:
+                    pass
+
+        def _do_print(tmp_path, layout, fn, signal) -> None:
+            try:
+                if layout is not None:
+                    try:
+                        fn(tmp_path, layout)
+                    except TypeError:
+                        fn(layout, tmp_path)
+                else:
+                    fn(tmp_path)
+            except Exception as exc3:
+                result_box["error"] = str(exc3)
+                try:
+                    loop.quit()
+                except Exception:
+                    pass
+
+        def _do_print_cb(cb, layout, fn) -> None:
+            try:
+                if layout is not None:
+                    try:
+                        fn(cb, layout)
+                    except TypeError:
+                        fn(layout, cb)
+                else:
+                    fn(cb)
+            except Exception as exc4:
+                result_box["error"] = str(exc4)
+                try:
+                    loop.quit()
+                except Exception:
+                    pass
+
+        # Timeout safety
+        def _timeout() -> None:
+            result_box["timeout"] = True
+            try:
+                loop.quit()
+            except Exception:
+                pass
+
+        QTimer.singleShot(60_000, _timeout)
+        try:
+            view.loadFinished.connect(_on_load)
+        except Exception:
+            return None
+
+        loop.exec()
+
+        # Handle signal path result -> read file
+        if result_box.get("ok") and result_box.get("path"):
+            try:
+                pth = str(result_box["path"])
+                if os.path.exists(pth):
+                    with open(pth, "rb") as f:
+                        data = f.read()
+                    if data:
+                        try:
+                            if os.path.exists(pth) and (pth.endswith(".tmp.pdf") or "tmp" in os.path.basename(pth).lower() or result_box.get("tmp") == pth):
+                                os.unlink(pth)
+                        except Exception:
+                            pass
+                        return data
+            except Exception:
+                pass
+        if isinstance(result_box.get("bytes"), (bytes, bytearray)) and len(result_box["bytes"]) > 0:
+            return bytes(result_box["bytes"])
+        return None
+    except Exception:
+        return None
+
+
+def _build_pdf_filename(title: Optional[str], suffix: str = "invoice") -> str:
+    from datetime import datetime as _dt
+    safe_title = "".join(c if c.isalnum() or c in "-_ " else "_" for c in str(title or suffix)).strip().replace(" ", "_") or suffix
+    return f"{safe_title}_{_dt.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+
+
+@app.post("/print-preview/{preview_id}/download-pdf")
+def print_preview_download_pdf(
+    preview_id: str,
+    payload: Dict[str, Any] = Body(default={}),
+) -> StreamingResponse:
+    """Render the stored print-preview HTML to an A4 PDF file and download it."""
+    _purge_expired_previews(time.time())
+    with _print_preview_lock:
+        entry = _print_previews.get(preview_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Preview expired or not found")
+    html = str(entry.get("html") or "")
+    title = str(entry.get("title") or "")
+    if not html.strip():
+        raise HTTPException(status_code=400, detail="Stored preview HTML is empty")
+
+    # First try the WebEngine pipeline (same renderer as the preview dialog -> pixel-perfect)
+    pdf_bytes = _render_html_to_pdf_via_qt(html)
+
+    # Fallback: basic reportlab canvas-based A4 render
+    if not pdf_bytes:
+        try:
+            from reportlab.pdfgen import canvas
+            from reportlab.lib.pagesizes import A4
+            out = BytesIO()
+            c = canvas.Canvas(out, pagesize=A4)
+            w, h = A4
+            c.setFont("Helvetica-Bold", 18)
+            c.drawString(40, h - 60, str(title or "Invoice"))
+            c.setFont("Helvetica", 10)
+            c.drawString(40, h - 80, "Generated: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            # Render body text stripped of tags
+            import re
+            body = re.sub(r"<[^>]+>", "\n", html)
+            body = re.sub(r"\n{3,}", "\n\n", body).strip()
+            y = h - 120
+            for raw_line in body.split("\n"):
+                line = (raw_line or "").strip()
+                if not line:
+                    y -= 6
+                    continue
+                # Word-wrap naive (8pt units)
+                chunks = [line[i:i + 120] for i in range(0, len(line), 120)]
+                for ch in chunks:
+                    if y < 60:
+                        c.showPage()
+                        c.setFont("Helvetica", 10)
+                        y = h - 40
+                    c.drawString(40, y, ch)
+                    y -= 14
+            c.save()
+            pdf_bytes = out.getvalue()
+        except Exception as exc:
+            logger.error(f"PDF reportlab fallback failed: {exc}", exc_info=True)
+            raise HTTPException(status_code=500, detail="PDF generation is unavailable on this server instance.")
+
+    if not pdf_bytes:
+        raise HTTPException(status_code=500, detail="PDF generation produced empty output.")
+
+    filename = _build_pdf_filename(title, "invoice")
+    return StreamingResponse(
+        BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(pdf_bytes)),
+        },
+    )
+
+
+@app.post("/api/download-pdf")
+def api_download_pdf(payload: Dict[str, Any] = Body(default={})) -> StreamingResponse:
+    """Ad-hoc PDF rendering: POST {html, title} and receive PDF bytes back as download.
+
+    If a preview_id is provided (as string), the HTML is taken from the stored preview instead.
+    """
+    html = ""
+    title = ""
+    if isinstance(payload, dict):
+        if payload.get("preview_id"):
+            pid = str(payload["preview_id"]).strip()
+            _purge_expired_previews(time.time())
+            with _print_preview_lock:
+                entry = _print_previews.get(pid)
+            if entry:
+                html = str(entry.get("html") or "")
+                title = str(entry.get("title") or payload.get("title") or "")
+            else:
+                raise HTTPException(status_code=404, detail="preview_id not found or expired")
+        else:
+            html = str(payload.get("html") or "")
+            title = str(payload.get("title") or "")
+    if not html.strip():
+        raise HTTPException(status_code=400, detail="html or preview_id required")
+    pdf_bytes = _render_html_to_pdf_via_qt(html)
+    if not pdf_bytes:
+        raise HTTPException(status_code=500, detail="PDF generation is unavailable on this server instance (PyQt6-WebEngine required).")
+    filename = _build_pdf_filename(title, "invoice")
+    return StreamingResponse(
+        BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(pdf_bytes)),
+        },
+    )
+
+
 @app.get("/api/print-layout/{template_name}")
 def get_print_layout(
     template_name: str,
@@ -549,7 +811,7 @@ def _render_dashboard_html() -> str:
             return { ok: true, iso: `${y}-${pad2(m)}-${pad2(d)}` };
           }
 
-          const digits = s.replace(/\D/g, '');
+          const digits = s.replace(/\\D/g, '');
           if (digits.length === 8) {
             const first4 = Number(digits.slice(0, 4));
             if (first4 >= 1900 && first4 <= 2100) {
@@ -742,7 +1004,7 @@ def _render_dashboard_html() -> str:
 
           function validateLive() {
             const raw = input.value || '';
-            const digitsOnly = raw.replace(/\D/g, '');
+            const digitsOnly = raw.replace(/\\D/g, '');
             if (digitsOnly && digitsOnly === raw) {
               let formatted = raw;
               if ((digitsOnly.startsWith('19') || digitsOnly.startsWith('20')) && digitsOnly.length <= 8) {
@@ -1943,7 +2205,7 @@ def _render_lookup_html() -> str:
                 if (document.readyState === 'complete') { setTimeout(tryPrint, 300); }
                 else { window.addEventListener('load', function(){ setTimeout(tryPrint, 300); }, { once: true }); }
               })();
-            <\/script>
+            <\\/script>
           </body></html>`;
 
           try {
@@ -2110,7 +2372,7 @@ def _render_lookup_html() -> str:
                   if (document.readyState === 'complete') { setTimeout(tryPrint, 450); }
                   else { window.addEventListener('load', function(){ setTimeout(tryPrint, 450); }, { once: true }); }
                 })();
-              <\/script>
+              <\\/script>
             </body></html>`;
 
             try {
