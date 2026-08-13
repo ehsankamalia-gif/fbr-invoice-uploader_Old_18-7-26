@@ -1,20 +1,149 @@
 import os
+import re
 from pathlib import Path
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
-from app.db.session import SessionLocal
+from sqlalchemy import inspect, text
+from app.db.session import SessionLocal, engine
 from app.db.models import FBRConfiguration, AppConfiguration
 import logging
 import time
 import threading
 from typing import Any, Callable, Dict, Optional
 import uuid
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, OperationalError
 import json
 
 logger = logging.getLogger(__name__)
 
 ENV_FILE = Path(__file__).resolve().parent.parent.parent / ".env"
+
+
+# ---------------------------------------------------------------------------
+# Self-heal: when MySQL is missing any AppConfiguration columns that the
+# SQLAlchemy model declares, the ORM crashes with OperationalError 1054 on
+# EVERY query (even ones that don't use the missing columns).
+# We automatically ALTER TABLE to add any missing column and retry.
+# ---------------------------------------------------------------------------
+_UNKNOWN_COLUMN_RE = re.compile(r"Unknown column\s+'([^']+)'", re.IGNORECASE)
+
+# Column definitions for any invoice_* (or other) columns we may have added.
+# Tuple: (column_name, mysql_def, sqlite_def)
+_APP_CONFIG_COLUMN_DEFS: list[tuple[str, str, str]] = [
+    ("invoice_font_family", "VARCHAR(200) DEFAULT 'Arial, sans-serif'", "TEXT"),
+    ("invoice_font_field_size_pt", "INT DEFAULT 11", "INTEGER DEFAULT 11"),
+    ("invoice_font_label_size_pt", "INT DEFAULT 9", "INTEGER DEFAULT 9"),
+    ("invoice_font_weight_field", "INT DEFAULT 600", "INTEGER DEFAULT 600"),
+    ("invoice_font_weight_label", "INT DEFAULT 500", "INTEGER DEFAULT 500"),
+    ("invoice_business_name_size_pt", "INT DEFAULT 16", "INTEGER DEFAULT 16"),
+    ("invoice_business_name_weight", "INT DEFAULT 800", "INTEGER DEFAULT 800"),
+    ("invoice_color_label", "VARCHAR(20) DEFAULT '#555555'", "TEXT"),
+    ("invoice_mono_font_family", "VARCHAR(200) DEFAULT 'Consolas, \\'Courier New\\', monospace'", "TEXT"),
+]
+
+
+def _is_sqlite_url(url: str) -> bool:
+    return "sqlite" in str(url or "").lower()
+
+
+def _add_missing_app_config_column(col_name: str) -> bool:
+    """Add a single missing column to app_configurations using a NEW direct engine
+    (bypasses the global SessionLocal/engine to avoid recursion).
+    Returns True on success."""
+    from app.core.config import get_database_url
+    from sqlalchemy import create_engine as _create_engine
+
+    db_url = get_database_url()
+    is_sqlite = _is_sqlite_url(db_url)
+    target_def = None
+    for cname, mysql_def, sqlite_def in _APP_CONFIG_COLUMN_DEFS:
+        if cname == col_name:
+            target_def = sqlite_def if is_sqlite else mysql_def
+            break
+    if target_def is None:
+        # Unknown column not in our list — try generic TEXT/VARCHAR fallback
+        target_def = "TEXT" if is_sqlite else "VARCHAR(255)"
+        logger.warning(f"Unknown missing column '{col_name}'; adding as generic {target_def}")
+
+    try:
+        tmp_engine = _create_engine(db_url, pool_recycle=3600)
+        try:
+            with tmp_engine.connect() as conn:
+                # Check if column already exists (another thread may have added it)
+                try:
+                    already = False
+                    insp = inspect(tmp_engine)
+                    cols = {c["name"] for c in insp.get_columns("app_configurations")}
+                    if col_name in cols:
+                        already = True
+                except Exception:
+                    already = False
+                if not already:
+                    ddl = f"ALTER TABLE app_configurations ADD COLUMN {col_name} {target_def}"
+                    logger.warning(f"Self-healing missing column: {ddl}")
+                    conn.execute(text(ddl))
+                    if not is_sqlite:
+                        try:
+                            conn.commit()
+                        except Exception:
+                            pass
+        finally:
+            tmp_engine.dispose()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to self-heal column '{col_name}': {e}")
+        return False
+
+
+def _run_with_app_config_self_heal(db_session_getter: Callable[[], Session],
+                                   work_fn: Callable[[Session], Any],
+                                   max_retries: int = 20) -> Any:
+    """Run work_fn(db_session) with automatic self-healing of missing
+    app_configurations columns. Retries up to max_retries times (once per
+    missing column, since a single query can only report the FIRST missing
+    column even if several are missing)."""
+    retries_left = max_retries
+    last_exc: Optional[BaseException] = None
+    while True:
+        db = db_session_getter()
+        try:
+            return work_fn(db)
+        except OperationalError as oe:
+            msg = str(oe)
+            m = _UNKNOWN_COLUMN_RE.search(msg)
+            if m and retries_left > 0:
+                qcol = m.group(1)  # may be qualified like app_configurations.colname
+                col = qcol.split(".")[-1].strip("`'\"")
+                # Only self-heal for app_configurations table
+                if "app_configuration" in msg.lower() or "." not in qcol:
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+                    try:
+                        db.close()
+                    except Exception:
+                        pass
+                    ok = _add_missing_app_config_column(col)
+                    if not ok:
+                        raise
+                    retries_left -= 1
+                    last_exc = oe
+                    continue  # retry with a fresh session
+            last_exc = oe
+            raise
+        except Exception:
+            raise
+        finally:
+            try:
+                db.close()
+            except Exception:
+                pass
+
+
+def _fresh_session() -> Session:
+    """Return a brand-new session from SessionLocal."""
+    return SessionLocal()
 
 def should_regenerate_invoice_number(current_invoice_number: str, previous_usin: str, changed_keys: list[str]) -> bool:
     current_inv = (current_invoice_number or "").strip()
@@ -644,6 +773,15 @@ class SettingsService:
                 "dms_portal_url": str(getattr(config, "dms_portal_url", "https://dms.ahlportal.com/login") or ""),
                 "dms_username": str(getattr(config, "dms_username", "") or ""),
                 "dms_password": str(getattr(config, "dms_password", "") or ""),
+                "invoice_font_family": str(getattr(config, "invoice_font_family", "Arial, sans-serif") or "Arial, sans-serif"),
+                "invoice_font_field_size_pt": int(getattr(config, "invoice_font_field_size_pt", 11) or 11),
+                "invoice_font_label_size_pt": int(getattr(config, "invoice_font_label_size_pt", 9) or 9),
+                "invoice_font_weight_field": int(getattr(config, "invoice_font_weight_field", 600) or 600),
+                "invoice_font_weight_label": int(getattr(config, "invoice_font_weight_label", 500) or 500),
+                "invoice_business_name_size_pt": int(getattr(config, "invoice_business_name_size_pt", 16) or 16),
+                "invoice_business_name_weight": int(getattr(config, "invoice_business_name_weight", 800) or 800),
+                "invoice_color_label": str(getattr(config, "invoice_color_label", "#555555") or "#555555"),
+                "invoice_mono_font_family": str(getattr(config, "invoice_mono_font_family", "Consolas, 'Courier New', monospace") or "Consolas, 'Courier New', monospace"),
             }
         except Exception as e:
             logger.error(f"Error getting app config: {e}")
@@ -667,6 +805,15 @@ class SettingsService:
                 "dms_portal_url": "https://dms.ahlportal.com/login",
                 "dms_username": "",
                 "dms_password": "",
+                "invoice_font_family": "Arial, sans-serif",
+                "invoice_font_field_size_pt": 11,
+                "invoice_font_label_size_pt": 9,
+                "invoice_font_weight_field": 600,
+                "invoice_font_weight_label": 500,
+                "invoice_business_name_size_pt": 16,
+                "invoice_business_name_weight": 800,
+                "invoice_color_label": "#555555",
+                "invoice_mono_font_family": "Consolas, 'Courier New', monospace",
             }
         finally:
             db.close()
@@ -767,9 +914,15 @@ class SettingsService:
         """Save (or clear) the default invoice logo.
 
         Pass empty strings to clear/remove the saved logo.
+        Raises on failure so callers can alert the user.
+        As a safety self-heal: when saving a NON-EMPTY logo, also clear any
+        deleted:true marker for custom_logo_settings_1 in PrintTemplateLayout
+        so the logo actually renders (user just uploaded a new one, they
+        obviously don't want it permanently hidden).
         """
-        data_url = str(data_url or "")
-        name = str(name or "")
+        from app.db.models import PrintTemplateLayout
+        data_url = str(data_url or "").strip()
+        name = str(name or "").strip()
         db = SessionLocal()
         try:
             config = db.query(AppConfiguration).first()
@@ -777,15 +930,38 @@ class SettingsService:
                 config = AppConfiguration(auto_push_enabled=False, auto_push_interval=5)
                 db.add(config)
                 db.flush()
-            try:
+            # NOTE: No more per-attribute try/except swallow!
+            # Failures here MUST surface so the user knows their logo was NOT saved.
+            has_logo_col = any(c["name"] == "invoice_logo_data_url" for c in inspect(engine).get_columns("app_configurations"))
+            if has_logo_col:
                 config.invoice_logo_data_url = data_url if data_url else None
-            except Exception:
-                # Column may not exist yet (pre-migration); swallow so rest of app works.
-                pass
-            try:
                 config.invoice_logo_name = name if name else None
-            except Exception:
-                pass
+            else:
+                raise RuntimeError(
+                    "Columns invoice_logo_data_url / invoice_logo_name missing from app_configurations table. "
+                    "Run the migration script first: python scripts/add_invoice_formatting_columns.py"
+                )
+
+            # --- Self-heal: if saving a NON-EMPTY logo, clear any stale deleted:true marker ---
+            if data_url:
+                try:
+                    ptl = db.query(PrintTemplateLayout).filter(PrintTemplateLayout.template_name == "invoice").first()
+                    if ptl and isinstance(ptl.positions, dict):
+                        elements = ptl.positions.get("elements", {}) if isinstance(ptl.positions, dict) else {}
+                        s1_entry = elements.get("custom_logo_settings_1") if isinstance(elements, dict) else None
+                        if isinstance(s1_entry, dict) and s1_entry.get("deleted") is True:
+                            s1_entry.pop("deleted", None)
+                            s1_entry["updated_at"] = int(time.time() * 1000)
+                            elements["custom_logo_settings_1"] = s1_entry
+                            new_positions = dict(ptl.positions)
+                            new_positions["elements"] = elements
+                            new_positions["updated_at"] = int(time.time() * 1000)
+                            ptl.positions = new_positions
+                            logger.info("Cleared stale deleted:true marker for custom_logo_settings_1 (new logo uploaded)")
+                except Exception as ptl_e:
+                    logger.warning(f"Could not self-heal PrintTemplateLayout for logo: {ptl_e}")
+                    # Not fatal: commit proceeds
+
             db.commit()
             self._invalidate_cache()
             self._bump_revision()
@@ -1032,6 +1208,154 @@ class SettingsService:
             db.rollback()
             logger.error(f"Error saving DMS config: {e}")
             raise
+        finally:
+            db.close()
+
+    def get_invoice_formatting(self) -> Dict[str, Any]:
+        """Return standardized invoice formatting config for identical appearance on all PCs."""
+        db = SessionLocal()
+        try:
+            config = db.query(AppConfiguration).first()
+            if not config:
+                return self._default_invoice_formatting()
+            return {
+                "font_family": str(getattr(config, "invoice_font_family", "Arial, sans-serif") or "Arial, sans-serif"),
+                "font_field_size_pt": int(getattr(config, "invoice_font_field_size_pt", 11) or 11),
+                "font_label_size_pt": int(getattr(config, "invoice_font_label_size_pt", 9) or 9),
+                "font_weight_field": int(getattr(config, "invoice_font_weight_field", 600) or 600),
+                "font_weight_label": int(getattr(config, "invoice_font_weight_label", 500) or 500),
+                "business_name_size_pt": int(getattr(config, "invoice_business_name_size_pt", 16) or 16),
+                "business_name_weight": int(getattr(config, "invoice_business_name_weight", 800) or 800),
+                "color_label": str(getattr(config, "invoice_color_label", "#555555") or "#555555"),
+                "mono_font_family": str(getattr(config, "invoice_mono_font_family", "Consolas, 'Courier New', monospace") or "Consolas, 'Courier New', monospace"),
+            }
+        except Exception as e:
+            logger.error(f"Error getting invoice formatting: {e}")
+            return self._default_invoice_formatting()
+        finally:
+            db.close()
+
+    def _default_invoice_formatting(self) -> Dict[str, Any]:
+        return {
+            "font_family": "Arial, sans-serif",
+            "font_field_size_pt": 11,
+            "font_label_size_pt": 9,
+            "font_weight_field": 600,
+            "font_weight_label": 500,
+            "business_name_size_pt": 16,
+            "business_name_weight": 800,
+            "color_label": "#555555",
+            "mono_font_family": "Consolas, 'Courier New', monospace",
+        }
+
+    def set_invoice_formatting(
+        self,
+        font_family: Optional[str] = None,
+        font_field_size_pt: Optional[int] = None,
+        font_label_size_pt: Optional[int] = None,
+        font_weight_field: Optional[int] = None,
+        font_weight_label: Optional[int] = None,
+        business_name_size_pt: Optional[int] = None,
+        business_name_weight: Optional[int] = None,
+        color_label: Optional[str] = None,
+        mono_font_family: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Update invoice formatting config (pass only values you want to change)."""
+        db = SessionLocal()
+        try:
+            config = db.query(AppConfiguration).first()
+            if not config:
+                config = AppConfiguration(auto_push_enabled=False, auto_push_interval=5)
+                db.add(config)
+                db.flush()
+            updates: Dict[str, Any] = {}
+            if font_family is not None:
+                try:
+                    config.invoice_font_family = str(font_family).strip() or "Arial, sans-serif"
+                    updates["font_family"] = config.invoice_font_family
+                except Exception:
+                    pass
+            if font_field_size_pt is not None:
+                try:
+                    config.invoice_font_field_size_pt = max(6, min(48, int(font_field_size_pt)))
+                    updates["font_field_size_pt"] = config.invoice_font_field_size_pt
+                except Exception:
+                    pass
+            if font_label_size_pt is not None:
+                try:
+                    config.invoice_font_label_size_pt = max(6, min(48, int(font_label_size_pt)))
+                    updates["font_label_size_pt"] = config.invoice_font_label_size_pt
+                except Exception:
+                    pass
+            if font_weight_field is not None:
+                try:
+                    config.invoice_font_weight_field = max(100, min(900, int(font_weight_field)))
+                    updates["font_weight_field"] = config.invoice_font_weight_field
+                except Exception:
+                    pass
+            if font_weight_label is not None:
+                try:
+                    config.invoice_font_weight_label = max(100, min(900, int(font_weight_label)))
+                    updates["font_weight_label"] = config.invoice_font_weight_label
+                except Exception:
+                    pass
+            if business_name_size_pt is not None:
+                try:
+                    config.invoice_business_name_size_pt = max(6, min(72, int(business_name_size_pt)))
+                    updates["business_name_size_pt"] = config.invoice_business_name_size_pt
+                except Exception:
+                    pass
+            if business_name_weight is not None:
+                try:
+                    config.invoice_business_name_weight = max(100, min(900, int(business_name_weight)))
+                    updates["business_name_weight"] = config.invoice_business_name_weight
+                except Exception:
+                    pass
+            if color_label is not None:
+                try:
+                    config.invoice_color_label = str(color_label).strip() or "#555555"
+                    updates["color_label"] = config.invoice_color_label
+                except Exception:
+                    pass
+            if mono_font_family is not None:
+                try:
+                    config.invoice_mono_font_family = str(mono_font_family).strip() or "Consolas, 'Courier New', monospace"
+                    updates["mono_font_family"] = config.invoice_mono_font_family
+                except Exception:
+                    pass
+            db.commit()
+            self._invalidate_cache()
+            self._bump_revision()
+            self._notify({"type": "invoice_formatting_updated", **updates})
+            logger.info(f"Updated invoice formatting: {updates}")
+            return updates
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error saving invoice formatting: {e}")
+            raise
+        finally:
+            db.close()
+
+    def get_invoice_deleted_elements(self, template_name: str = "invoice") -> Dict[str, bool]:
+        """Check PrintTemplateLayout for elements permanently marked as deleted.
+        Returns dict like {'honda_logo': True, 'fbr_pos_logo': True}"""
+        from app.db.models import PrintTemplateLayout
+        deleted: Dict[str, bool] = {}
+        db = SessionLocal()
+        try:
+            row = db.query(PrintTemplateLayout).filter(PrintTemplateLayout.template_name == str(template_name or "").strip().lower()).first()
+            if not row or not isinstance(row.positions, dict):
+                return deleted
+            elements = row.positions.get("elements") if isinstance(row.positions, dict) else None
+            if not isinstance(elements, dict):
+                return deleted
+            for key, entry in elements.items():
+                if isinstance(entry, dict) and entry.get("deleted") is True:
+                    deleted[str(key)] = True
+            return deleted
+        except Exception as e:
+            logger.warning(f"get_invoice_deleted_elements failed: {e}")
+            return deleted
         finally:
             db.close()
 

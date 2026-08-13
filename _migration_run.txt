@@ -1,0 +1,38 @@
+﻿python : C:\laragon\www\fbr-invoice-uploader_Old_18-7-26\scripts\add_invoice_fo
+rmatting_columns.py:156: SAWarning: transaction already deassociated from 
+connection
+At line:1 char:58
++ ... d_18-7-26 ; python scripts\add_invoice_formatting_columns.py 2>&1 | O ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\laragon\www\...from connection 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  trans.rollback()
+MIGRATION FAILED: This transaction is inactive
+Traceback (most recent call last):
+  File "C:\laragon\www\fbr-invoice-uploader_Old_18-7-26\scripts\add_invoice_for
+matting_columns.py", line 143, in main
+    trans.commit()
+    ~~~~~~~~~~~~^^
+  File "C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\s
+qlalchemy\engine\base.py", line 2640, in commit
+    self._do_commit()
+    ~~~~~~~~~~~~~~~^^
+  File "C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\s
+qlalchemy\engine\base.py", line 2763, in _do_commit
+    raise exc.InvalidRequestError("This transaction is inactive")
+sqlalchemy.exc.InvalidRequestError: This transaction is inactive
+Using database URL (suffix shown): ...mysql+pymysql://root:@localhost:3306/fbr_invoice_uploader
+WARNING: Could not verify MySQL database existence: (pymysql.err.OperationalError) (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+app_configurations currently has 31 columns.
+[SKIP] invoice_font_family already exists
+[SKIP] invoice_font_field_size_pt already exists
+[SKIP] invoice_font_label_size_pt already exists
+[SKIP] invoice_font_weight_field already exists
+[SKIP] invoice_font_weight_label already exists
+[SKIP] invoice_business_name_size_pt already exists
+[SKIP] invoice_business_name_weight already exists
+[SKIP] invoice_color_label already exists
+[ADD ] invoice_mono_font_family: VARCHAR(200) DEFAULT 'Consolas, \'Courier New\', monospace'

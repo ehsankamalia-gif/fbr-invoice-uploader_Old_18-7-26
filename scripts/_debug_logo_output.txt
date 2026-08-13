@@ -1,0 +1,15 @@
+[DB] AppConfiguration row exists: False
+[SERVICE] get_invoice_logo() data_url len: 0
+[SERVICE] get_invoice_logo() name: ''
+[DB] PrintTemplateLayout invoice exists: False
+[SERVICE] deleted_elements keys: []
+[HTML] Total HTML length: 93550
+[HTML] Contains settingsLogo1 id: False
+[HTML] Contains custom_logo_settings_1: False
+[HTML] Contains any <img src=data:image: False
+[HTML] Contains hondaLogo id: True
+[HTML] Contains fbrPosLogo id: True
+[HTML] settingsLogo1 DIV NOT FOUND IN HTML!
+[FMT] font_family='Arial, sans-serif' found in HTML: True
+[FMT] color_label='#555555' found in HTML: True
+[FMT] mono_font_family='Consolas, 'Courier New', monospace' found in HTML: True

@@ -301,17 +301,16 @@ def verify_schema_integrity(target_engine):
                                 
                             default_val = ""
                             if col_obj.default is not None:
-                                # Very basic default handling
                                 try:
                                     if hasattr(col_obj.default, "arg"):
                                         arg = col_obj.default.arg
                                         if isinstance(arg, str):
-                                            # If it's a string, wrap it in single quotes
-                                            default_val = f" DEFAULT '{arg}'"
+                                            escaped = arg.replace("'", "''")
+                                            default_val = f" DEFAULT '{escaped}'"
                                         else:
-                                            # For numbers or booleans, use it as is
                                             default_val = f" DEFAULT {arg}"
-                                except: pass
+                                except Exception:
+                                    default_val = ""
 
                             alter_stmt = f"ALTER TABLE {table_name} ADD COLUMN {col_name} {sql_type}{default_val}"
                             try:

@@ -550,14 +550,22 @@ class BusinessPreferencesDialog(BaseSettingsDialog):
                 item_name=self.item_name.text().strip(),
                 business_name=self.business_name.text().strip()
             )
+            logo_error = None
             try:
                 settings_service.set_invoice_logo(
                     self._pending_logo_data_url or "",
                     self._pending_logo_name or "",
                 )
             except Exception as e:
-                logger.warning(f"Could not save invoice logo from settings dialog: {e}")
-                # Non-fatal: still accept the rest of save
+                logger.error(f"Could not save invoice logo from settings dialog: {e}")
+                logo_error = str(e)
+            if logo_error:
+                self._show_error(
+                    "Invoice Logo Not Saved",
+                    f"The rest of your preferences were saved, but the invoice logo could not be stored:\n\n{logo_error}\n\n"
+                    "Please verify the image file is valid (PNG/JPG under 4MB) and try again.",
+                )
+                return
             self._show_success("Preferences Saved", "Business rules, preferences, and invoice logo updated.")
             self.accept()
         except Exception as e:

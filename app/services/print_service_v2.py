@@ -554,6 +554,83 @@ class PrintServiceV2:
             logger.warning(f"Could not load settings invoice logo for render_invoice: {e}")
             settings_logo_html = ""
 
+        # --- Standardized invoice formatting config (ensures identical appearance on all PCs) ---
+        inv_fmt = {
+            "font_family": "Arial, sans-serif",
+            "font_field_size_pt": 11,
+            "font_label_size_pt": 9,
+            "font_weight_field": 600,
+            "font_weight_label": 500,
+            "business_name_size_pt": 16,
+            "business_name_weight": 800,
+            "color_label": "#555555",
+            "mono_font_family": "Consolas, 'Courier New', monospace",
+        }
+        try:
+            from app.services.settings_service import settings_service as _ss2
+            _loaded = _ss2.get_invoice_formatting() or {}
+            if isinstance(_loaded, dict):
+                for _k, _v in _loaded.items():
+                    if _v is not None:
+                        inv_fmt[_k] = _v
+        except Exception as e:
+            logger.warning(f"Using default invoice formatting: {e}")
+
+        # --- Permanently deleted built-in elements (survives reload / reset) ---
+        deleted_elements: dict = {}
+        try:
+            from app.services.settings_service import settings_service as _ss3
+            deleted_elements = _ss3.get_invoice_deleted_elements("invoice") or {}
+        except Exception as e:
+            logger.warning(f"Could not load deleted invoice elements: {e}")
+
+        # Conditionally render built-in logos based on deletion status
+        honda_logo_html = ""
+        if not deleted_elements.get("honda_logo"):
+            honda_logo_html = """<div id="hondaLogo" class="draggable" data-pos-key="honda_logo" data-default-left="0.25in" data-default-top="0.18in" data-default-width="1.20in" data-default-height="0.80in" style="position:absolute; left: 0.25in; top: 0.18in; width: 1.20in; height: 0.80in; background: transparent; user-select: none; -webkit-user-select: none; -webkit-user-drag: none; touch-action: none;">
+          <svg draggable="false" viewBox="0 0 240 160" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" style="pointer-events: none; display: block; user-select: none; -webkit-user-select: none;">
+            <g fill="#C20000">
+              <path d="M30,132 Q20,102 38,76 Q50,58 72,50 Q94,42 118,38 Q142,36 166,40 Q190,46 208,58 L200,70 Q180,60 162,56 Q140,52 118,54 Q96,56 78,64 Q62,72 52,88 Q44,104 42,122 Z"/>
+              <path d="M42,142 Q34,116 48,94 Q60,76 82,68 Q108,58 134,56 Q160,56 184,62 Q204,68 220,80 L212,92 Q194,82 178,78 Q158,72 138,72 Q116,72 96,78 Q76,84 62,98 Q52,112 48,128 Z"/>
+              <path d="M54,150 Q48,126 60,108 Q72,90 94,82 Q120,74 146,74 Q172,74 194,82 Q214,88 230,102 L222,112 Q208,104 192,98 Q172,92 154,92 Q132,92 110,96 Q88,102 74,114 Q64,126 60,138 Z"/>
+              <path d="M66,156 Q62,138 72,122 Q84,106 106,100 Q132,94 158,96 Q182,98 202,108 Q218,116 236,130 L230,138 Q216,130 202,124 Q184,118 166,116 Q144,114 122,116 Q102,120 86,130 Q74,140 70,150 Z"/>
+            </g>
+            <g fill="#C20000" font-family="Arial Black, Arial, sans-serif" font-weight="900" text-anchor="middle">
+              <text x="120" y="152" font-size="44" letter-spacing="2">HONDA</text>
+            </g>
+          </svg>
+        </div>"""
+
+        fbr_pos_logo_html = ""
+        if not deleted_elements.get("fbr_pos_logo"):
+            fbr_pos_logo_html = """<div id="fbrPosLogo" class="draggable" data-pos-key="fbr_pos_logo" data-default-left="6.70in" data-default-top="0.15in" data-default-width="1.25in" data-default-height="0.88in" style="position:absolute; left: 6.70in; top: 0.15in; width: 1.25in; height: 0.88in; background: transparent; user-select: none; -webkit-user-select: none; -webkit-user-drag: none; touch-action: none;">
+          <svg draggable="false" viewBox="0 0 260 180" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" style="pointer-events: none; display: block; user-select: none; -webkit-user-select: none;">
+            <defs>
+              <linearGradient id="rainbowArc" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="#2ca02c"/>
+                <stop offset="50%" stop-color="#d4af37"/>
+                <stop offset="100%" stop-color="#2ca02c"/>
+              </linearGradient>
+            </defs>
+            <path d="M20,46 Q130,4 240,46" fill="none" stroke="url(#rainbowArc)" stroke-width="8" stroke-linecap="round"/>
+            <polygon points="130,4 136,24 156,30 136,36 130,56 124,36 104,30 124,24" fill="#d4af37" stroke="#b8941f" stroke-width="1"/>
+            <g font-family="Arial Black, Arial, sans-serif" font-weight="900" fill="#0047AB" text-anchor="middle">
+              <text x="80" y="94" font-size="44">F</text>
+              <text x="130" y="94" font-size="44">B</text>
+              <text x="180" y="94" font-size="44">R</text>
+            </g>
+            <rect x="12" y="104" width="236" height="68" rx="14" fill="#0047AB"/>
+            <g font-family="Arial Black, Arial, sans-serif" font-weight="900" fill="#FFFFFF" text-anchor="middle">
+              <text x="52" y="158" font-size="60">P</text>
+              <text x="130" y="158" font-size="60">O</text>
+              <text x="208" y="158" font-size="60">S</text>
+            </g>
+            <g font-family="Arial, sans-serif" font-weight="700" fill="#E6EDF5" text-anchor="middle" letter-spacing="1.4">
+              <text x="130" y="178" font-size="14">INVOICING SYSTEM</text>
+            </g>
+          </svg>
+        </div>"""
+
         html = f"""
 <!DOCTYPE html>
 <html lang="en">
@@ -564,7 +641,7 @@ class PrintServiceV2:
   <style>
     @page {{ size: A4 portrait; margin: 0; }}
     html, body {{ margin: 0; padding: 0; }}
-    body {{ font-family: Arial, sans-serif; color: #000; background: #ffffff; }}
+    body {{ font-family: {inv_fmt['font_family']}; color: #000; background: #ffffff; }}
     .page-wrap {{
       width: 100%;
       height: 100vh;
@@ -587,20 +664,20 @@ class PrintServiceV2:
     .field {{
       position: absolute;
       display: inline-block;
-      font-size: 11pt;
-      font-weight: 600;
+      font-size: {inv_fmt['font_field_size_pt']}pt;
+      font-weight: {inv_fmt['font_weight_field']};
       white-space: nowrap;
     }}
     .label {{
       position: absolute;
       display: inline-block;
-      font-size: 9pt;
-      font-weight: 500;
-      color: #555;
+      font-size: {inv_fmt['font_label_size_pt']}pt;
+      font-weight: {inv_fmt['font_weight_label']};
+      color: {inv_fmt['color_label']};
       white-space: nowrap;
     }}
     .mono {{
-      font-family: Consolas, 'Courier New', monospace;
+      font-family: {inv_fmt['mono_font_family']};
       font-weight: 700;
     }}
     .draggable {{
@@ -846,49 +923,11 @@ class PrintServiceV2:
   <div class="page-wrap">
     <div id="pageShell" class="page-shell">
       <div id="invoicePage" class="page">
-        <div id="hondaLogo" class="draggable" data-pos-key="honda_logo" data-default-left="0.25in" data-default-top="0.18in" data-default-width="1.20in" data-default-height="0.80in" style="position:absolute; left: 0.25in; top: 0.18in; width: 1.20in; height: 0.80in; background: transparent; user-select: none; -webkit-user-select: none; -webkit-user-drag: none; touch-action: none;">
-          <svg draggable="false" viewBox="0 0 240 160" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" style="pointer-events: none; display: block; user-select: none; -webkit-user-select: none;">
-            <g fill="#C20000">
-              <path d="M30,132 Q20,102 38,76 Q50,58 72,50 Q94,42 118,38 Q142,36 166,40 Q190,46 208,58 L200,70 Q180,60 162,56 Q140,52 118,54 Q96,56 78,64 Q62,72 52,88 Q44,104 42,122 Z"/>
-              <path d="M42,142 Q34,116 48,94 Q60,76 82,68 Q108,58 134,56 Q160,56 184,62 Q204,68 220,80 L212,92 Q194,82 178,78 Q158,72 138,72 Q116,72 96,78 Q76,84 62,98 Q52,112 48,128 Z"/>
-              <path d="M54,150 Q48,126 60,108 Q72,90 94,82 Q120,74 146,74 Q172,74 194,82 Q214,88 230,102 L222,112 Q208,104 192,98 Q172,92 154,92 Q132,92 110,96 Q88,102 74,114 Q64,126 60,138 Z"/>
-              <path d="M66,156 Q62,138 72,122 Q84,106 106,100 Q132,94 158,96 Q182,98 202,108 Q218,116 236,130 L230,138 Q216,130 202,124 Q184,118 166,116 Q144,114 122,116 Q102,120 86,130 Q74,140 70,150 Z"/>
-            </g>
-            <g fill="#C20000" font-family="Arial Black, Arial, sans-serif" font-weight="900" text-anchor="middle">
-              <text x="120" y="152" font-size="44" letter-spacing="2">HONDA</text>
-            </g>
-          </svg>
-        </div>
-        <div id="fbrPosLogo" class="draggable" data-pos-key="fbr_pos_logo" data-default-left="6.70in" data-default-top="0.15in" data-default-width="1.25in" data-default-height="0.88in" style="position:absolute; left: 6.70in; top: 0.15in; width: 1.25in; height: 0.88in; background: transparent; user-select: none; -webkit-user-select: none; -webkit-user-drag: none; touch-action: none;">
-          <svg draggable="false" viewBox="0 0 260 180" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" style="pointer-events: none; display: block; user-select: none; -webkit-user-select: none;">
-            <defs>
-              <linearGradient id="rainbowArc" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stop-color="#2ca02c"/>
-                <stop offset="50%" stop-color="#d4af37"/>
-                <stop offset="100%" stop-color="#2ca02c"/>
-              </linearGradient>
-            </defs>
-            <path d="M20,46 Q130,4 240,46" fill="none" stroke="url(#rainbowArc)" stroke-width="8" stroke-linecap="round"/>
-            <polygon points="130,4 136,24 156,30 136,36 130,56 124,36 104,30 124,24" fill="#d4af37" stroke="#b8941f" stroke-width="1"/>
-            <g font-family="Arial Black, Arial, sans-serif" font-weight="900" fill="#0047AB" text-anchor="middle">
-              <text x="80" y="94" font-size="44">F</text>
-              <text x="130" y="94" font-size="44">B</text>
-              <text x="180" y="94" font-size="44">R</text>
-            </g>
-            <rect x="12" y="104" width="236" height="68" rx="14" fill="#0047AB"/>
-            <g font-family="Arial Black, Arial, sans-serif" font-weight="900" fill="#FFFFFF" text-anchor="middle">
-              <text x="52" y="158" font-size="60">P</text>
-              <text x="130" y="158" font-size="60">O</text>
-              <text x="208" y="158" font-size="60">S</text>
-            </g>
-            <g font-family="Arial, sans-serif" font-weight="700" fill="#E6EDF5" text-anchor="middle" letter-spacing="1.4">
-              <text x="130" y="178" font-size="14">INVOICING SYSTEM</text>
-            </g>
-          </svg>
-        </div>
+        {honda_logo_html}
+        {fbr_pos_logo_html}
         {settings_logo_html}
 
-        <div id="businessName" class="field draggable" data-pos-key="business_name" data-default-left="2.40in" data-default-top="0.22in" style="left: 2.40in; top: 0.22in; font-size: 16pt; font-weight: 800; text-align: center; white-space: nowrap;">EHSAN TRADERS</div>
+        <div id="businessName" class="field draggable" data-pos-key="business_name" data-default-left="2.40in" data-default-top="0.22in" style="left: 2.40in; top: 0.22in; font-size: {inv_fmt['business_name_size_pt']}pt; font-weight: {inv_fmt['business_name_weight']}; text-align: center; white-space: nowrap;">EHSAN TRADERS</div>
         <div id="businessAddress" class="field draggable" data-pos-key="business_address" data-default-left="1.70in" data-default-top="0.52in" style="left: 1.70in; top: 0.52in; font-size: 10pt; font-weight: 600; text-align: center; white-space: nowrap;">NEAR BUS STAND RAJANA ROAD KAMALIA</div>
         <div id="businessNtn" class="field draggable" data-pos-key="business_ntn" data-default-left="3.30in" data-default-top="0.78in" style="left: 3.30in; top: 0.78in; font-size: 10pt; font-weight: 700; text-align: center; white-space: nowrap;">NTN: 2755340</div>
 
@@ -999,6 +1038,10 @@ class PrintServiceV2:
       <button id="stWrap" type="button" title="Word Wrap (W)">Wrap</button>
       <button id="stEdit" type="button" title="Edit Text (F2)">Edit</button>
       <button id="stReset" class="danger" type="button" title="Reset this field's style & position (dbl-click)">Reset</button>
+    </div>
+    <div class="st-divider"></div>
+    <div class="st-row" style="margin-top:4px;">
+      <button id="stResetAll" type="button" title="Reset ALL fields, logos, and deletions to factory defaults (use to restore deleted logos/fields)" style="flex:1; background:#fef3c7; border:1px solid #d97706; color:#92400e; font-weight:700; padding:6px 8px; border-radius:6px;">↺ Reset All (Restore Deleted)</button>
     </div>
   </div>
   <input id="stFileInput" type="file" accept="image/png, image/jpeg, image/jpg, image/gif, image/svg+xml, image/webp" style="display:none;" />
@@ -1410,13 +1453,25 @@ class PrintServiceV2:
         const doc = readSaved();
         const pageRect = getPageRect();
         const els = Array.from(document.querySelectorAll('[data-pos-key]'));
-        els.forEach((el) => applyDefaultsIfMissing(el, pageRect));
-        const refreshPageRect = getPageRect();
+        // FIRST PASS: remove elements permanently marked as deleted (deleted: true)
         els.forEach((el) => {{
           const key = (el.getAttribute('data-pos-key') || '').trim();
           if (!key) return;
+          const entry = (doc.elements && typeof doc.elements === 'object') ? doc.elements[key] : null;
+          if (entry && typeof entry === 'object' && entry.deleted === true) {{
+            try {{ el.parentNode && el.parentNode.removeChild(el); }} catch (_) {{}}
+          }}
+        }});
+        // SECOND PASS: re-query remaining elements, apply defaults + positions
+        const remainingEls = Array.from(document.querySelectorAll('[data-pos-key]'));
+        remainingEls.forEach((el) => applyDefaultsIfMissing(el, pageRect));
+        const refreshPageRect = getPageRect();
+        remainingEls.forEach((el) => {{
+          const key = (el.getAttribute('data-pos-key') || '').trim();
+          if (!key) return;
           const entry = doc.elements[key];
-          if (!entry) return;
+          if (!entry || typeof entry !== 'object') return;
+          if (entry.deleted === true) return;
           applyEntryContent(el, entry);
           const elRect = el.getBoundingClientRect();
           const s = refreshPageRect && refreshPageRect.scale ? refreshPageRect.scale : 1;
@@ -1481,8 +1536,6 @@ class PrintServiceV2:
           const backendCount = backend && backend.elements ? Object.keys(backend.elements).length : 0;
           if (backendCount > 0 && (localCount === 0 || backendUpdated >= localUpdated)) {{
             try {{
-              // Merge backend into local while preserving LOCAL DELETIONS: any key missing
-              // from a previously-modified local doc stays deleted.
               const localKeys = (localDoc && localDoc.elements && typeof localDoc.elements === 'object')
                 ? Object.keys(localDoc.elements)
                 : [];
@@ -1490,23 +1543,30 @@ class PrintServiceV2:
               const mergedElements = {{}};
               const be = (backend && backend.elements && typeof backend.elements === 'object') ? backend.elements : {{}};
               const le = (localDoc && localDoc.elements && typeof localDoc.elements === 'object') ? localDoc.elements : {{}};
-              if (isFreshLocal) {{
-                // No local history yet -> trust backend completely
-                for (const k of Object.keys(be)) mergedElements[k] = be[k];
-              }} else {{
-                // Import backend keys only if they were NOT explicitly removed from local
-                for (const k of Object.keys(be)) {{
-                  if (k in le) {{
-                    // Prefer the newer entry
-                    const leT = Number(le[k] && le[k].updated_at ? le[k].updated_at : 0);
-                    const beT = Number(be[k] && be[k].updated_at ? be[k].updated_at : 0);
-                    mergedElements[k] = (beT >= leT) ? be[k] : le[k];
+              const allKeys = new Set();
+              Object.keys(be).forEach((k) => allKeys.add(k));
+              Object.keys(le).forEach((k) => allKeys.add(k));
+              for (const k of Array.from(allKeys)) {{
+                const beEntry = be[k];
+                const leEntry = le[k];
+                const beDeleted = !!(beEntry && typeof beEntry === 'object' && beEntry.deleted === true);
+                const leDeleted = !!(leEntry && typeof leEntry === 'object' && leEntry.deleted === true);
+                const beT = Number(beEntry && beEntry.updated_at ? beEntry.updated_at : 0);
+                const leT = Number(leEntry && leEntry.updated_at ? leEntry.updated_at : 0);
+                if (isFreshLocal) {{
+                  if (beEntry) mergedElements[k] = beEntry;
+                }} else {{
+                  // If either side marks as deleted, prefer the newer timestamp
+                  if (beDeleted || leDeleted) {{
+                    mergedElements[k] = (beT >= leT) ? beEntry : leEntry;
+                  }} else if (beEntry && leEntry) {{
+                    // Non-deleted: prefer newer
+                    mergedElements[k] = (beT >= leT) ? beEntry : leEntry;
+                  }} else if (beEntry) {{
+                    mergedElements[k] = beEntry;
+                  }} else if (leEntry) {{
+                    mergedElements[k] = leEntry;
                   }}
-                  // else: k is NOT in local doc → user deleted it locally → DON'T import, keep deleted
-                }}
-                // Also keep any keys that only exist in local (newly-created logos the backend hadn't seen yet)
-                for (const k of Object.keys(le)) {{
-                  if (!(k in mergedElements)) mergedElements[k] = le[k];
                 }}
               }}
               const merged = {{
@@ -1516,8 +1576,6 @@ class PrintServiceV2:
               }};
               writeSaved(merged);
               applyAllPositions();
-              // After applyAllPositions + sync, re-run restoreDynamicCustomLogos in case
-              // backend had custom_logo_* entries local DOM was missing (server-pushed logo)
               try {{
                 const rdcl = window.__restoreDynamicCustomLogos;
                 if (typeof rdcl === 'function') rdcl();
@@ -1897,6 +1955,7 @@ class PrintServiceV2:
       const stWrap = document.getElementById('stWrap');
       const stEdit = document.getElementById('stEdit');
       const stReset = document.getElementById('stReset');
+      const stResetAll = document.getElementById('stResetAll');
 
       function rgbToHex(rgbStr) {{
         try {{
@@ -2171,6 +2230,23 @@ class PrintServiceV2:
           showHud(selected);
         }});
 
+        // Reset All: clear all saved positions, styles, custom logos AND deleted markers
+        // This re-renders the invoice like a fresh page load, restoring deleted built-in logos.
+        stResetAll && stResetAll.addEventListener('click', () => {{
+          const ok = confirm("Reset ALL invoice layout, styles, and permanently deleted logos/fields?\\n\\n- All fields return to default positions/styles\\n- Deleted built-in logos (Honda, FBR) are restored\\n- Custom added logos are removed\\n\\nThis cannot be undone.");
+          if (!ok) return;
+          userTouched = true;
+          // Clear localStorage for this template
+          try {{ localStorage.removeItem(STORAGE_KEY); }} catch (_) {{}}
+          // Clear backend by saving empty doc
+          const empty = {{ version: 2, updated_at: nowMs(), elements: {{}} }};
+          writeSaved(empty);
+          saveToBackend(empty).catch(() => {{}});
+          setTimeout(() => {{ saveToBackend(readSaved()).catch(() => {{}}); }}, 350);
+          // Reload page so server re-renders HTML with all built-in logos restored
+          setTimeout(() => {{ try {{ window.location.reload(); }} catch (_) {{}} }}, 120);
+        }});
+
         // Stop clicks inside toolbar from being interpreted by the page handler
         toolbar.addEventListener('click', (e) => {{ e.stopPropagation(); }});
         toolbar.addEventListener('pointerdown', (e) => {{ e.stopPropagation(); }});
@@ -2324,32 +2400,27 @@ class PrintServiceV2:
         if (!selected || !(selected instanceof HTMLElement)) return;
         const key = (selected.getAttribute('data-pos-key') || '').trim();
         if (!key) return;
-        // Guard: don't allow deleting FBR invoice #, grand total, core labels/values unless custom/logo
         const isCustom = key.indexOf('custom_logo_') === 0;
         const confirmName = selected.dataset && selected.dataset.originalHtml ? '' : (selected.textContent || '').slice(0, 40);
-        const ok = confirm(`Delete selected "${{key}}" from invoice?${{confirmName ? `\\n("${{confirmName}}")` : ''}}${{isCustom ? '' : '\\n\\n⚠️ This is a built-in field — it will return on Reset or page reload.'}}`);
+        const ok = confirm(`Delete selected "${{key}}" from invoice?${{confirmName ? `\\n("${{confirmName}}")` : ''}}\\n\\nThis deletion is permanent and saved to the database.\\nTo restore, select any remaining field and click "Reset All" in the toolbar.`);
         if (!ok) return;
         userTouched = true;
         // Remove from DOM
         try {{ selected.parentNode && selected.parentNode.removeChild(selected); }} catch (_) {{}}
-        // Remove from saved doc
+        // Save deletion marker to doc.elements[key].deleted = true so it persists across reloads and DB sync.
         const doc = readSaved();
-        let changed = false;
-        if (doc.elements && typeof doc.elements === 'object' && key in doc.elements) {{
-          delete doc.elements[key];
-          changed = true;
-        }}
         doc.version = 2;
         doc.updated_at = nowMs();
-        if (changed) {{
-          writeSaved(doc);
-          // Persist backend twice (async fire-and-forget; retries help if first post was dropped)
-          saveToBackend(doc).catch(() => {{}});
-          setTimeout(() => {{ saveToBackend(readSaved()).catch(() => {{}}); }}, 350);
-        }} else {{
-          writeSaved(doc);
-          saveToBackend(doc).catch(() => {{}});
-        }}
+        doc.elements = doc.elements && typeof doc.elements === 'object' ? doc.elements : {{}};
+        const prev = (doc.elements[key] && typeof doc.elements[key] === 'object') ? doc.elements[key] : {{}};
+        doc.elements[key] = Object.assign({{}}, prev, {{
+          deleted: true,
+          updated_at: doc.updated_at,
+        }});
+        writeSaved(doc);
+        // Persist backend twice (async fire-and-forget; retries help if first post was dropped)
+        saveToBackend(doc).catch(() => {{}});
+        setTimeout(() => {{ saveToBackend(readSaved()).catch(() => {{}}); }}, 350);
         // Clear selected & UI
         clearResizeHandles();
         setSelected(null);

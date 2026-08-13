@@ -1,0 +1,12 @@
+﻿Total columns in app_configurations: 32
+  OK   invoice_font_family
+  OK   invoice_font_field_size_pt
+  OK   invoice_font_label_size_pt
+  OK   invoice_font_weight_field
+  OK   invoice_font_weight_label
+  OK   invoice_business_name_size_pt
+  OK   invoice_business_name_weight
+  OK   invoice_color_label
+  OK   invoice_mono_font_family
+
+ALL 9 INVOICE FORMATTING COLUMNS ARE PRESENT.

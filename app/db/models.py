@@ -526,6 +526,17 @@ class AppConfiguration(Base):
     invoice_logo_data_url = Column(Text, nullable=True)
     invoice_logo_name = Column(String(200), nullable=True)
 
+    # Invoice formatting standardization (ensures identical appearance on all PCs)
+    invoice_font_family = Column(String(200), default="Arial, sans-serif")
+    invoice_font_field_size_pt = Column(Integer, default=11)
+    invoice_font_label_size_pt = Column(Integer, default=9)
+    invoice_font_weight_field = Column(Integer, default=600)
+    invoice_font_weight_label = Column(Integer, default=500)
+    invoice_business_name_size_pt = Column(Integer, default=16)
+    invoice_business_name_weight = Column(Integer, default=800)
+    invoice_color_label = Column(String(20), default="#555555")
+    invoice_mono_font_family = Column(String(200), default="Consolas, 'Courier New', monospace")
+
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
 
 
