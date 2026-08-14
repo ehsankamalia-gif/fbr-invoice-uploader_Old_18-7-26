@@ -1,0 +1,9 @@
+=== Invoices created today ===
+Total: 0
+Synced: 0
+Pending: 0
+
+=== All invoices (for reference) ===
+Total: 0
+Synced: 0
+Pending: 0

@@ -487,6 +487,19 @@ class CapturedDataTableModel(QAbstractTableModel):
         ]
         self.endResetModel()
 
+class _ClickableFilter(QObject):
+    """Event filter to make any widget clickable by emitting a callback on left-click release."""
+    def __init__(self, parent: QWidget, callback: Callable, target):
+        super().__init__(parent)
+        self._callback = callback
+        self._target = target
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.MouseButtonRelease:
+            if event.button() == Qt.MouseButton.LeftButton:
+                self._callback(self._target)
+                return True
+        return super().eventFilter(obj, event)
+
 class BookingCard(QFrame):
     """Dynamic card displaying real-time booking quantity for a specific model."""
     def __init__(self, model_name: str, count: int = 0, color: str = "#3498db", parent: QWidget | None = None) -> None:
@@ -691,6 +704,17 @@ class AutocompleteLineEdit(QLineEdit):
         super().__init__(parent)
         self.is_navigating = False
         self.on_completion_accept: Callable[[str], None] | None = None
+    
+    def setCompleter(self, completer: QCompleter | None) -> None:
+        if self.completer() is not None:
+            self.completer().activated.disconnect()
+        super().setCompleter(completer)
+        if completer is not None:
+            completer.activated.connect(self._on_completer_activated)
+    
+    def _on_completer_activated(self, text: str) -> None:
+        if self.on_completion_accept is not None:
+            self.on_completion_accept(text)
 
     def keyPressEvent(self, event) -> None:
         if event.key() in (Qt.Key.Key_Up, Qt.Key.Key_Down):
@@ -1346,7 +1370,7 @@ class MainWindow(QMainWindow):
 
         self.apply_sidebar_font_settings(self._ui_cfg)
 
-        self._select_page("dashboard")
+        self._select_page("welcome")
         self._update_fbr_submitted_counter() # Initial load of counter state
 
         # Connect global focus signal to automatic scrolling logic
@@ -3898,7 +3922,7 @@ class MainWindow(QMainWindow):
 
     def _create_welcome_page(self) -> QWidget:
         page = QWidget(self)
-        page.setStyleSheet("background-color: #f8f9fa;")
+        page.setStyleSheet("background-color: #f5f7fa;")
         
         # Main layout for the page with a scroll area
         main_layout = QVBoxLayout(page)
@@ -3911,27 +3935,41 @@ class MainWindow(QMainWindow):
         scroll_content = QWidget()
         scroll_content.setStyleSheet("background-color: transparent;")
         layout = QVBoxLayout(scroll_content)
-        layout.setContentsMargins(40, 40, 40, 40)
-        layout.setSpacing(30)
+        layout.setContentsMargins(60, 60, 60, 60)
+        layout.setSpacing(40)
 
-        # Main Banner
+        # Main Banner - Enhanced with professional design
         banner = QFrame()
         banner.setObjectName("welcomeBanner")
         banner.setStyleSheet("""
             QFrame#welcomeBanner {
-                background-color: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:0, stop:0 #1a252f, stop:1 #2c3e50);
-                border-radius: 15px;
+                background: qlineargradient( x1:0 y1:0, x2:1 y2:0, 
+                    stop:0 #1e3c72, stop:0.5 #2a5298, stop:1 #7e98d3);
+                border-radius: 20px;
+                padding: 40px;
+                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
             }
         """)
         banner_layout = QVBoxLayout(banner)
-        banner_layout.setContentsMargins(30, 30, 30, 30)
+        banner_layout.setContentsMargins(0, 0, 0, 0)
 
         title = QLabel(f"Welcome back to {self.windowTitle()}!")
-        title.setStyleSheet("color: white; font-size: 28px; font-weight: bold; background: transparent;")
+        title.setStyleSheet("""
+            color: white; 
+            font-size: 32px; 
+            font-weight: bold; 
+            background: transparent;
+            margin-bottom: 10px;
+        """)
         title.setWordWrap(True)
         
         subtitle = QLabel("Your complete solution for FBR Invoice Management and Sales Tracking.")
-        subtitle.setStyleSheet("color: #bdc3c7; font-size: 16px; background: transparent;")
+        subtitle.setStyleSheet("""
+            color: #d1d9ff; 
+            font-size: 18px; 
+            background: transparent;
+            line-height: 1.4;
+        """)
         subtitle.setWordWrap(True)
         
         banner_layout.addWidget(title)
@@ -3940,16 +3978,21 @@ class MainWindow(QMainWindow):
         
         layout.addWidget(banner)
 
-        # Quick Actions Grid
+        # Quick Actions Grid - Professional card design
         actions_header = QLabel("Quick Actions")
-        actions_header.setStyleSheet("font-size: 18px; font-weight: bold; color: #2c3e50;")
+        actions_header.setStyleSheet("""
+            font-size: 22px; 
+            font-weight: bold; 
+            color: #1a2332;
+            margin-bottom: 10px;
+        """)
         layout.addWidget(actions_header)
 
         # Using QGridLayout for better responsiveness in small screens
         actions_container = QWidget()
         actions_grid = QGridLayout(actions_container)
         actions_grid.setContentsMargins(0, 0, 0, 0)
-        actions_grid.setSpacing(20)
+        actions_grid.setSpacing(25)
 
         actions_grid.addWidget(self._create_action_card("📝", "Create Invoice", "Generate a new tax invoice", "invoice"), 0, 0)
         actions_grid.addWidget(self._create_action_card("📦", "Inventory", "Manage motorcycle stock", "inventory"), 0, 1)
@@ -3962,15 +4005,20 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(actions_container)
 
-        # Statistics Summary
+        # Statistics Summary - Enhanced with professional styling
         stats_header = QLabel("Today's Overview")
-        stats_header.setStyleSheet("font-size: 18px; font-weight: bold; color: #2c3e50;")
+        stats_header.setStyleSheet("""
+            font-size: 22px; 
+            font-weight: bold; 
+            color: #1a2332;
+            margin-bottom: 10px;
+        """)
         layout.addWidget(stats_header)
 
         stats_container = QWidget()
         stats_grid = QGridLayout(stats_container)
         stats_grid.setContentsMargins(0, 0, 0, 0)
-        stats_grid.setSpacing(20)
+        stats_grid.setSpacing(25)
 
         self.welcome_total_invoices_lbl = QLabel("0")
         stats_grid.addWidget(self._create_stat_widget("Total Invoices", self.welcome_total_invoices_lbl), 0, 0)
@@ -3986,17 +4034,23 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(stats_container)
 
-        # App Info / Status
+        # App Info / Status - Enhanced design
         info_frame = QFrame()
-        info_frame.setStyleSheet("background-color: white; border: 1px solid #e0e0e0; border-radius: 12px; padding: 20px;")
+        info_frame.setStyleSheet("""
+            background-color: white; 
+            border: 1px solid #e8eef3; 
+            border-radius: 16px; 
+            padding: 25px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        """)
         info_layout = QHBoxLayout(info_frame)
         
         status_dot = QLabel("●")
-        status_dot.setStyleSheet("color: #27ae60; font-size: 20px;")
+        status_dot.setStyleSheet("color: #27ae60; font-size: 22px;")
         
         active_env = settings_service.get_active_environment()
         status_text = QLabel(f"System Status: <b>Online</b>  |  Environment: <b>{active_env}</b>")
-        status_text.setStyleSheet("color: #2c3e50; font-size: 14px;")
+        status_text.setStyleSheet("color: #2c3e50; font-size: 15px;")
         
         info_layout.addWidget(status_dot)
         info_layout.addWidget(status_text)
@@ -4016,40 +4070,60 @@ class MainWindow(QMainWindow):
         card.setStyleSheet("""
             QFrame {
                 background-color: white;
-                border: 1px solid #e0e0e0;
-                border-radius: 12px;
-                min-width: 180px;
-                min-height: 150px;
+                border: 1px solid #e8eef3;
+                border-radius: 16px;
+                min-width: 190px;
+                min-height: 160px;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+                transition: all 0.3s ease;
             }
             QFrame:hover {
-                border: 2px solid #3498db;
-                background-color: #f7fbfe;
+                border: 1px solid #4a6fa5;
+                background-color: #f8fafc;
+                box-shadow: 0 8px 25px rgba(0, 0, 0, 0.12);
+                transform: translateY(-3px);
             }
         """)
         
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(10)
+        layout.setContentsMargins(25, 25, 25, 25)
+        layout.setSpacing(12)
         
         icon_lbl = QLabel(icon)
-        icon_lbl.setStyleSheet("font-size: 32px; border: none; background: transparent;")
+        icon_lbl.setStyleSheet("font-size: 36px; border: none; background: transparent;")
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         
         title_lbl = QLabel(title)
-        title_lbl.setStyleSheet("font-size: 16px; font-weight: bold; color: #2c3e50; border: none; background: transparent;")
+        title_lbl.setStyleSheet("""
+            font-size: 17px; 
+            font-weight: bold; 
+            color: #1a2332; 
+            border: none; 
+            background: transparent;
+        """)
         title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         
         desc_lbl = QLabel(desc)
-        desc_lbl.setStyleSheet("font-size: 12px; color: #7f8c8d; border: none; background: transparent;")
+        desc_lbl.setStyleSheet("""
+            font-size: 13px; 
+            color: #64748b; 
+            border: none; 
+            background: transparent;
+            line-height: 1.3;
+        """)
         desc_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         desc_lbl.setWordWrap(True)
+        desc_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         
         layout.addWidget(icon_lbl)
         layout.addWidget(title_lbl)
         layout.addWidget(desc_lbl)
         
-        # Make card clickable
-        card.mousePressEvent = lambda e: self._select_page(page_key)
+        # Make card clickable via event filter
+        filter_obj = _ClickableFilter(card, self._select_page, page_key)
+        card.installEventFilter(filter_obj)
         
         return card
 
@@ -4058,18 +4132,31 @@ class MainWindow(QMainWindow):
         card.setStyleSheet("""
             QFrame {
                 background-color: white;
-                border: 1px solid #e0e0e0;
-                border-radius: 12px;
-                padding: 15px;
+                border: 1px solid #e8eef3;
+                border-radius: 16px;
+                padding: 20px;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
             }
         """)
         layout = QVBoxLayout(card)
-        layout.setSpacing(5)
+        layout.setSpacing(8)
         
         title_lbl = QLabel(title)
-        title_lbl.setStyleSheet("color: #7f8c8d; font-size: 11px; text-transform: uppercase; font-weight: bold; border: none;")
+        title_lbl.setStyleSheet("""
+            color: #64748b; 
+            font-size: 12px; 
+            text-transform: uppercase; 
+            font-weight: bold; 
+            border: none;
+            letter-spacing: 0.5px;
+        """)
         
-        val_lbl.setStyleSheet("color: #2c3e50; font-size: 24px; font-weight: bold; border: none;")
+        val_lbl.setStyleSheet("""
+            color: #1a2332; 
+            font-size: 28px; 
+            font-weight: bold; 
+            border: none;
+        """)
         
         layout.addWidget(title_lbl)
         layout.addWidget(val_lbl)
@@ -4082,17 +4169,13 @@ class MainWindow(QMainWindow):
             
         db = SessionLocal()
         try:
-            today = dt.date.today()
-            # Start of today (00:00:00)
-            start_of_day = dt.datetime.combine(today, dt.time.min)
-            
-            # Note: Invoice model uses 'datetime' column for creation time
-            total = db.query(Invoice).filter(Invoice.datetime >= start_of_day).count()
-            synced = db.query(Invoice).filter(
-                Invoice.datetime >= start_of_day,
-                Invoice.fbr_invoice_number != None
+            # Show all-time statistics (matching dashboard) instead of today only
+            total = db.query(Invoice).count()
+            synced = db.query(Invoice).filter(Invoice.fbr_invoice_number != None).count()
+            pending = db.query(Invoice).filter(
+                Invoice.fbr_invoice_number == None,
+                Invoice.sync_status != "FAILED"
             ).count()
-            pending = total - synced
             
             self.welcome_total_invoices_lbl.setText(str(total))
             self.welcome_fbr_synced_lbl.setText(str(synced))

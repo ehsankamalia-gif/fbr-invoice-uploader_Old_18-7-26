@@ -245,6 +245,12 @@ class _StartupDialog(QDialog):
         self.move(frame.topLeft())
 
 def main() -> None:
+    # Show splash screen as early as possible
+    app = QApplication(sys.argv)
+    startup = _StartupDialog(app)
+    startup.show()
+    app.processEvents()
+
     # --- Fix for QWebEngine GPU Crash on some Windows machines ---
     # Force software rendering if needed
     os.environ["QT_QUICK_BACKEND"] = "software"
@@ -271,11 +277,6 @@ def main() -> None:
 
     import PyQt6.QtWebEngineWidgets  # noqa: F401
 
-    app = QApplication(sys_args)
-    startup = _StartupDialog(app)
-    startup.show()
-    app.processEvents()
-
     startup.set_status("Initializing database…")
     try:
         init_db()
@@ -294,7 +295,6 @@ def main() -> None:
     app.installEventFilter(font_manager)
     app.installEventFilter(copy_support_manager)
     app._font_manager = font_manager
-    app._font_manager = font_manager
     app._copy_support_manager = copy_support_manager
     font_manager.refresh_from_settings()
     copy_support_manager.apply_existing_widgets()
@@ -310,8 +310,10 @@ def main() -> None:
         )
         sys.exit(1)
 
-    startup.close()
+    startup.set_status("Finalizing…")
+    app.processEvents()
     window = MainWindow(db_status=db_status)
+    startup.close()
     window.show()
     sys.exit(app.exec())
 
