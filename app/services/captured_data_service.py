@@ -27,6 +27,8 @@ class CapturedDataService:
             
             if record:
                 db.delete(record)
+                # Commit the transaction to make the delete permanent
+                db.commit()
                 logger.info(f"AUDIT: Automatically deleted captured_data record for chassis {chassis_number} after FBR upload.")
                 return True
             else:
@@ -35,6 +37,8 @@ class CapturedDataService:
                 
         except Exception as e:
             logger.error(f"Error deleting captured data for chassis {chassis_number}: {e}")
+            # Rollback the transaction if there's an error
+            db.rollback()
             # Do not raise exception to avoid rolling back the main invoice transaction
             # just because cleanup failed? 
             # User said: "transaction management to ensure data integrity"
