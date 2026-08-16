@@ -74,6 +74,8 @@ class InvoiceService:
             # Calculate line total
             line_total = sale_value + tax_charged + further_tax
 
+            # Enforce quantity 1 as per user request
+            item.quantity = 1
             # Update totals
             total_sale_value += sale_value
             total_tax_charged += tax_charged
@@ -134,7 +136,7 @@ class InvoiceService:
                 item_code=item.item_code,
                 item_name=item.item_name,
                 pct_code=item.pct_code,
-                quantity=item.quantity,
+                quantity=1,
                 tax_rate=item.tax_rate,
                 sale_value=sale_value,
                 further_tax=further_tax,

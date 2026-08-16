@@ -3137,8 +3137,9 @@ class MainWindow(QMainWindow):
 
         group2_layout.addWidget(QLabel("Quantity"), 3, 2)
         self.invoice_quantity_spin = QSpinBox()
-        self.invoice_quantity_spin.setRange(1, 999)
-        self.invoice_quantity_spin.valueChanged.connect(self._recalculate_invoice_totals)
+        self.invoice_quantity_spin.setRange(1, 1)
+        self.invoice_quantity_spin.setValue(1)
+        self.invoice_quantity_spin.setDisabled(True)
         group2_layout.addWidget(self.invoice_quantity_spin, 3, 3)
 
         container_layout.addWidget(group2)
@@ -3293,7 +3294,7 @@ class MainWindow(QMainWindow):
         self.invoice_color_combo.currentTextChanged.connect(self._on_invoice_color_changed)  # type: ignore[arg-type]
         self.invoice_color_combo.currentTextChanged.connect(self._check_invoice_form_completeness)
         self.invoice_payment_mode_combo.currentTextChanged.connect(self._check_invoice_form_completeness)
-        self.invoice_quantity_spin.valueChanged.connect(self._recalculate_invoice_totals)  # type: ignore[arg-type]
+        # Quantity spin box is disabled (fixed to 1), so no need for valueChanged connection
         self.invoice_amount_spin.valueChanged.connect(self._recalculate_invoice_totals)  # type: ignore[arg-type]
         self.invoice_buyer_name_input.textEdited.connect(self._on_invoice_buyer_name_changed)  # type: ignore[arg-type]
         self.invoice_chassis_input.textEdited.connect(self._on_invoice_chassis_changed)  # type: ignore[arg-type]
