@@ -6,6 +6,7 @@ from app.db.session import SessionLocal
 from app.db.models import Invoice
 from app.services.invoice_service import invoice_service
 from app.services.settings_service import settings_service
+from app.services.sequential_upload_service import sequential_upload_service
 from app.core.logger import logger
 
 class SyncService:
@@ -23,6 +24,8 @@ class SyncService:
             self._stop_event.clear()
             self._thread = threading.Thread(target=self._run_loop, daemon=True)
             self._thread.start()
+            # Start the sequential upload service
+            sequential_upload_service.start()
             logger.info("SyncService started.")
 
     def stop(self):
@@ -30,7 +33,8 @@ class SyncService:
         self._stop_event.set()
         if self._thread:
             self._thread.join(timeout=2)
-            logger.info("SyncService stopped.")
+        sequential_upload_service.stop()
+        logger.info("SyncService stopped.")
 
     def set_status_callback(self, callback):
         """Callback(is_online: bool, pending_count: int)"""
@@ -38,11 +42,13 @@ class SyncService:
 
     def trigger_sync_now(self):
         """Manually triggers a check/sync cycle (non-blocking)"""
-        threading.Thread(target=self._single_cycle, daemon=True).start()
+        logger.info("SyncService: Triggering sequential upload service")
+        sequential_upload_service.start()
 
     def _run_loop(self):
         """
         Main sync loop with exponential backoff for connectivity checks when offline.
+        Delegates to SequentialUploadService for actual processing.
         """
         backoff_delay = 5 # Start with 5 seconds
         max_delay = 60 # Cap at 60 seconds
@@ -70,11 +76,6 @@ class SyncService:
             try:
                 self._check_connectivity()
                 self._update_pending_count()
-                
-                if self.is_online and self.pending_count > 0:
-                    self._process_queue()
-                    # Update count again after processing
-                    self._update_pending_count()
                 
                 if self._status_callback:
                     # Run callback safely
@@ -136,35 +137,29 @@ class SyncService:
         finally:
             db.close()
 
-    def _process_queue(self):
-        db = SessionLocal()
-        try:
-            # Process strictly chronologically (FIFO)
-            # Fetch one by one to avoid long transaction locks
-            pending = db.query(Invoice).filter(Invoice.sync_status == "PENDING").order_by(Invoice.id.asc()).all()
-            
-            if pending:
-                logger.info(f"SyncService: Processing {len(pending)} pending invoices...")
+    def get_upload_queue_status(self):
+        """Gets the current state of the sequential upload queue."""
+        return sequential_upload_service.get_queue_status()
 
-            for inv in pending:
-                if self._stop_event.is_set(): break
-                
-                # Re-check connectivity occasionally if queue is long? 
-                # For now, rely on individual sync failures to stop.
-                
-                try:
-                    # Use existing service method
-                    invoice_service.sync_invoice(db, inv)
-                    db.commit()
-                    
-                    if inv.sync_status == "SYNCED":
-                        logger.info(f"SyncService: Invoice {inv.invoice_number} synced successfully.")
+    def get_upload_history(self, limit: int = 20):
+        """Gets recent upload history."""
+        return sequential_upload_service.get_queue_history(limit)
 
-                except Exception as e:
-                    logger.error(f"SyncService: Failed to sync {inv.invoice_number}: {e}")
-                    db.rollback()
-                    
-        finally:
-            db.close()
+    def queue_invoice_for_upload(self, invoice_id: int):
+        """Adds an invoice to the sequential upload queue."""
+        sequential_upload_service.queue_invoice_for_upload(invoice_id)
+
+    def cancel_upload(self, invoice_id: int):
+        """Cancels a pending invoice upload."""
+        sequential_upload_service.cancel_upload(invoice_id)
+
+    def reset_failed_uploads(self):
+        """Resets all failed upload attempts to pending state."""
+        sequential_upload_service.reset_failed_uploads()
+
+    def is_sequential_service_running(self):
+        """Checks if the sequential upload service is running."""
+        return sequential_upload_service.is_running()
+
 
 sync_service = SyncService()

@@ -95,6 +95,13 @@ class Invoice(Base):
     fbr_response_message = Column(String(255), nullable=True)
     fbr_full_response = Column(JSON, nullable=True)
     
+    # Sequential processing fields
+    upload_attempts = Column(Integer, default=0)
+    max_upload_attempts = Column(Integer, default=5)
+    next_upload_attempt = Column(DateTime, nullable=True)
+    upload_priority = Column(Integer, default=0)
+    is_processing = Column(Boolean, default=False)
+    
     items = relationship("InvoiceItem", back_populates="invoice", cascade="all, delete-orphan")
 
 class InvoiceItem(Base):

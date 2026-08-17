@@ -369,6 +369,7 @@ def run_migrations():
                 (13, "Make installment_no nullable in finance_installments", _migration_v13_nullable_installment_no),
                 (14, "Make due_date nullable in finance_installments", _migration_v14_nullable_due_date),
                 (15, "Make finance fields nullable and add defaults", _migration_v15_comprehensive_finance_fix),
+                (16, "Add sequential processing fields to invoices", _migration_v16_add_sequential_upload_fields),
             ]
 
             for version, description, func in migrations:
@@ -742,6 +743,34 @@ def _migration_v15_comprehensive_finance_fix(conn) -> bool:
     except Exception as e:
         logger.error(f"Migration v15 failed: {e}", exc_info=True)
         return False
+
+
+def _migration_v16_add_sequential_upload_fields(conn) -> bool:
+    """Adds sequential processing fields to the invoices table."""
+    try:
+        columns = [
+            ("upload_attempts", "INTEGER DEFAULT 0"),
+            ("max_upload_attempts", "INTEGER DEFAULT 5"),
+            ("next_upload_attempt", "DATETIME"),
+            ("upload_priority", "INTEGER DEFAULT 0"),
+            ("is_processing", "BOOLEAN DEFAULT 0")
+        ]
+        
+        for col_name, col_def in columns:
+            try:
+                conn.execute(text(f"SELECT {col_name} FROM invoices LIMIT 1"))
+            except Exception:
+                logger.info(f"Adding column {col_name} to invoices...")
+                conn.execute(text(f"ALTER TABLE invoices ADD COLUMN {col_name} {col_def}"))
+                try:
+                    conn.commit()
+                except: pass
+                
+        return True
+    except Exception as e:
+        logger.error(f"Migration v16 failed: {e}", exc_info=True)
+        return False
+
 
 def get_db():
     db = SessionLocal()
