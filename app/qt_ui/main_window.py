@@ -3242,6 +3242,22 @@ class MainWindow(QMainWindow):
         self.invoice_submit_btn.clicked.connect(self._submit_invoice)  # type: ignore[arg-type]
         button_layout.addWidget(self.invoice_submit_btn)
         
+        # Upload queue status indicator
+        self.invoice_upload_status_label = QLabel("")
+        self.invoice_upload_status_label.setStyleSheet("""
+            QLabel {
+                font-size: 11px; 
+                color: #6c757d;
+                padding: 4px 8px;
+                border-radius: 4px;
+                background-color: #f8f9fa;
+                border: 1px solid #e9ecef;
+                min-width: 120px;
+            }
+        """)
+        self.invoice_upload_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        button_layout.addWidget(self.invoice_upload_status_label)
+        
         root_layout.addWidget(button_bar)
 
         # Autocomplete setup for Buyer Name
@@ -3276,6 +3292,15 @@ class MainWindow(QMainWindow):
         self._chassis_completer_timer.setSingleShot(True)
         self._chassis_completer_timer.setInterval(200)
         self._chassis_completer_timer.timeout.connect(self._perform_chassis_search)
+        
+        # Upload status refresh timer
+        self._upload_status_timer = QTimer(self)
+        self._upload_status_timer.setInterval(5000)  # Refresh every 5 seconds
+        self._upload_status_timer.timeout.connect(self._update_invoice_upload_status)
+        self._upload_status_timer.start()
+        
+        # Initial status update
+        self._update_invoice_upload_status()
 
         # Connect all fields to live validation
         for widget in [
@@ -7031,6 +7056,74 @@ class MainWindow(QMainWindow):
             logger.error("Error updating FBR counter: %s", e)
         finally:
             db.close()
+    
+    def _update_invoice_upload_status(self) -> None:
+        """Update the invoice upload status indicator with pending count."""
+        try:
+            from app.services.sync_service import sync_service
+            queue_status = sync_service.get_upload_queue_status()
+            
+            pending = queue_status.get("pending", 0)
+            processing = queue_status.get("processing", 0)
+            current = queue_status.get("current")
+            
+            if processing > 0 and current:
+                status_text = f"⏳ Uploading: {current['invoice_number']}"
+                style = """
+                    QLabel {
+                        font-size: 11px; 
+                        color: #0d6efd;
+                        padding: 4px 8px;
+                        border-radius: 4px;
+                        background-color: #e7f1ff;
+                        border: 1px solid #b6d4fe;
+                        min-width: 120px;
+                    }
+                """
+            elif pending > 0:
+                status_text = f"📋 Pending: {pending}"
+                style = """
+                    QLabel {
+                        font-size: 11px; 
+                        color: #6c757d;
+                        padding: 4px 8px;
+                        border-radius: 4px;
+                        background-color: #f8f9fa;
+                        border: 1px solid #e9ecef;
+                        min-width: 120px;
+                    }
+                """
+            else:
+                status_text = "✅ All synced"
+                style = """
+                    QLabel {
+                        font-size: 11px; 
+                        color: #198754;
+                        padding: 4px 8px;
+                        border-radius: 4px;
+                        background-color: #d1e7dd;
+                        border: 1px solid #badbcc;
+                        min-width: 120px;
+                    }
+                """
+                
+            self.invoice_upload_status_label.setText(status_text)
+            self.invoice_upload_status_label.setStyleSheet(style)
+            
+        except Exception as e:
+            logger.error("Error updating invoice upload status: %s", e)
+            self.invoice_upload_status_label.setText("⚠️ Error loading status")
+            self.invoice_upload_status_label.setStyleSheet("""
+                QLabel {
+                    font-size: 11px; 
+                    color: #dc3545;
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                    background-color: #f8d7da;
+                    border: 1px solid #f5c2c7;
+                    min-width: 120px;
+                }
+            """)
 
     def _submit_invoice(self) -> None:
         if not self.invoice_submit_btn.isEnabled():
@@ -7044,6 +7137,21 @@ class MainWindow(QMainWindow):
         self.invoice_submit_btn.setEnabled(False)
         self.invoice_submit_btn.setText("⏳ Submitting...")
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        
+        # Show uploading status immediately
+        self.invoice_upload_status_label.setText("⏳ Processing...")
+        self.invoice_upload_status_label.setStyleSheet("""
+            QLabel {
+                font-size: 11px; 
+                color: #0d6efd;
+                padding: 4px 8px;
+                border-radius: 4px;
+                background-color: #e7f1ff;
+                border: 1px solid #b6d4fe;
+                min-width: 120px;
+            }
+        """)
+        
         QApplication.processEvents() # Ensure UI updates
 
         inv_num = self.invoice_number_input.text().strip()
@@ -7165,6 +7273,7 @@ class MainWindow(QMainWindow):
             
             self._clear_invoice_form_after_submission()
             self._update_fbr_submitted_counter()
+            self._update_invoice_upload_status()
             
             # Queue SMS if enabled
             try:
