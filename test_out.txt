@@ -1,0 +1,293 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.4, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\PC\AppData\Local\Programs\Python\Python314\python.exe
+cachedir: .pytest_cache
+rootdir: c:\laragon\www\fbr-invoice-uploader_Old_18-7-26
+plugins: anyio-4.13.0, asyncio-1.3.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 30 items
+
+tests/test_portal_account_creation.py::TestPasswordGenerationSecurity::test_generate_password_uses_secrets_choice PASSED [  3%]
+tests/test_portal_account_creation.py::TestPasswordGenerationSecurity::test_generated_password_contains_only_allowed_chars PASSED [  6%]
+tests/test_portal_account_creation.py::TestPasswordGenerationSecurity::test_generated_password_length PASSED [ 10%]
+tests/test_portal_account_creation.py::TestPasswordGenerationSecurity::test_generated_passwords_are_unique PASSED [ 13%]
+tests/test_portal_account_creation.py::TestPasswordHashCompatibility::test_custom_hash_format PASSED [ 16%]
+tests/test_portal_account_creation.py::TestPasswordHashCompatibility::test_custom_hash_uses_high_iterations PASSED [ 20%]
+tests/test_portal_account_creation.py::TestPasswordHashCompatibility::test_unique_salt_per_hash PASSED [ 23%]
+tests/test_portal_account_creation.py::TestCustomerPortalServiceAccountCreation::test_create_account_for_credit_sale_integration ERROR [ 26%]
+tests/test_portal_account_creation.py::TestCustomerPortalServiceAccountCreation::test_create_portal_account_fails_without_phone ERROR [ 30%]
+tests/test_portal_account_creation.py::TestCustomerPortalServiceAccountCreation::test_create_portal_account_fallback_to_customer_phone ERROR [ 33%]
+tests/test_portal_account_creation.py::TestCustomerPortalServiceAccountCreation::test_create_portal_account_prevents_duplicates ERROR [ 36%]
+tests/test_portal_account_creation.py::TestCustomerPortalServiceAccountCreation::test_create_portal_account_returns_credentials ERROR [ 40%]
+tests/test_portal_account_creation.py::TestCustomerPortalServiceAccountCreation::test_last_created_credentials_tracking ERROR [ 43%]
+tests/test_portal_account_creation.py::TestCustomerPortalServiceAccountCreation::test_pop_last_credentials_clears ERROR [ 46%]
+tests/test_portal_account_creation.py::TestSmsPortalCredentialsIntegration::test_queue_credit_sale_sms_accepts_portal_credentials_param PASSED [ 50%]
+tests/test_portal_account_creation.py::TestSmsPortalCredentialsIntegration::test_queue_finance_sale_sms_accepts_portal_credentials_param PASSED [ 53%]
+tests/test_portal_account_creation.py::TestServiceMethodSignatures::test_bulk_credit_service_passes_phone_number PASSED [ 56%]
+tests/test_portal_account_creation.py::TestServiceMethodSignatures::test_create_account_for_credit_sale_accepts_password_param PASSED [ 60%]
+tests/test_portal_account_creation.py::TestServiceMethodSignatures::test_create_credit_sale_captures_portal_credentials PASSED [ 63%]
+tests/test_portal_account_creation.py::TestServiceMethodSignatures::test_create_credit_sale_passes_portal_creds_to_sms PASSED [ 66%]
+tests/test_portal_account_creation.py::TestServiceMethodSignatures::test_create_finance_sale_captures_portal_credentials PASSED [ 70%]
+tests/test_portal_account_creation.py::TestServiceMethodSignatures::test_create_finance_sale_passes_portal_creds_to_sms PASSED [ 73%]
+tests/test_portal_account_creation.py::TestServiceMethodSignatures::test_customer_portal_service_has_last_created_credentials PASSED [ 76%]
+tests/test_portal_account_creation.py::TestServiceMethodSignatures::test_customer_portal_service_has_pop_last_credentials PASSED [ 80%]
+tests/test_portal_account_creation.py::TestSourceCodeSecurity::test_no_random_choice_in_password_generation PASSED [ 83%]
+tests/test_portal_account_creation.py::TestSourceCodeSecurity::test_portal_service_uses_secrets_not_random PASSED [ 86%]
+tests/test_portal_account_creation.py::TestUiPortalCredentialsDisplay::test_bulk_credit_page_shows_portal_creds PASSED [ 90%]
+tests/test_portal_account_creation.py::TestUiPortalCredentialsDisplay::test_credit_ledger_page_shows_portal_creds PASSED [ 93%]
+tests/test_portal_account_creation.py::TestAutoActivationServiceSecurity::test_auto_activation_generate_password_uses_secrets_choice PASSED [ 96%]
+tests/test_portal_account_creation.py::TestAutoActivationServiceSecurity::test_auto_activation_uses_secrets_not_random PASSED [100%]
+
+=================================== ERRORS ====================================
+_ ERROR at setup of TestCustomerPortalServiceAccountCreation.test_create_account_for_credit_sale_integration _
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1967: in _exec_single_context
+    self.dialect.do_execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\default.py:952: in do_execute
+    cursor.execute(statement, parameters)
+E   sqlite3.OperationalError: no such table: customer_portal_auth
+
+The above exception was the direct cause of the following exception:
+tests\test_portal_account_creation.py:164: in setUpClass
+    db.execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\orm\session.py:2351: in execute
+    return self._execute_internal(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\orm\session.py:2258: in _execute_internal
+    result = conn.execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1419: in execute
+    return meth(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\sql\elements.py:527: in _execute_on_connection
+    return connection._execute_clauseelement(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1641: in _execute_clauseelement
+    ret = self._execute_context(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1846: in _execute_context
+    return self._exec_single_context(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1986: in _exec_single_context
+    self._handle_dbapi_exception(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:2363: in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1967: in _exec_single_context
+    self.dialect.do_execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\default.py:952: in do_execute
+    cursor.execute(statement, parameters)
+E   sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) no such table: customer_portal_auth
+E   [SQL: DELETE FROM customer_portal_auth WHERE customer_id = ?]
+E   [parameters: (1,)]
+E   (Background on this error at: https://sqlalche.me/e/20/e3q8)
+_ ERROR at setup of TestCustomerPortalServiceAccountCreation.test_create_portal_account_fails_without_phone _
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1967: in _exec_single_context
+    self.dialect.do_execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\default.py:952: in do_execute
+    cursor.execute(statement, parameters)
+E   sqlite3.OperationalError: no such table: customer_portal_auth
+
+The above exception was the direct cause of the following exception:
+tests\test_portal_account_creation.py:164: in setUpClass
+    db.execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\orm\session.py:2351: in execute
+    return self._execute_internal(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\orm\session.py:2258: in _execute_internal
+    result = conn.execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1419: in execute
+    return meth(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\sql\elements.py:527: in _execute_on_connection
+    return connection._execute_clauseelement(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1641: in _execute_clauseelement
+    ret = self._execute_context(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1846: in _execute_context
+    return self._exec_single_context(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1986: in _exec_single_context
+    self._handle_dbapi_exception(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:2363: in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1967: in _exec_single_context
+    self.dialect.do_execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\default.py:952: in do_execute
+    cursor.execute(statement, parameters)
+E   sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) no such table: customer_portal_auth
+E   [SQL: DELETE FROM customer_portal_auth WHERE customer_id = ?]
+E   [parameters: (1,)]
+E   (Background on this error at: https://sqlalche.me/e/20/e3q8)
+_ ERROR at setup of TestCustomerPortalServiceAccountCreation.test_create_portal_account_fallback_to_customer_phone _
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1967: in _exec_single_context
+    self.dialect.do_execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\default.py:952: in do_execute
+    cursor.execute(statement, parameters)
+E   sqlite3.OperationalError: no such table: customer_portal_auth
+
+The above exception was the direct cause of the following exception:
+tests\test_portal_account_creation.py:164: in setUpClass
+    db.execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\orm\session.py:2351: in execute
+    return self._execute_internal(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\orm\session.py:2258: in _execute_internal
+    result = conn.execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1419: in execute
+    return meth(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\sql\elements.py:527: in _execute_on_connection
+    return connection._execute_clauseelement(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1641: in _execute_clauseelement
+    ret = self._execute_context(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1846: in _execute_context
+    return self._exec_single_context(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1986: in _exec_single_context
+    self._handle_dbapi_exception(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:2363: in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1967: in _exec_single_context
+    self.dialect.do_execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\default.py:952: in do_execute
+    cursor.execute(statement, parameters)
+E   sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) no such table: customer_portal_auth
+E   [SQL: DELETE FROM customer_portal_auth WHERE customer_id = ?]
+E   [parameters: (1,)]
+E   (Background on this error at: https://sqlalche.me/e/20/e3q8)
+_ ERROR at setup of TestCustomerPortalServiceAccountCreation.test_create_portal_account_prevents_duplicates _
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1967: in _exec_single_context
+    self.dialect.do_execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\default.py:952: in do_execute
+    cursor.execute(statement, parameters)
+E   sqlite3.OperationalError: no such table: customer_portal_auth
+
+The above exception was the direct cause of the following exception:
+tests\test_portal_account_creation.py:164: in setUpClass
+    db.execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\orm\session.py:2351: in execute
+    return self._execute_internal(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\orm\session.py:2258: in _execute_internal
+    result = conn.execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1419: in execute
+    return meth(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\sql\elements.py:527: in _execute_on_connection
+    return connection._execute_clauseelement(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1641: in _execute_clauseelement
+    ret = self._execute_context(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1846: in _execute_context
+    return self._exec_single_context(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1986: in _exec_single_context
+    self._handle_dbapi_exception(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:2363: in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1967: in _exec_single_context
+    self.dialect.do_execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\default.py:952: in do_execute
+    cursor.execute(statement, parameters)
+E   sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) no such table: customer_portal_auth
+E   [SQL: DELETE FROM customer_portal_auth WHERE customer_id = ?]
+E   [parameters: (1,)]
+E   (Background on this error at: https://sqlalche.me/e/20/e3q8)
+_ ERROR at setup of TestCustomerPortalServiceAccountCreation.test_create_portal_account_returns_credentials _
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1967: in _exec_single_context
+    self.dialect.do_execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\default.py:952: in do_execute
+    cursor.execute(statement, parameters)
+E   sqlite3.OperationalError: no such table: customer_portal_auth
+
+The above exception was the direct cause of the following exception:
+tests\test_portal_account_creation.py:164: in setUpClass
+    db.execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\orm\session.py:2351: in execute
+    return self._execute_internal(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\orm\session.py:2258: in _execute_internal
+    result = conn.execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1419: in execute
+    return meth(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\sql\elements.py:527: in _execute_on_connection
+    return connection._execute_clauseelement(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1641: in _execute_clauseelement
+    ret = self._execute_context(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1846: in _execute_context
+    return self._exec_single_context(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1986: in _exec_single_context
+    self._handle_dbapi_exception(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:2363: in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1967: in _exec_single_context
+    self.dialect.do_execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\default.py:952: in do_execute
+    cursor.execute(statement, parameters)
+E   sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) no such table: customer_portal_auth
+E   [SQL: DELETE FROM customer_portal_auth WHERE customer_id = ?]
+E   [parameters: (1,)]
+E   (Background on this error at: https://sqlalche.me/e/20/e3q8)
+_ ERROR at setup of TestCustomerPortalServiceAccountCreation.test_last_created_credentials_tracking _
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1967: in _exec_single_context
+    self.dialect.do_execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\default.py:952: in do_execute
+    cursor.execute(statement, parameters)
+E   sqlite3.OperationalError: no such table: customer_portal_auth
+
+The above exception was the direct cause of the following exception:
+tests\test_portal_account_creation.py:164: in setUpClass
+    db.execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\orm\session.py:2351: in execute
+    return self._execute_internal(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\orm\session.py:2258: in _execute_internal
+    result = conn.execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1419: in execute
+    return meth(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\sql\elements.py:527: in _execute_on_connection
+    return connection._execute_clauseelement(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1641: in _execute_clauseelement
+    ret = self._execute_context(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1846: in _execute_context
+    return self._exec_single_context(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1986: in _exec_single_context
+    self._handle_dbapi_exception(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:2363: in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1967: in _exec_single_context
+    self.dialect.do_execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\default.py:952: in do_execute
+    cursor.execute(statement, parameters)
+E   sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) no such table: customer_portal_auth
+E   [SQL: DELETE FROM customer_portal_auth WHERE customer_id = ?]
+E   [parameters: (1,)]
+E   (Background on this error at: https://sqlalche.me/e/20/e3q8)
+_ ERROR at setup of TestCustomerPortalServiceAccountCreation.test_pop_last_credentials_clears _
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1967: in _exec_single_context
+    self.dialect.do_execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\default.py:952: in do_execute
+    cursor.execute(statement, parameters)
+E   sqlite3.OperationalError: no such table: customer_portal_auth
+
+The above exception was the direct cause of the following exception:
+tests\test_portal_account_creation.py:164: in setUpClass
+    db.execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\orm\session.py:2351: in execute
+    return self._execute_internal(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\orm\session.py:2258: in _execute_internal
+    result = conn.execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1419: in execute
+    return meth(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\sql\elements.py:527: in _execute_on_connection
+    return connection._execute_clauseelement(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1641: in _execute_clauseelement
+    ret = self._execute_context(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1846: in _execute_context
+    return self._exec_single_context(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1986: in _exec_single_context
+    self._handle_dbapi_exception(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:2363: in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\base.py:1967: in _exec_single_context
+    self.dialect.do_execute(
+C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\engine\default.py:952: in do_execute
+    cursor.execute(statement, parameters)
+E   sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) no such table: customer_portal_auth
+E   [SQL: DELETE FROM customer_portal_auth WHERE customer_id = ?]
+E   [parameters: (1,)]
+E   (Background on this error at: https://sqlalche.me/e/20/e3q8)
+============================== warnings summary ===============================
+tests/test_portal_account_creation.py::TestCustomerPortalServiceAccountCreation::test_create_account_for_credit_sale_integration
+  C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\sql\schema.py:3624: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    return util.wrap_callable(lambda ctx: fn(), fn)  # type: ignore
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+ERROR tests/test_portal_account_creation.py::TestCustomerPortalServiceAccountCreation::test_create_account_for_credit_sale_integration
+ERROR tests/test_portal_account_creation.py::TestCustomerPortalServiceAccountCreation::test_create_portal_account_fails_without_phone
+ERROR tests/test_portal_account_creation.py::TestCustomerPortalServiceAccountCreation::test_create_portal_account_fallback_to_customer_phone
+ERROR tests/test_portal_account_creation.py::TestCustomerPortalServiceAccountCreation::test_create_portal_account_prevents_duplicates
+ERROR tests/test_portal_account_creation.py::TestCustomerPortalServiceAccountCreation::test_create_portal_account_returns_credentials
+ERROR tests/test_portal_account_creation.py::TestCustomerPortalServiceAccountCreation::test_last_created_credentials_tracking
+ERROR tests/test_portal_account_creation.py::TestCustomerPortalServiceAccountCreation::test_pop_last_credentials_clears
+============= 23 passed, 1 warning, 7 errors in 96.35s (0:01:36) ==============

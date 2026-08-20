@@ -11,6 +11,7 @@ from PyQt6.QtCore import Qt, QDate, QStringListModel, QModelIndex, QTimer, QEven
 from PyQt6.QtGui import QStandardItemModel, QStandardItem, QFont, QShortcut, QKeySequence, QKeyEvent, QRegularExpressionValidator, QCursor
 from app.qt_ui.auto_scroll_manager import AutoScrollManager
 from app.services.credit_ledger_service import credit_ledger_service
+from app.services.customer_portal_service import customer_portal_service
 
 
 class PanScrollArea(QScrollArea):
@@ -1563,7 +1564,19 @@ class CreditLedgerSystemPage(QWidget):
                     "notes": item['description']
                 }
                 sale = credit_ledger_service.create_finance_sale(sale_data)
-                QMessageBox.information(self, "Success", f"Advanced Finance account {sale.sale_id} created successfully.")
+                # Check if portal credentials were created
+                portal_creds = customer_portal_service.pop_last_credentials()
+                if portal_creds:
+                    msg = (
+                        f"Advanced Finance account {sale.sale_id} created successfully.\n\n"
+                        f"--- Customer Portal Account Created ---\n"
+                        f"Login (Phone): {portal_creds['phone_number']}\n"
+                        f"Password: {portal_creds['password']}\n"
+                        f"Credentials sent via SMS to {portal_creds['phone_number']}"
+                    )
+                    QMessageBox.information(self, "Success - Portal Access Granted", msg)
+                else:
+                    QMessageBox.information(self, "Success", f"Advanced Finance account {sale.sale_id} created successfully.")
                 self.print_btn.setEnabled(True)
             else:
                 # Old Running Credit System Logic
@@ -1579,7 +1592,19 @@ class CreditLedgerSystemPage(QWidget):
                     "remaining_amount": total_credit - advance
                 }
                 credit_ledger_service.create_credit_sale(sale_data, items_data)
-                QMessageBox.information(self, "Success", "Old credit sale processed and running balance updated.")
+                # Check if portal credentials were created
+                portal_creds = customer_portal_service.pop_last_credentials()
+                if portal_creds:
+                    msg = (
+                        f"Old credit sale processed and running balance updated.\n\n"
+                        f"--- Customer Portal Account Created ---\n"
+                        f"Login (Phone): {portal_creds['phone_number']}\n"
+                        f"Password: {portal_creds['password']}\n"
+                        f"Credentials sent via SMS to {portal_creds['phone_number']}"
+                    )
+                    QMessageBox.information(self, "Success - Portal Access Granted", msg)
+                else:
+                    QMessageBox.information(self, "Success", "Old credit sale processed and running balance updated.")
 
             self.refresh_dashboard()
             self._clear_sale_form()

@@ -10,6 +10,7 @@ from PyQt6.QtGui import QStandardItemModel, QStandardItem
 from app.services.bulk_credit_service import bulk_credit_service
 from app.services.credit_book_service import credit_book_service # Reuse customer suggest
 from app.services.customer_service import customer_service
+from app.services.customer_portal_service import customer_portal_service
 import datetime as dt
 from app.core.logger import logger
 
@@ -256,7 +257,19 @@ class BulkCreditPage(QWidget):
                 })
 
             bulk_credit_service.create_bulk_purchase(header, items)
-            QMessageBox.information(self, "Success", "Bulk purchase processed successfully.")
+            # Check if portal credentials were created
+            portal_creds = customer_portal_service.pop_last_credentials()
+            if portal_creds:
+                msg = (
+                    f"Bulk purchase processed successfully.\n\n"
+                    f"--- Customer Portal Account Created ---\n"
+                    f"Login (Phone): {portal_creds['phone_number']}\n"
+                    f"Password: {portal_creds['password']}\n"
+                    f"Credentials sent via SMS to {portal_creds['phone_number']}"
+                )
+                QMessageBox.information(self, "Success - Portal Access Granted", msg)
+            else:
+                QMessageBox.information(self, "Success", "Bulk purchase processed successfully.")
             self.clear_form()
             self.load_history()
         except Exception as e:
