@@ -64,11 +64,15 @@ class BulkCreditService:
                     )
                     db.add(schedule)
 
-            # Create portal account if it doesn't exist
+            # Create portal account if it doesn't exist and capture credentials
+            portal_creds = None
             try:
-                customer_portal_service.create_account_for_credit_sale(
-                    customer_id=header_data.get('customer_id')
+                portal_creds = customer_portal_service.create_account_for_credit_sale(
+                    customer_id=header_data.get('customer_id'),
+                    phone_number=header_data.get('phone_number') or header_data.get('customer_phone') or header_data.get('buyer_phone')
                 )
+                if portal_creds:
+                    logger.info(f"Portal account created for customer {header_data.get('customer_id')} with phone {portal_creds['phone_number']}")
             except Exception as e:
                 logger.error(f"Error creating portal account during bulk purchase: {e}", exc_info=True)
             

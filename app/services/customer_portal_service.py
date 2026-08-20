@@ -3,12 +3,10 @@ from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
 from app.db.models import Customer, FinanceCreditSale, CreditSale
 from typing import Optional, Dict, Any
-import random
+import secrets
 import string
 import hashlib
-import hmac
 import base64
-import secrets
 from app.core.logger import logger
 import datetime as dt
 
@@ -34,13 +32,16 @@ def make_password(password: str) -> str:
 
 
 class CustomerPortalService:
+    def __init__(self):
+        self.last_created_credentials: Optional[Dict[str, Any]] = None
+
     def _get_db(self) -> Session:
         return SessionLocal()
 
     def _generate_password(self, length: int = 8) -> str:
-        """Generate a random password with letters and digits."""
+        """Generate a cryptographically secure random password with letters and digits."""
         characters = string.ascii_letters + string.digits
-        return ''.join(random.choice(characters) for _ in range(length))
+        return ''.join(secrets.choice(characters) for _ in range(length))
 
     def create_portal_account(
         self,
@@ -111,13 +112,18 @@ class CustomerPortalService:
 
             logger.info(f"Created portal account for customer {customer_id} (phone: {use_phone})")
             
-            return {
+            result_dict = {
                 "customer_id": customer_id,
                 "customer_name": customer.name,
                 "phone_number": use_phone,
                 "password": use_password,
                 "created_at": now
             }
+            
+            # Store for UI access
+            self.last_created_credentials = result_dict
+            
+            return result_dict
 
         except Exception as e:
             db.rollback()
@@ -129,14 +135,25 @@ class CustomerPortalService:
     def create_account_for_credit_sale(
         self,
         customer_id: int,
-        phone_number: Optional[str] = None
+        phone_number: Optional[str] = None,
+        password: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Create portal account when a credit sale is created (only once per customer).
         
         This should be called whenever a new credit sale (old or advanced) is created.
+        
+        Returns:
+            Dictionary with account details (including plaintext password) if created,
+            None if account already exists or creation failed.
         """
-        return self.create_portal_account(customer_id, phone_number)
+        return self.create_portal_account(customer_id, phone_number, password)
+
+    def pop_last_credentials(self) -> Optional[Dict[str, Any]]:
+        """Get and clear the last created credentials (for UI display)."""
+        creds = self.last_created_credentials
+        self.last_created_credentials = None
+        return creds
 
 
 customer_portal_service = CustomerPortalService()

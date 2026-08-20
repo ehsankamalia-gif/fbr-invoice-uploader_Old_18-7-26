@@ -6,7 +6,7 @@ import socket
 import uuid
 import time
 import threading
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_result, RetryError
 from app.db.models import SMSQueue, SMSStatus, SMSConfiguration
 from app.db.session import SessionLocal
@@ -769,8 +769,12 @@ class SMSService:
             logger.error(f"Failed to queue SMS to {p}: {e}", exc_info=True)
 
     def queue_credit_sale_sms(self, db, sale_id: int, items, advance_payment: float,
-                              customer_id: int, fallback_phone=None):
-        """Queue one SMS per chassis in a newly-created credit sale (BuyerLedger SALE debit entries)."""
+                              customer_id: int, fallback_phone=None,
+                              portal_credentials: Optional[Dict[str, Any]] = None):
+        """Queue one SMS per chassis in a newly-created credit sale (BuyerLedger SALE debit entries).
+        
+        If portal_credentials is provided, an additional SMS with portal login details is sent.
+        """
         try:
             if not self._is_feature_enabled(db, "credit_sale_payment_sms_enabled"):
                 return
@@ -778,6 +782,22 @@ class SMSService:
             if not phone:
                 logger.warning(f"No phone for buyer/customer {customer_id} in credit sale {sale_id}")
                 return
+            
+            # Send portal credentials SMS if this is a new portal account
+            if portal_credentials:
+                try:
+                    portal_msg = (
+                        f"Dear {portal_credentials.get('customer_name', 'Customer')}, "
+                        f"your customer portal account has been created. "
+                        f"Login: {portal_credentials['phone_number']}, "
+                        f"Password: {portal_credentials['password']}. "
+                        f"Visit portal to view your account."
+                    )
+                    self._queue_template_sms(db, phone, portal_msg, reference_type="PORTAL_CREDENTIALS", reference_id=int(sale_id))
+                    logger.info(f"Portal credentials SMS sent for customer {customer_id} on sale {sale_id}")
+                except Exception as e:
+                    logger.error(f"Failed to send portal credentials SMS for sale {sale_id}: {e}", exc_info=True)
+
             tmpl = self._resolve_template(
                 db, "credit_sale_template",
                 "Dear {customer}, credit sale of {model} (Chassis: {chassis}) is confirmed. Credit: Rs. {credit_price}. Advance: Rs. {advance}. Balance: Rs. {balance}."
@@ -882,8 +902,12 @@ class SMSService:
         except Exception as e:
             logger.error(f"queue_credit_payment_sms failed for payment {payment_id}: {e}", exc_info=True)
 
-    def queue_finance_sale_sms(self, db, sale, customer_id: int, fallback_phone=None):
-        """Queue SMS when a new FinanceCreditSale account is created."""
+    def queue_finance_sale_sms(self, db, sale, customer_id: int, fallback_phone=None,
+                                portal_credentials: Optional[Dict[str, Any]] = None):
+        """Queue SMS when a new FinanceCreditSale account is created.
+        
+        If portal_credentials is provided, an additional SMS with portal login details is sent.
+        """
         try:
             if not self._is_feature_enabled(db, "finance_sale_installment_sms_enabled"):
                 return
@@ -892,6 +916,22 @@ class SMSService:
             if not phone:
                 logger.warning(f"No phone for finance customer {customer_id} in finance sale {getattr(sale, 'id', None)}")
                 return
+            
+            # Send portal credentials SMS if this is a new portal account
+            if portal_credentials:
+                try:
+                    portal_msg = (
+                        f"Dear {portal_credentials.get('customer_name', 'Customer')}, "
+                        f"your customer portal account has been created. "
+                        f"Login: {portal_credentials['phone_number']}, "
+                        f"Password: {portal_credentials['password']}. "
+                        f"Visit portal to view your account."
+                    )
+                    self._queue_template_sms(db, phone, portal_msg, reference_type="PORTAL_CREDENTIALS", reference_id=int(getattr(sale, 'id', 0)))
+                    logger.info(f"Portal credentials SMS sent for customer {customer_id} on finance sale {getattr(sale, 'sale_id', 'N/A')}")
+                except Exception as e:
+                    logger.error(f"Failed to send portal credentials SMS for finance sale: {e}", exc_info=True)
+
             tmpl = self._resolve_template(
                 db, "finance_sale_template",
                 "Dear {customer}, finance account {sale_id} for {model} (Chassis: {chassis}) is confirmed. Finance: Rs. {credit_price}. Down: Rs. {down}. Balance: Rs. {balance}."

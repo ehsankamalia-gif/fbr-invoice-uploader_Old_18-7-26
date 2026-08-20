@@ -8,7 +8,7 @@ Monitors for new credit sales and auto-activates portal access
 import os
 import sys
 import time
-import random
+import secrets
 import string
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -40,9 +40,9 @@ class CreditPortalAutoActivationService:
         print()
 
     def generate_random_password(self, length=8):
-        """Generate a random secure password"""
+        """Generate a cryptographically secure random password"""
         chars = string.ascii_letters + string.digits
-        return ''.join(random.choice(chars) for _ in range(length))
+        return ''.join(secrets.choice(chars) for _ in range(length))
 
     def check_new_credit_sales(self):
         """Check for new credit sales since last check"""

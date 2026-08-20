@@ -225,12 +225,15 @@ class CreditLedgerService:
                 )
                 db.add(advance_entry)
 
-            # Create portal account if it doesn't exist
+            # Create portal account if it doesn't exist and capture credentials
+            portal_creds = None
             try:
-                customer_portal_service.create_account_for_credit_sale(
+                portal_creds = customer_portal_service.create_account_for_credit_sale(
                     customer_id=sale.buyer_id,
-                    phone_number=sale_data.get('buyer_phone')
+                    phone_number=sale_data.get('buyer_phone') or sale_data.get('customer_phone')
                 )
+                if portal_creds:
+                    logger.info(f"Portal account created for customer {sale.buyer_id} with phone {portal_creds['phone_number']}")
             except Exception as e:
                 logger.error(f"Error creating portal account during credit sale: {e}", exc_info=True)
 
@@ -243,7 +246,8 @@ class CreditLedgerService:
                     items=db.query(CreditSaleItem).filter(CreditSaleItem.sale_id == sale.id).all(),
                     advance_payment=float(sale.advance_payment or 0.0),
                     customer_id=sale.buyer_id,
-                    fallback_phone=sale_data.get('buyer_phone')
+                    fallback_phone=sale_data.get('buyer_phone'),
+                    portal_credentials=portal_creds
                 )
             except Exception as e:
                 logger.error(f"Error queueing credit sale SMS for sale {sale.id}: {e}", exc_info=True)
@@ -476,12 +480,15 @@ class CreditLedgerService:
                 db.add(down_payment_entry)
                 finance_sale.remaining_balance = current_balance
 
-            # Create portal account if it doesn't exist
+            # Create portal account if it doesn't exist and capture credentials
+            portal_creds = None
             try:
-                customer_portal_service.create_account_for_credit_sale(
+                portal_creds = customer_portal_service.create_account_for_credit_sale(
                     customer_id=finance_sale.customer_id,
-                    phone_number=sale_data.get('customer_phone')
+                    phone_number=sale_data.get('customer_phone') or sale_data.get('buyer_phone')
                 )
+                if portal_creds:
+                    logger.info(f"Portal account created for customer {finance_sale.customer_id} with phone {portal_creds['phone_number']}")
             except Exception as e:
                 logger.error(f"Error creating portal account during finance sale: {e}", exc_info=True)
 
@@ -492,7 +499,8 @@ class CreditLedgerService:
                     db,
                     sale=finance_sale,
                     customer_id=finance_sale.customer_id,
-                    fallback_phone=sale_data.get('customer_phone')
+                    fallback_phone=sale_data.get('customer_phone'),
+                    portal_credentials=portal_creds
                 )
             except Exception as e:
                 logger.error(f"Error queueing finance sale SMS for {finance_sale.sale_id}: {e}", exc_info=True)
