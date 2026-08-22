@@ -154,12 +154,11 @@ class InvoiceService:
             customer = db.query(Customer).filter(Customer.cnic == invoice_in.buyer_cnic).first()
         
         if customer:
-            # Update info
-            if invoice_in.buyer_name: customer.name = invoice_in.buyer_name.upper()
-            if invoice_in.buyer_father_name: customer.father_name = invoice_in.buyer_father_name.upper()
+            # Customer already exists - do NOT overwrite their name, father_name,
+            # phone, or address. Those are permanent customer details managed
+            # via the Customer Directory, not the invoice form.
+            # Only update NTN and is_deleted as those are administrative fields.
             if invoice_in.buyer_ntn: customer.ntn = (invoice_in.buyer_ntn or "").upper()
-            if invoice_in.buyer_phone: customer.phone = invoice_in.buyer_phone
-            if invoice_in.buyer_address: customer.address = invoice_in.buyer_address.upper()
             
             # If we explicitly pass DEALER type, ensure it stays/becomes DEALER
             if invoice_in.buyer_type == CustomerType.DEALER:
@@ -168,17 +167,29 @@ class InvoiceService:
             # Reactivate if they were deleted
             customer.is_deleted = False
         else:
-            # Create new
-            customer = Customer(
-                cnic=invoice_in.buyer_cnic,
-                name=(invoice_in.buyer_name or "").upper(),
-                father_name=(invoice_in.buyer_father_name or "").upper(),
-                ntn=(invoice_in.buyer_ntn or "").upper(),
-                phone=invoice_in.buyer_phone,
-                address=(invoice_in.buyer_address or "").upper(),
-                type=invoice_in.buyer_type or CustomerType.INDIVIDUAL
-            )
-            db.add(customer)
+            # Create new - enforce CNIC uniqueness via service layer
+            from app.services.customer_service import customer_service
+            
+            # Double-check: another process may have created a customer with this CNIC
+            existing_by_cnic = customer_service.get_customer_by_cnic(invoice_in.buyer_cnic)
+            if existing_by_cnic:
+                customer = existing_by_cnic
+                # Do NOT overwrite permanent customer details
+                if invoice_in.buyer_ntn: customer.ntn = (invoice_in.buyer_ntn or "").upper()
+                if invoice_in.buyer_type == CustomerType.DEALER:
+                    customer.type = CustomerType.DEALER
+                customer.is_deleted = False
+            else:
+                customer = Customer(
+                    cnic=invoice_in.buyer_cnic,
+                    name=(invoice_in.buyer_name or "").upper(),
+                    father_name=(invoice_in.buyer_father_name or "").upper(),
+                    ntn=(invoice_in.buyer_ntn or "").upper(),
+                    phone=invoice_in.buyer_phone,
+                    address=(invoice_in.buyer_address or "").upper(),
+                    type=invoice_in.buyer_type or CustomerType.INDIVIDUAL
+                )
+                db.add(customer)
         
         db.flush() # Get customer.id
 

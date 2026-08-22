@@ -155,5 +155,126 @@ class CustomerPortalService:
         self.last_created_credentials = None
         return creds
 
+    def change_password(
+        self,
+        customer_id: int,
+        new_password: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Change the portal password for an existing customer.
+        
+        Args:
+            customer_id: ID of the customer
+            new_password: New plaintext password to set
+            
+        Returns:
+            Dictionary with updated account details if successful, None if no portal account exists.
+        """
+        db = self._get_db()
+        try:
+            from sqlalchemy import text
+
+            # Check if portal account exists
+            result = db.execute(
+                text("SELECT id, phone_number FROM customer_portal_auth WHERE customer_id = :customer_id"),
+                {"customer_id": customer_id}
+            ).fetchone()
+
+            if not result:
+                logger.error(f"No portal account found for customer {customer_id}")
+                return None
+
+            # Hash the new password
+            password_hash = make_password(new_password)
+
+            # Update the password
+            now = dt.datetime.now()
+            db.execute(
+                text("""
+                    UPDATE customer_portal_auth
+                    SET password_hash = :password_hash, updated_at = :updated_at
+                    WHERE customer_id = :customer_id
+                """),
+                {
+                    "customer_id": customer_id,
+                    "password_hash": password_hash,
+                    "updated_at": now
+                }
+            )
+            db.commit()
+
+            # Get customer name for response
+            customer = db.query(Customer).filter(Customer.id == customer_id).first()
+            customer_name = customer.name if customer else "Unknown"
+
+            logger.info(f"Password changed for customer {customer_id} (phone: {result.phone_number})")
+
+            result_dict = {
+                "customer_id": customer_id,
+                "customer_name": customer_name,
+                "phone_number": result.phone_number,
+                "password": new_password,
+                "updated_at": now
+            }
+
+            # Store for UI access
+            self.last_created_credentials = result_dict
+
+            return result_dict
+
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error changing password: {e}", exc_info=True)
+            return None
+        finally:
+            db.close()
+
+    def get_portal_account_info(
+        self,
+        customer_id: int
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get portal account info for a customer.
+        
+        Args:
+            customer_id: ID of the customer
+            
+        Returns:
+            Dictionary with account info if exists, None otherwise.
+        """
+        db = self._get_db()
+        try:
+            from sqlalchemy import text
+
+            result = db.execute(
+                text("""
+                    SELECT a.id, a.phone_number, a.is_active, a.created_at, a.updated_at,
+                           c.name as customer_name
+                    FROM customer_portal_auth a
+                    JOIN customers c ON c.id = a.customer_id
+                    WHERE a.customer_id = :customer_id
+                """),
+                {"customer_id": customer_id}
+            ).fetchone()
+
+            if not result:
+                return None
+
+            return {
+                "id": result.id,
+                "customer_id": customer_id,
+                "customer_name": result.customer_name,
+                "phone_number": result.phone_number,
+                "is_active": bool(result.is_active),
+                "created_at": result.created_at,
+                "updated_at": result.updated_at
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting portal account info: {e}", exc_info=True)
+            return None
+        finally:
+            db.close()
+
 
 customer_portal_service = CustomerPortalService()

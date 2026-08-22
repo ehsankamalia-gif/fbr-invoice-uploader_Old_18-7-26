@@ -11,7 +11,7 @@ class Customer(models.Model):
     ]
     
     id = models.IntegerField(primary_key=True)
-    cnic = models.CharField(max_length=20, null=True, unique=True)
+    cnic = models.CharField(max_length=20, null=False, unique=True)
     name = models.CharField(max_length=100)
     father_name = models.CharField(max_length=100, null=True)
     business_name = models.CharField(max_length=100, null=True)
@@ -288,3 +288,62 @@ class BuyerLedger(models.Model):
     
     def __str__(self):
         return f"{self.id} - {self.customer.name}"
+
+
+class SpareLedgerTransaction(models.Model):
+    CREDIT = 'CREDIT'
+    DEBIT = 'DEBIT'
+    TRANS_TYPE_CHOICES = [
+        (CREDIT, 'Credit'),
+        (DEBIT, 'Debit'),
+    ]
+    
+    BANK = 'BANK'
+    HARD_CASH = 'HARD_CASH'
+    CASH_TYPE_CHOICES = [
+        (BANK, 'Bank'),
+        (HARD_CASH, 'Cash'),
+    ]
+    
+    id = models.IntegerField(primary_key=True)
+    timestamp = models.DateTimeField()
+    trans_type = models.CharField(max_length=10, choices=TRANS_TYPE_CHOICES)
+    amount = models.FloatField()
+    reference_number = models.CharField(max_length=50, null=True)
+    description = models.CharField(max_length=255, null=True)
+    cash_type = models.CharField(max_length=20, choices=CASH_TYPE_CHOICES, default=HARD_CASH)
+    created_by_user_id = models.IntegerField(null=True)
+    month_key = models.CharField(max_length=7, null=True)
+    
+    class Meta:
+        db_table = 'spare_ledger_transactions'
+        managed = False
+        ordering = ['-timestamp']
+    
+    def __str__(self):
+        return f"{self.id} - {self.trans_type} - {self.amount}"
+
+
+class SpareLedgerMonthlyClose(models.Model):
+    CLOSED = 'CLOSED'
+    STATUS_CHOICES = [
+        (CLOSED, 'Closed'),
+    ]
+    
+    id = models.IntegerField(primary_key=True)
+    month_key = models.CharField(max_length=7, unique=True)
+    closed_at = models.DateTimeField()
+    opening_balance = models.FloatField(default=0.0)
+    total_credits = models.FloatField(default=0.0)
+    total_debits = models.FloatField(default=0.0)
+    closing_balance = models.FloatField(default=0.0)
+    carried_forward = models.FloatField(default=0.0)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=CLOSED)
+    
+    class Meta:
+        db_table = 'spare_ledger_monthly_close'
+        managed = False
+        ordering = ['-month_key']
+    
+    def __str__(self):
+        return f"{self.month_key} - {self.closing_balance}"

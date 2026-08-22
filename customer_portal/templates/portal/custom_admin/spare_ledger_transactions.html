@@ -1,0 +1,139 @@
+{% extends "portal/custom_admin/base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="mb-8">
+    <h1 class="text-3xl font-bold text-gray-800 mb-2">
+        <i class="fas fa-cogs mr-3"></i>{{ title }}
+    </h1>
+    <p class="text-gray-600">View and filter spare parts ledger transactions</p>
+</div>
+
+<!-- Summary Cards -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+    <div class="bg-white rounded-xl p-6 card-shadow card-hover border-l-4 border-green-500">
+        <h3 class="text-sm text-gray-600 font-semibold mb-2">Total Credits (In)</h3>
+        <p class="text-3xl font-bold text-green-600">{{ total_credits|floatformat:2 }}</p>
+    </div>
+    <div class="bg-white rounded-xl p-6 card-shadow card-hover border-l-4 border-red-500">
+        <h3 class="text-sm text-gray-600 font-semibold mb-2">Spare Part Order</h3>
+        <p class="text-3xl font-bold text-red-600">{{ total_debits|floatformat:2 }}</p>
+    </div>
+    <div class="bg-white rounded-xl p-6 card-shadow card-hover border-l-4 border-blue-500">
+        <h3 class="text-sm text-gray-600 font-semibold mb-2">Current Balance</h3>
+        <p class="text-3xl font-bold text-blue-600">{{ closing_balance|floatformat:2 }}</p>
+        <p class="text-xs text-gray-500 mt-1">Take from Ehsan Traders</p>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="bg-white rounded-xl p-6 card-shadow mb-6">
+    <div class="flex flex-wrap gap-4 items-end">
+        <div class="flex-1 min-w-[200px]">
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+                <i class="fas fa-calendar-alt mr-2 text-gray-500"></i>Select Month
+            </label>
+            <select id="monthFilter" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200">
+                <option value="">All Months</option>
+                {% for month in unique_months %}
+                <option value="{{ month }}" {% if month == selected_month %}selected{% endif %}>{{ month }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        
+        <div class="flex-1 min-w-[200px]">
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+                <i class="fas fa-exchange-alt mr-2 text-gray-500"></i>Transaction Type
+            </label>
+            <select id="transTypeFilter" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200">
+                <option value="">All Types</option>
+                <option value="CREDIT" {% if selected_trans_type == 'CREDIT' %}selected{% endif %}>Credit (Deposit)</option>
+                <option value="DEBIT" {% if selected_trans_type == 'DEBIT' %}selected{% endif %}>SP Order (Debit)</option>
+            </select>
+        </div>
+        
+        <div>
+            <button onclick="applyFilters()" class="w-full px-6 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white font-semibold rounded-lg hover:shadow-lg transition-all duration-200">
+                <i class="fas fa-filter mr-2"></i>Apply Filters
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Transactions Table -->
+<div class="bg-white rounded-xl p-6 card-shadow">
+    <div class="overflow-x-auto">
+        <table class="w-full">
+            <thead>
+                <tr class="border-b border-gray-200">
+                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-600">Date/Time</th>
+                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-600">Source</th>
+                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-600">Reference</th>
+                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-600">Description</th>
+                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-600">Credit (In)</th>
+                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-600">SP Order</th>
+                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-600">Balance</th>
+                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-600">Month</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in transactions_with_balance %}
+                {% with transaction=item.transaction %}
+                <tr class="border-b border-gray-100 hover:bg-gray-50">
+                    <td class="py-3 px-2 text-sm text-gray-600">{{ transaction.timestamp|date:"Y-m-d H:i" }}</td>
+                    <td class="py-3 px-2 text-sm text-gray-800">{{ transaction.get_cash_type_display }}</td>
+                    <td class="py-3 px-2 text-sm text-gray-800">{{ transaction.reference_number|default:"-" }}</td>
+                    <td class="py-3 px-2 text-sm text-gray-800">{{ transaction.description|default:"-" }}</td>
+                    <td class="py-3 px-2 text-sm font-semibold text-green-600">
+                        {% if transaction.trans_type == 'CREDIT' %}
+                            {{ transaction.amount|floatformat:2 }}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td class="py-3 px-2 text-sm font-semibold text-red-600">
+                        {% if transaction.trans_type == 'DEBIT' %}
+                            {{ transaction.amount|floatformat:2 }}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td class="py-3 px-2 text-sm font-bold text-blue-600">{{ item.balance|floatformat:2 }}</td>
+                    <td class="py-3 px-2 text-sm text-gray-800">{{ transaction.month_key }}</td>
+                </tr>
+                {% endwith %}
+                {% empty %}
+                <tr><td colspan="8" class="py-8 text-center text-gray-500">
+                    <i class="fas fa-inbox fa-2x mb-2"></i>
+                    <p>No transactions found{% if selected_month or selected_trans_type %} for the selected filters{% endif %}</p>
+                </td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+function applyFilters() {
+    const month = document.getElementById('monthFilter').value;
+    const transType = document.getElementById('transTypeFilter').value;
+    const params = new URLSearchParams();
+    
+    if (month) params.append('month', month);
+    if (transType) params.append('trans_type', transType);
+    
+    const url = '{% url "custom_admin_spare_ledger_transactions" %}' + (params.toString() ? '?' + params.toString() : '');
+    window.location.href = url;
+}
+
+// Allow Enter key to apply filters
+document.getElementById('monthFilter').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') applyFilters();
+});
+
+document.getElementById('transTypeFilter').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') applyFilters();
+});
+</script>
+{% endblock %}

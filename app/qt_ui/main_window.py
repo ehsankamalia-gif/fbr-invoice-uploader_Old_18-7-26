@@ -1246,6 +1246,7 @@ class MainWindow(QMainWindow):
         self._add_page("welcome", self._create_welcome_page(), "Welcome")
         self._add_page("dms_automation", self._create_dms_automation_page(), "DMS Automation")
         self._add_page("excise", self._create_excise_page(), "Excise Records")
+        self._add_page("portal_accounts", self._create_portal_accounts_page(), "Portal Accounts")
 
         nav_layout.addSpacing(10)
         
@@ -1268,14 +1269,16 @@ class MainWindow(QMainWindow):
             "print_document": "🖨️",
             "dms_automation": "🤖",
             "excise": "📋",
+            "portal_accounts": "🔑",
         }
 
         self.menu_groups = {
             "GENERAL": ["dashboard", "welcome"],
-            "SALES": ["invoice", "reports", "advance_booking", "credit_ledger", "print_document", "excise"],
+            "SALES": ["invoice", "reports", "advance_booking", "print_document", "excise"],
             "INVENTORY": ["inventory", "prices", "spare_ledger", "captured_data"],
             "DIRECTORY": ["customers", "dealers"],
             "AUTOMATION": ["dms_automation"],
+            "PORTAL": ["portal_accounts", "credit_ledger"],
             "SYSTEM": ["sms", "whatsapp", "settings"]
         }
 
@@ -3896,6 +3899,10 @@ class MainWindow(QMainWindow):
         from app.db.session import SessionLocal
         db_session = SessionLocal()
         return ExciseRecordPage(db_session)
+
+    def _create_portal_accounts_page(self) -> QWidget:
+        from app.qt_ui.portal_account_page import PortalAccountPage
+        return PortalAccountPage(self)
 
     def _open_fbr_security(self):
         dialog = FBRSecurityDialog(self)
@@ -10624,17 +10631,32 @@ class MainWindow(QMainWindow):
             layout.addWidget(btn_box)
 
             if dialog.exec() == QDialog.DialogCode.Accepted:
-                if not is_synced:
-                    cust.name = name_input.text().strip()
-                    cust.father_name = father_input.text().strip()
-                    cust.cnic = cnic_input.text().strip()
-                
-                cust.phone = phone_input.text().strip()
-                cust.address = address_input.text().strip()
-                cust.ntn = ntn_input.text().strip()
-                
-                db.commit()
-                QMessageBox.information(self, "Updated", "Customer record has been updated.")
+                try:
+                    cnic_value = cnic_input.text().strip()
+                    name_value = name_input.text().strip()
+                    father_value = father_input.text().strip()
+                    phone_value = phone_input.text().strip()
+                    address_value = address_input.text().strip()
+                    ntn_value = ntn_input.text().strip()
+
+                    # Use the service layer which enforces CNIC uniqueness
+                    from app.services.customer_service import customer_service
+                    updated = customer_service.update_customer(
+                        customer_id=cust.id,
+                        cnic=cnic_value if not is_synced else cust.cnic,
+                        name=name_value if not is_synced else cust.name,
+                        father_name=father_value if not is_synced else cust.father_name,
+                        phone=phone_value,
+                        address=address_value,
+                        ntn=ntn_value
+                    )
+                    if updated:
+                        QMessageBox.information(self, "Updated", "Customer record has been updated.")
+                    else:
+                        QMessageBox.warning(self, "Not Found", "Customer record could not be found.")
+                except ValueError as ve:
+                    QMessageBox.warning(self, "Validation Error", str(ve))
+                    return
                 self._reload_customers()
 
         except Exception as e:
@@ -10934,27 +10956,21 @@ class MainWindow(QMainWindow):
 
             db = SessionLocal()
             try:
-                # Check for existing CNIC
-                existing = db.query(Customer).filter(Customer.cnic == cnic).first()
-                if existing:
-                    QMessageBox.critical(self, "Duplicate Error", f"A dealer or customer with CNIC {cnic} already exists.")
-                    return
+                from app.services.dealer_service import dealer_service
 
-                new_dealer = Customer(
-                    business_name=biz_name.upper(),
-                    name=name.upper(),
-                    father_name=father.upper(),
+                new_dealer = dealer_service.create_dealer(
                     cnic=cnic,
+                    name=name,
+                    father_name=father,
+                    business_name=biz_name,
                     phone=phone,
-                    address=address.upper(),
-                    ntn=ntn.upper(),
-                    type=CustomerType.DEALER.value
+                    address=address
                 )
-                db.add(new_dealer)
-                db.commit()
                 QMessageBox.information(self, "Success", "New dealer has been added successfully.")
+            except ValueError as ve:
+                QMessageBox.critical(self, "Duplicate Error", str(ve))
+                return
             except Exception as e:
-                db.rollback()
                 logger.error(f"Error adding dealer: {e}")
                 QMessageBox.critical(self, "Error", f"Failed to add dealer: {e}")
             finally:
@@ -11540,7 +11556,7 @@ class InventoryTableModel(QAbstractTableModel):
                     return Qt.GlobalColor.red
                     
         if role == Qt.ItemDataRole.TextAlignmentRole:
-            return Qt.AlignmentFlag.AlignCenter
+            return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
                 
         return None
 
@@ -11592,7 +11608,7 @@ class CustomersTableModel(QAbstractTableModel):
                 return row.ntn
         
         if role == Qt.ItemDataRole.TextAlignmentRole:
-            return Qt.AlignmentFlag.AlignCenter
+            return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
             
         return None
 

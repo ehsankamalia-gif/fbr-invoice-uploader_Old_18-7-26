@@ -370,6 +370,7 @@ def run_migrations():
                 (14, "Make due_date nullable in finance_installments", _migration_v14_nullable_due_date),
                 (15, "Make finance fields nullable and add defaults", _migration_v15_comprehensive_finance_fix),
                 (16, "Add sequential processing fields to invoices", _migration_v16_add_sequential_upload_fields),
+                (17, "Make customer CNIC non-nullable", _migration_v17_make_cnic_non_nullable),
             ]
 
             for version, description, func in migrations:
@@ -769,6 +770,50 @@ def _migration_v16_add_sequential_upload_fields(conn) -> bool:
         return True
     except Exception as e:
         logger.error(f"Migration v16 failed: {e}", exc_info=True)
+        return False
+
+def _migration_v17_make_cnic_non_nullable(conn) -> bool:
+    """
+    Makes the cnic column in the customers table NOT NULL.
+    First assigns temporary CNICs to any existing rows with NULL cnic.
+    """
+    try:
+        is_sqlite = "sqlite" in str(engine.url)
+        
+        if is_sqlite:
+            # SQLite doesn't support ALTER COLUMN; re-create the table.
+            # But Base.metadata.create_all will handle the new schema for fresh DBs.
+            # For existing SQLite DBs with NULL CNICs, we skip schema change.
+            logger.info("SQLite: Skipping CNIC non-nullable migration (handled at app level).")
+            return True
+
+        # Step 1: Find and fix any existing rows with NULL CNIC
+        null_rows = conn.execute(
+            text("SELECT id, name FROM customers WHERE cnic IS NULL OR cnic = ''")
+        ).fetchall()
+
+        if null_rows:
+            logger.warning(f"Found {len(null_rows)} customer(s) with NULL/empty CNIC. Assigning temporary CNICs...")
+            for row in null_rows:
+                # Generate a temporary unique CNIC based on customer ID
+                # Format: XXXXX-XXXXXXX-X where the last 7 digits are the customer ID
+                temp_cnic = f"00000-{row.id:07d}-0"
+                conn.execute(
+                    text("UPDATE customers SET cnic = :cnic WHERE id = :id"),
+                    {"cnic": temp_cnic, "id": row.id}
+                )
+                logger.info(f"Assigned temporary CNIC '{temp_cnic}' to customer '{row.name}' (ID: {row.id})")
+            conn.commit()
+
+        # Step 2: Alter the column to NOT NULL
+        logger.info("Altering cnic column in customers table to NOT NULL...")
+        conn.execute(text("ALTER TABLE customers MODIFY cnic VARCHAR(20) NOT NULL UNIQUE"))
+        conn.commit()
+        logger.info("Successfully made cnic column NOT NULL.")
+
+        return True
+    except Exception as e:
+        logger.error(f"Migration v17 failed: {e}", exc_info=True)
         return False
 
 

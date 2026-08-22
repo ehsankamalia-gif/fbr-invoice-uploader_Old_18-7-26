@@ -8,14 +8,16 @@ class LoginForm(forms.Form):
     phone_number = forms.CharField(
         max_length=20,
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'Enter your phone number'
+            'class': 'w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 bg-gray-50 hover:bg-white',
+            'placeholder': 'Enter your phone number',
+            'id': 'phone_number'
         })
     )
     password = forms.CharField(
         widget=forms.PasswordInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'Enter your password'
+            'class': 'w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 bg-gray-50 hover:bg-white',
+            'placeholder': 'Enter your password',
+            'id': 'password'
         })
     )
     

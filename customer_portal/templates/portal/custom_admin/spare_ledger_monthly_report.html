@@ -1,0 +1,95 @@
+{% extends "portal/custom_admin/base.html" %}
+{% load custom_filters %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="mb-8">
+    <h1 class="text-3xl font-bold text-gray-800 mb-2">
+        <i class="fas fa-calendar-alt mr-3"></i>{{ title }}
+    </h1>
+    <p class="text-gray-600">Monthly report with detailed cash type breakdown and balances</p>
+</div>
+
+<!-- Monthly Report Table -->
+<div class="bg-white rounded-xl p-6 card-shadow">
+    <div class="overflow-x-auto">
+        <table class="w-full">
+            <thead>
+                <tr class="border-b border-gray-200 bg-gray-50">
+                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-700">Month</th>
+                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-700">B/F</th>
+                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-700">Bank Credit</th>
+                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-700">Hard Cash Credit</th>
+                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-700">Total Credit</th>
+                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-700">Bank Debit</th>
+                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-700">Hard Cash Debit</th>
+                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-700">Total Debit</th>
+                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-700">Closing Balance</th>
+                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-700">C/F</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in report_data %}
+                <tr class="border-b border-gray-100 hover:bg-gray-50">
+                    <td class="py-3 px-2 text-sm font-semibold text-gray-800">{{ row.month_key }}</td>
+                    <td class="py-3 px-2 text-sm text-gray-600">{{ row.brought_forward|floatformat:2 }}</td>
+                    <td class="py-3 px-2 text-sm text-green-600">{{ row.bank_credit|floatformat:2 }}</td>
+                    <td class="py-3 px-2 text-sm text-green-600">{{ row.hard_cash_credit|floatformat:2 }}</td>
+                    <td class="py-3 px-2 text-sm font-semibold text-green-600">{{ row.total_credit|floatformat:2 }}</td>
+                    <td class="py-3 px-2 text-sm text-red-600">{{ row.bank_debit|floatformat:2 }}</td>
+                    <td class="py-3 px-2 text-sm text-red-600">{{ row.hard_cash_debit|floatformat:2 }}</td>
+                    <td class="py-3 px-2 text-sm font-semibold text-red-600">{{ row.total_debit|floatformat:2 }}</td>
+                    <td class="py-3 px-2 text-sm font-bold text-blue-600">{{ row.closing_balance|floatformat:2 }}</td>
+                    <td class="py-3 px-2 text-sm text-gray-600">{{ row.carried_forward|floatformat:2 }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="10" class="py-8 text-center text-gray-500">
+                    <i class="fas fa-calendar-times fa-2x mb-2"></i>
+                    <p>No monthly report data available</p>
+                </td></tr>
+                {% endfor %}
+                
+                {% if report_data %}
+                <tr class="bg-gray-50 border-t-2 border-gray-300 font-bold">
+                    <td class="py-3 px-2 text-sm text-gray-800">Grand Total</td>
+                    <td class="py-3 px-2 text-sm text-gray-600">-</td>
+                    <td class="py-3 px-2 text-sm text-green-600">{{ report_data|sum:"bank_credit"|floatformat:2 }}</td>
+                    <td class="py-3 px-2 text-sm text-green-600">{{ report_data|sum:"hard_cash_credit"|floatformat:2 }}</td>
+                    <td class="py-3 px-2 text-sm text-green-600">{{ grand_total_in|floatformat:2 }}</td>
+                    <td class="py-3 px-2 text-sm text-red-600">{{ report_data|sum:"bank_debit"|floatformat:2 }}</td>
+                    <td class="py-3 px-2 text-sm text-red-600">{{ report_data|sum:"hard_cash_debit"|floatformat:2 }}</td>
+                    <td class="py-3 px-2 text-sm text-red-600">{{ grand_total_out|floatformat:2 }}</td>
+                    <td class="py-3 px-2 text-sm text-blue-600">{{ overall_balance|floatformat:2 }}</td>
+                    <td class="py-3 px-2 text-sm text-gray-600">-</td>
+                </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Summary Cards -->
+{% if report_data %}
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
+    <div class="bg-white rounded-xl p-6 card-shadow card-hover border-l-4 border-green-500">
+        <h3 class="text-sm text-gray-600 font-semibold mb-2">Total Credits</h3>
+        <p class="text-3xl font-bold text-green-600">{{ grand_total_in|floatformat:2 }}</p>
+    </div>
+    <div class="bg-white rounded-xl p-6 card-shadow card-hover border-l-4 border-red-500">
+        <h3 class="text-sm text-gray-600 font-semibold mb-2">Total Debits</h3>
+        <p class="text-3xl font-bold text-red-600">{{ grand_total_out|floatformat:2 }}</p>
+    </div>
+    <div class="bg-white rounded-xl p-6 card-shadow card-hover border-l-4 border-blue-500">
+        <h3 class="text-sm text-gray-600 font-semibold mb-2">Overall Balance</h3>
+        <p class="text-3xl font-bold text-blue-600">{{ overall_balance|floatformat:2 }}</p>
+    </div>
+</div>
+{% endif %}
+
+<style>
+    .table-responsive {
+        overflow-x: auto;
+    }
+</style>
+{% endblock %}
