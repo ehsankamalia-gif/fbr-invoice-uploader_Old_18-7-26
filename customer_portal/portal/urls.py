@@ -32,4 +32,5 @@ urlpatterns = [
     path('custom-admin/combined-credit-ledger/', views.custom_admin_combined_credit_ledger_view, name='custom_admin_combined_credit_ledger'),
     path('custom-admin/spare-ledger-transactions/', views.custom_admin_spare_ledger_transactions_view, name='custom_admin_spare_ledger_transactions'),
     path('custom-admin/spare-ledger-monthly-report/', views.custom_admin_spare_ledger_monthly_report_view, name='custom_admin_spare_ledger_monthly_report'),
+    path('custom-admin/spare-ledger-monthly-summary/', views.custom_admin_spare_ledger_monthly_summary_view, name='custom_admin_spare_ledger_monthly_summary'),
 ]

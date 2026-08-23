@@ -1,4 +1,5 @@
 {% extends "portal/custom_admin/base.html" %}
+{% load custom_filters %}
 
 {% block title %}{{ title }}{% endblock %}
 
@@ -15,37 +16,29 @@
     <div class="overflow-x-auto">
         <table class="w-full">
             <thead>
-                <tr class="border-b border-gray-200">
-                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-600">Month</th>
-                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-600">Opening Balance</th>
-                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-600">Total Credits</th>
-                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-600">Total Debits</th>
-                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-600">Closing Balance</th>
-                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-600">Carried Forward</th>
-                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-600">Status</th>
-                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-600">Closed At</th>
+                <tr class="border-b border-gray-200 bg-gray-50">
+                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-700">Date</th>
+                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-700">Previous Month Balance</th>
+                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-700">Bank Credit</th>
+                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-700">Cash Credit</th>
+                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-700">SP Order</th>
+                    <th class="text-left py-3 px-2 text-sm font-semibold text-gray-700">Monthly Balance</th>
                 </tr>
             </thead>
             <tbody>
-                {% for month in monthly_closes %}
+                {% for month in report_data %}
                 <tr class="border-b border-gray-100 hover:bg-gray-50">
-                    <td class="py-3 px-2 text-sm font-semibold text-gray-800">{{ month.month_key }}</td>
-                    <td class="py-3 px-2 text-sm text-gray-800">Rs. {{ month.opening_balance }}</td>
-                    <td class="py-3 px-2 text-sm text-green-600 font-semibold">Rs. {{ month.total_credits }}</td>
-                    <td class="py-3 px-2 text-sm text-red-600 font-semibold">Rs. {{ month.total_debits }}</td>
-                    <td class="py-3 px-2 text-sm font-bold text-blue-600">Rs. {{ month.closing_balance }}</td>
-                    <td class="py-3 px-2 text-sm text-gray-800">Rs. {{ month.carried_forward }}</td>
-                    <td class="py-3 px-2">
-                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                            {{ month.status }}
-                        </span>
-                    </td>
-                    <td class="py-3 px-2 text-sm text-gray-600">{{ month.closed_at|date:"Y-m-d H:i" }}</td>
+                    <td class="py-3 px-2 text-sm font-semibold text-gray-800">{{ month.date }}</td>
+                    <td class="py-3 px-2 text-sm text-gray-800">{{ month.previous_month_balance|floatformat:2 }}</td>
+                    <td class="py-3 px-2 text-sm text-green-600 font-semibold">{{ month.bank_credit|floatformat:2 }}</td>
+                    <td class="py-3 px-2 text-sm text-green-600 font-semibold">{{ month.cash_credit|floatformat:2 }}</td>
+                    <td class="py-3 px-2 text-sm text-red-600 font-semibold">{{ month.sp_order|floatformat:2 }}</td>
+                    <td class="py-3 px-2 text-sm font-bold text-blue-600">{{ month.monthly_balance|floatformat:2 }}</td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="8" class="py-8 text-center text-gray-500">
+                <tr><td colspan="6" class="py-8 text-center text-gray-500">
                     <i class="fas fa-calendar-times fa-2x mb-2"></i>
-                    <p>No monthly closing records found</p>
+                    <p>No monthly summary data available</p>
                 </td></tr>
                 {% endfor %}
             </tbody>
@@ -54,30 +47,18 @@
 </div>
 
 <!-- Summary Statistics -->
-{% if monthly_closes %}
+{% if report_data %}
 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mt-6">
     <div class="bg-white rounded-xl p-6 card-shadow card-hover">
         <div class="flex items-center justify-between">
             <div>
-                <p class="text-sm text-gray-500 mb-1">Total Closed Months</p>
-                <h3 class="text-3xl font-bold text-gray-800">{{ monthly_closes.count }}</h3>
-            </div>
-            <div class="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center">
-                <i class="fas fa-calendar-check text-white text-2xl"></i>
-            </div>
-        </div>
-    </div>
-    
-    <div class="bg-white rounded-xl p-6 card-shadow card-hover">
-        <div class="flex items-center justify-between">
-            <div>
-                <p class="text-sm text-gray-500 mb-1">Total Credits</p>
+                <p class="text-sm text-gray-500 mb-1">Total Credits (Bank)</p>
                 <h3 class="text-3xl font-bold text-green-600">
-                    Rs. {{ monthly_closes.aggregate(total_credits=models.Sum('total_credits'))['total_credits']|default:0 }}
+                    {{ report_data|sum:"bank_credit"|floatformat:2 }}
                 </h3>
             </div>
             <div class="w-14 h-14 rounded-xl bg-gradient-to-br from-green-500 to-green-600 flex items-center justify-center">
-                <i class="fas fa-arrow-down text-white text-2xl"></i>
+                <i class="fas fa-university text-white text-2xl"></i>
             </div>
         </div>
     </div>
@@ -85,13 +66,27 @@
     <div class="bg-white rounded-xl p-6 card-shadow card-hover">
         <div class="flex items-center justify-between">
             <div>
-                <p class="text-sm text-gray-500 mb-1">Total Debits</p>
+                <p class="text-sm text-gray-500 mb-1">Total Credits (Cash)</p>
+                <h3 class="text-3xl font-bold text-green-600">
+                    {{ report_data|sum:"cash_credit"|floatformat:2 }}
+                </h3>
+            </div>
+            <div class="w-14 h-14 rounded-xl bg-gradient-to-br from-green-500 to-green-600 flex items-center justify-center">
+                <i class="fas fa-money-bill-wave text-white text-2xl"></i>
+            </div>
+        </div>
+    </div>
+    
+    <div class="bg-white rounded-xl p-6 card-shadow card-hover">
+        <div class="flex items-center justify-between">
+            <div>
+                <p class="text-sm text-gray-500 mb-1">Total SP Orders</p>
                 <h3 class="text-3xl font-bold text-red-600">
-                    Rs. {{ monthly_closes.aggregate(total_debits=models.Sum('total_debits'))['total_debits']|default:0 }}
+                    {{ report_data|sum:"sp_order"|floatformat:2 }}
                 </h3>
             </div>
             <div class="w-14 h-14 rounded-xl bg-gradient-to-br from-red-500 to-red-600 flex items-center justify-center">
-                <i class="fas fa-arrow-up text-white text-2xl"></i>
+                <i class="fas fa-shopping-cart text-white text-2xl"></i>
             </div>
         </div>
     </div>
@@ -101,10 +96,10 @@
             <div>
                 <p class="text-sm text-gray-500 mb-1">Current Balance</p>
                 <h3 class="text-3xl font-bold text-blue-600">
-                    Rs. {{ monthly_closes.first.closing_balance|default:0 }}
+                    {{ current_balance|floatformat:2 }}
                 </h3>
             </div>
-            <div class="w-14 h-14 rounded-xl bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center">
+            <div class="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center">
                 <i class="fas fa-balance-scale text-white text-2xl"></i>
             </div>
         </div>

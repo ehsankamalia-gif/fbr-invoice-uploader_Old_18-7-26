@@ -161,6 +161,11 @@
                     <i class="fas fa-calendar-alt w-6 mr-3"></i>
                     Monthly Report
                 </a>
+                <a href="{% url 'custom_admin_spare_ledger_monthly_summary' %}" 
+                   class="sidebar-link flex items-center px-4 py-3 rounded-lg mb-2 {% if request.resolver_match.url_name == 'custom_admin_spare_ledger_monthly_summary' %}active bg-white/15{% endif %}">
+                    <i class="fas fa-calendar mr-3"></i>
+                    Monthly Summary
+                </a>
                 
                 <div class="border-t border-white/10 my-4"></div>
                 

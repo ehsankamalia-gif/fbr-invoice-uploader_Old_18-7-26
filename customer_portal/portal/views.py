@@ -1087,8 +1087,10 @@ def custom_admin_spare_ledger_transactions_view(request):
     selected_month = request.GET.get('month')
     selected_trans_type = request.GET.get('trans_type')
     
-    # Get all transactions
-    transactions = SpareLedgerTransaction.objects.all().order_by('timestamp')
+    # Get all transactions (exclude advance booking payments)
+    transactions = SpareLedgerTransaction.objects.filter(
+        Q(description__isnull=True) | ~Q(description__startswith='Advance Booking -')
+    ).order_by('timestamp')
     
     # Apply filters
     if selected_month:
@@ -1223,6 +1225,77 @@ def custom_admin_spare_ledger_monthly_report_view(request):
     }
 
     return render(request, "portal/custom_admin/spare_ledger_monthly_report.html", context)
+
+
+@staff_member_required
+def custom_admin_spare_ledger_monthly_summary_view(request):
+    """Display monthly closing summary for spare parts ledger (desktop-style implementation)."""
+    # Get all transactions excluding advance bookings
+    transactions = SpareLedgerTransaction.objects.filter(
+        Q(description__isnull=True) | ~Q(description__startswith='Advance Booking -')
+    ).order_by('timestamp')
+    
+    # Calculate monthly statistics
+    month_stats = {}
+    for tx in transactions:
+        month_key = tx.month_key or "N/A"
+        if month_key not in month_stats:
+            month_stats[month_key] = {
+                "bank_credit": 0.0,
+                "hard_cash_credit": 0.0,
+                "total_debit": 0.0
+            }
+        
+        amount = float(tx.amount or 0)
+        is_bank = (tx.cash_type == "BANK")
+        
+        if tx.trans_type == "CREDIT":
+            if is_bank:
+                month_stats[month_key]["bank_credit"] += amount
+            else:
+                month_stats[month_key]["hard_cash_credit"] += amount
+        else:
+            month_stats[month_key]["total_debit"] += amount
+    
+    # Prepare report data with running balance
+    report_data = []
+    running_balance = 0.0
+    
+    sorted_months = sorted(month_stats.keys())
+    
+    for month_key in sorted_months:
+        stats = month_stats[month_key]
+        
+        bank_credit = stats["bank_credit"]
+        cash_credit = stats["hard_cash_credit"]
+        total_credit = bank_credit + cash_credit
+        total_debit = stats["total_debit"]
+        
+        monthly_balance = running_balance + total_credit - total_debit
+        
+        report_data.append({
+            "date": month_key.replace("-", "-"),  # Format as YYYY-MM
+            "previous_month_balance": running_balance,
+            "bank_credit": bank_credit,
+            "cash_credit": cash_credit,
+            "sp_order": total_debit,
+            "monthly_balance": monthly_balance
+        })
+        
+        running_balance = monthly_balance
+    
+    # Get current balance (last month's closing balance)
+    current_balance = 0.0
+    if report_data:
+        current_balance = report_data[-1]["monthly_balance"]
+    
+    context = {
+        "title": "Spare Parts Ledger - Monthly Summary",
+        "report_data": report_data,
+        "current_balance": current_balance,
+    }
+    
+    return render(request, "portal/custom_admin/spare_ledger_monthly_summary.html", context)
 
 
 @staff_member_required
