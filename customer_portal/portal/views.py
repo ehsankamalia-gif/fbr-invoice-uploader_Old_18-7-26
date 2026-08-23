@@ -1082,6 +1082,70 @@ def custom_admin_combined_credit_ledger_view(request):
 
 
 @staff_member_required
+def custom_admin_spare_ledger_transactions_view(request):
+    # Get filter parameters
+    selected_month = request.GET.get('month')
+    selected_trans_type = request.GET.get('trans_type')
+    
+    # Get all transactions
+    transactions = SpareLedgerTransaction.objects.all().order_by('timestamp')
+    
+    # Apply filters
+    if selected_month:
+        transactions = transactions.filter(month_key=selected_month)
+    if selected_trans_type:
+        transactions = transactions.filter(trans_type=selected_trans_type)
+    
+    # Calculate totals
+    total_credits = 0.0
+    total_debits = 0.0
+    
+    for tx in transactions:
+        amount = float(tx.amount or 0)
+        if tx.trans_type == "CREDIT":
+            total_credits += amount
+        else:
+            total_debits += amount
+    
+    closing_balance = total_credits - total_debits
+    
+    # Calculate running balance
+    transactions_with_balance = []
+    running_balance = 0.0
+    
+    for tx in transactions:
+        amount = float(tx.amount or 0)
+        if tx.trans_type == "CREDIT":
+            running_balance += amount
+        else:
+            running_balance -= amount
+            
+        transactions_with_balance.append({
+            'transaction': tx,
+            'balance': running_balance
+        })
+    
+    # Get unique months for filter
+    all_transactions = SpareLedgerTransaction.objects.filter(
+        Q(description__isnull=True) | ~Q(description__startswith='Advance Booking -')
+    )
+    unique_months = sorted(all_transactions.values_list('month_key', flat=True).distinct())
+    
+    context = {
+        "title": "Spare Parts Ledger - Transactions",
+        "total_credits": total_credits,
+        "total_debits": total_debits,
+        "closing_balance": closing_balance,
+        "transactions_with_balance": transactions_with_balance,
+        "unique_months": unique_months,
+        "selected_month": selected_month,
+        "selected_trans_type": selected_trans_type,
+    }
+    
+    return render(request, "portal/custom_admin/spare_ledger_transactions.html", context)
+
+
+@staff_member_required
 def custom_admin_spare_ledger_monthly_report_view(request):
 
     transactions = SpareLedgerTransaction.objects.filter(

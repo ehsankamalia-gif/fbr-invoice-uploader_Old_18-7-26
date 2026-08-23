@@ -1,4 +1,5 @@
 
 @echo off
-cd /d c:\laragon\www\fbr-invoice-uploader\customer_portal
+cd /d "%~dp0"
+call venv\Scripts\activate
 python manage.py shell < fix_portal_passwords.py

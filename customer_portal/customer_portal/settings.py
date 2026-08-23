@@ -60,7 +60,9 @@ WSGI_APPLICATION = 'customer_portal.wsgi.application'
 
 
 def get_database_url():
-    """Get database URL from environment, supporting both MySQL and SQLite like the main app."""
+    """Get database URL from environment, supporting both MySQL and SQLite like the main app.
+    Defaults to SQLite at project root (fbr_invoices.db) which matches desktop app.
+    """
     server = os.getenv("DB_SERVER")
     if server:
         user = os.getenv("DB_USER", "root")
@@ -70,17 +72,10 @@ def get_database_url():
         encoded_password = urllib.parse.quote_plus(password)
         return f"mysql+pymysql://{user}:{encoded_password}@{server}:{port}/{name}"
     
-    if sys.platform == "win32":
-        app_data = os.getenv("APPDATA")
-        if app_data:
-            db_dir = Path(app_data) / "EhsanTraderFBR"
-            db_dir.mkdir(parents=True, exist_ok=True)
-            db_path = db_dir / "fbr_invoices.db"
-            if db_path.exists():
-                return f"sqlite:///{db_path}"
-    
+    # Use the SQLite database at project root (matches desktop app's database)
     parent_db = BASE_DIR.parent / "fbr_invoices.db"
     if parent_db.exists():
+        print(f"Using SQLite database at: {parent_db}")
         return f"sqlite:///{parent_db}"
     
     return f"sqlite:///{BASE_DIR.parent / 'fbr_invoice_uploader.db'}"

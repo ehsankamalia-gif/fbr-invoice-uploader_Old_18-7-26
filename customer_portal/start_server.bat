@@ -5,7 +5,8 @@ echo   Starting Django Development Server
 echo ========================================
 echo.
 
-cd /d "C:\laragon\www\fbr-invoice-uploader_Old_18-7-26\customer_portal"
+cd /d "%~dp0"
+call venv\Scripts\activate
 
 echo Current directory: %cd%
 echo.
