@@ -46,6 +46,10 @@ class FormCaptureService:
         self.task_queue = queue.Queue()
         self.on_data_captured = None # Callback for listeners (e.g. main_window)
         
+        # Batch processing configuration
+        self.batch_size = 5  # Number of field changes before saving
+        self.current_batch = 0
+        
         self.load_config()
         self.processor = CapturedFormProcessor(self.config)
         self._ensure_output_file()
@@ -159,6 +163,7 @@ class FormCaptureService:
         with self._lock:
             self.session_data = {"pages": {}}
             self._save_data()
+            self.current_batch = 0
             logging.info("Session data cleared by user request.")
 
     def execute_task(self, callback):
@@ -310,11 +315,11 @@ class FormCaptureService:
                         if len(pages) > 0:
                             try:
                                 # Use the last page (active) to pump the event loop
-                                # Reduced timeout for better task responsiveness
-                                pages[-1].wait_for_timeout(100) 
+                                # Increased timeout to reduce overhead
+                                pages[-1].wait_for_timeout(300) 
                             except Exception:
                                 # If page closes during wait, fallback to short sleep
-                                time.sleep(0.1)
+                                time.sleep(0.3)
                         else:
                             logging.info("All pages closed, stopping session.")
                             break
@@ -330,14 +335,8 @@ class FormCaptureService:
     def _handle_captured_data(self, source, data):
         """Callback for window.py_capture(data)"""
         try:
-            # DEBUG RAW DATA
-            try:
-                with open("save_debug.txt", "a") as f:
-                    f.write(f"RAW DATA: {data}\n")
-            except:
-                pass
-
-            logging.info(f"Captured Data Received: {data}")
+            # DEBUG RAW DATA - Only log to console, not to file
+            logging.debug(f"Captured Data Received: {data}")
             
             # Check for Form Submission
             if data.get("type") == "form_submission":
@@ -390,8 +389,12 @@ class FormCaptureService:
 
                     self.clear_session_data()
                     
-                    logging.info("Submission captured. Waiting for next action.")
-                    # Removed forced reload to allow validation checks on page
+                # Always save after form submission
+                self._save_data()
+                self.current_batch = 0
+                
+                logging.info("Submission captured. Waiting for next action.")
+                # Removed forced reload to allow validation checks on page
 
                         
                 return
@@ -421,8 +424,14 @@ class FormCaptureService:
                 self.session_data["pages"][page_url]["fields"][selector] = data
                 self.session_data["pages"][page_url]["last_updated"] = time.time()
                 
-                logging.info(f"Data updated in memory for {page_url}. Calling _save_data()...")
-                self._save_data()
+                self.current_batch += 1
+                
+                if self.current_batch >= self.batch_size:
+                    logging.debug(f"Data updated in memory for {page_url}. Batch size {self.batch_size} reached. Saving data...")
+                    self._save_data()
+                    self.current_batch = 0
+                else:
+                    logging.debug(f"Data updated in memory for {page_url}. Batch size {self.current_batch}/{self.batch_size}")
             else:
                 logging.warning(f"No selector in captured data: {data}")
                 
@@ -432,61 +441,27 @@ class FormCaptureService:
     def _save_data(self):
         """Persist data to JSON file"""
         with self._lock:
-            # Retry mechanism for Windows file locking issues
-            max_retries = 5
-            for attempt in range(max_retries):
-                try:
-                    # Direct debug write
-                    try:
-                        with open("save_debug.txt", "a") as dbg:
-                            dbg.write(f"{datetime.now()}: Attempting save (try {attempt+1}). Pages: {len(self.session_data.get('pages', {}))}\n")
-                    except:
-                        pass
-
-                    logging.info(f"Saving data to {self.output_file}")
-                    
-                    # Ensure directory exists
-                    self.output_file.parent.mkdir(parents=True, exist_ok=True)
-                    
-                    # Write to temporary file first to avoid corruption
-                    temp_file = self.output_file.with_suffix('.tmp')
-                    with open(temp_file, 'w') as f:
-                        json.dump(self.session_data, f, indent=2)
-                        f.flush()
-                        os.fsync(f.fileno())
-                    
-                    # Atomic replace with retry handling
-                    try:
-                        if self.output_file.exists():
-                            os.replace(temp_file, self.output_file)
-                        else:
-                            temp_file.rename(self.output_file)
-                        
-                        logging.info("File saved successfully.")
-                        return # Success, exit loop
-                        
-                    except OSError as e:
-                        # Check for Access Denied (WinError 5) or Sharing Violation (WinError 32)
-                        if hasattr(e, 'winerror') and e.winerror in [5, 32]:
-                            if attempt < max_retries - 1:
-                                logging.warning(f"File locked, retrying in 0.2s... ({e})")
-                                time.sleep(0.2)
-                                continue
-                        raise e # Re-raise if not a locking issue or out of retries
-                        
-                except Exception as e:
-                    msg = f"Error saving data (attempt {attempt+1}): {e}"
-                    print(msg)
-                    logging.error(msg)
-                    # Fallback
-                    try:
-                        with open("save_error.txt", "a") as err:
-                            err.write(f"{datetime.now()}: {msg}\n")
-                    except:
-                        pass
-                    
-                    if attempt < max_retries - 1:
-                        time.sleep(0.2)
+            try:
+                # Ensure directory exists
+                self.output_file.parent.mkdir(parents=True, exist_ok=True)
+                
+                # Write to temporary file first to avoid corruption
+                temp_file = self.output_file.with_suffix('.tmp')
+                with open(temp_file, 'w') as f:
+                    json.dump(self.session_data, f)
+                    f.flush()
+                    os.fsync(f.fileno())
+                
+                # Atomic replace
+                if self.output_file.exists():
+                    os.replace(temp_file, self.output_file)
+                else:
+                    temp_file.rename(self.output_file)
+                
+                logging.debug("File saved successfully.")
+                
+            except Exception as e:
+                logging.error(f"Error saving data: {e}")
 
 
     def _get_injection_script(self):
@@ -568,51 +543,28 @@ class FormCaptureService:
                 return false;
             }}
 
-            // Attempt immediately and on mutations
+            // Attempt login prefill only once after a short delay
             try {{ window.tryPrefillLogin = tryPrefillLogin; }} catch(e){{}}
-            let __prefillDone = false;
-            function ensurePrefillLoop() {{
-                let attempts = 0;
-                const maxAttempts = 12; // ~6 seconds
-                const timer = setInterval(() => {{
-                    if (tryPrefillLogin()) {{
-                        __prefillDone = true;
-                        clearInterval(timer);
-                    }} else {{
-                        attempts++;
-                        if (attempts >= maxAttempts) clearInterval(timer);
-                    }}
-                }}, 500);
-            }}
-            ensurePrefillLoop();
-            if (typeof MutationObserver !== 'undefined') {{
-                const mo = new MutationObserver(() => {{ tryPrefillLogin(); }});
-                if (document.body) mo.observe(document.body, {{ subtree: true, childList: true }});
-            }}
+            setTimeout(() => {{
+                tryPrefillLogin();
+            }}, 1500); // Wait for page to fully load before attempting prefill
 
+            // Optimized selector generation - uses id directly if available
             function getCssSelector(el) {{
                 if (!(el instanceof Element)) return;
                 
-                let path = [];
-                while (el.nodeType === Node.ELEMENT_NODE) {{
-                    let selector = el.nodeName.toLowerCase();
-                    if (el.id) {{
-                        selector += '#' + el.id;
-                        path.unshift(selector);
-                        break;
-                    }} else {{
-                        let sib = el, nth = 1;
-                        while (sib = sib.previousElementSibling) {{
-                            if (sib.nodeName.toLowerCase() == selector)
-                                nth++;
-                        }}
-                        if (nth != 1)
-                            selector += ":nth-of-type("+nth+")";
-                    }}
-                    path.unshift(selector);
-                    el = el.parentNode;
+                // If element has an id, use that directly
+                if (el.id) {{
+                    return '#' + el.id;
                 }}
-                return path.join(" > ");
+                
+                // Fallback to tag name with class
+                let selector = el.nodeName.toLowerCase();
+                if (el.className) {{
+                    selector += '.' + el.className.split(' ').join('.');
+                }}
+                
+                return selector;
             }}
 
             function isExcluded(el) {{
@@ -694,7 +646,7 @@ class FormCaptureService:
             }}
 
             // Event Listeners
-            ['input', 'change', 'blur', 'focusout', 'click'].forEach(event => {{
+            ['input', 'change'].forEach(event => {{
                 document.addEventListener(event, (e) => {{
                     try {{
                         if (!e.target || !(e.target instanceof Element)) return;
@@ -747,19 +699,23 @@ class FormCaptureService:
             // Mutation Observer for complex widgets (like Select2 containers)
             if (typeof MutationObserver !== 'undefined') {{
                 const observer = new MutationObserver((mutations) => {{
-                    mutations.forEach((mutation) => {{
-                        // Ignore our own visual feedback changes to avoid infinite loops
-                        if (mutation.type === 'attributes' && (mutation.attributeName === 'style' || mutation.attributeName === 'data-captured' || mutation.attributeName === 'class')) {{
-                            return;
-                        }}
+                    // Process mutations in batches and debounce
+                    clearTimeout(window.__mutationTimeout);
+                    window.__mutationTimeout = setTimeout(() => {{
+                        mutations.forEach((mutation) => {{
+                            // Ignore our own visual feedback changes to avoid infinite loops
+                            if (mutation.type === 'attributes' && (mutation.attributeName === 'style' || mutation.attributeName === 'data-captured' || mutation.attributeName === 'class')) {{
+                                return;
+                            }}
 
-                        let target = mutation.target;
-                        if (target.nodeType === 3) target = target.parentElement; // Text node -> Parent
-                        
-                        if (target && isIncluded(target)) {{
-                            debouncedCapture(target, 'mutation');
-                        }}
-                    }});
+                            let target = mutation.target;
+                            if (target.nodeType === 3) target = target.parentElement; // Text node -> Parent
+                            
+                            if (target && isIncluded(target)) {{
+                                debouncedCapture(target, 'mutation');
+                            }}
+                        }});
+                    }}, 100); // Debounce mutations by 100ms
                 }});
                 
                 // Only observe if body exists (wait for load usually, but this script injects after load)
@@ -943,7 +899,7 @@ class FormCaptureService:
             }}
             
             // Poll every 2 seconds
-            setInterval(pollWhitelistedElements, 2000);
+            setInterval(pollWhitelistedElements, 5000); // Reduced polling frequency
 
             // Initial Capture of whitelisted elements (Fix for static TD elements)
             setTimeout(() => {{
