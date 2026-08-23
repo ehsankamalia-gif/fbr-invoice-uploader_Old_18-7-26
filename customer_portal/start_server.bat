@@ -1,26 +1,40 @@
-
 @echo off
-cd /d "%~dp0"
+chcp 65001 >nul
 echo ========================================
-echo   Starting Customer Portal Server
-echo ========================================
-echo.
-echo The server will be available at:
-echo   http://127.0.0.1:8000
-echo.
-echo Press CTRL+C to stop the server.
-echo.
+echo   Starting Django Development Server
 echo ========================================
 echo.
 
-IF EXIST "..\venv\Scripts\python.exe" (
-    echo [INFO] Using virtual environment found in root...
-    "..\venv\Scripts\python.exe" manage.py runserver
-) ELSE IF EXIST "venv\Scripts\python.exe" (
-    echo [INFO] Using local virtual environment...
-    "venv\Scripts\python.exe" manage.py runserver
-) ELSE (
-    echo [WARNING] Virtual environment not found. Using system python...
-    python manage.py runserver
+cd /d "C:\laragon\www\fbr-invoice-uploader_Old_18-7-26\customer_portal"
+
+echo Current directory: %cd%
+echo.
+echo Checking Python installation...
+python --version
+if errorlevel 1 (
+    echo ERROR: Python not found! Make sure Python is installed and in PATH.
+    pause
+    exit /b 1
 )
+echo.
+
+echo Running Django system checks first...
+python manage.py check
+if errorlevel 1 (
+    echo.
+    echo ERROR: Django system checks failed! Please check the errors above.
+    pause
+    exit /b 1
+)
+echo.
+echo Django system checks passed!
+echo.
+echo ========================================
+echo Starting server on http://127.0.0.1:8000
+echo Press Ctrl+C to stop the server
+echo ========================================
+echo.
+
+python manage.py runserver 127.0.0.1:8000
+
 pause

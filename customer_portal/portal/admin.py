@@ -1,10 +1,9 @@
-
 from django.contrib import admin
 from django.db.models import Count, Q
 from django import forms
 from django.contrib.auth.hashers import make_password
 from .models import (
-    Customer, ProductModel, Motorcycle, 
+    Customer, ProductModel, Motorcycle,
     FinanceCreditSale, FinanceInstallment, FinanceLedger,
     CustomerPortalAuth
 )
@@ -13,13 +12,13 @@ from .models import (
 class HasCreditSalesFilter(admin.SimpleListFilter):
     title = 'Has Credit Sales'
     parameter_name = 'has_credit_sales'
-    
+
     def lookups(self, request, model_admin):
         return (
             ('yes', 'Yes'),
             ('no', 'No'),
         )
-    
+
     def queryset(self, request, queryset):
         if self.value() == 'yes':
             return queryset.annotate(
@@ -37,14 +36,14 @@ class CustomerAdmin(admin.ModelAdmin):
     list_display = ['id', 'name', 'cnic', 'phone', 'type', 'is_deleted', 'credit_sales_count']
     list_filter = ['type', 'is_deleted', HasCreditSalesFilter]
     search_fields = ['name', 'cnic', 'phone', 'business_name']
-    
+
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         qs = qs.annotate(
             credit_sales_count=Count('financecreditsale')
         )
         return qs
-    
+
     def credit_sales_count(self, obj):
         return obj.credit_sales_count
     credit_sales_count.admin_order_field = 'credit_sales_count'
@@ -73,10 +72,10 @@ class CustomerPortalAuthAdmin(admin.ModelAdmin):
         """Auto-set phone number from customer, and use default password if not set."""
         if obj.customer and not obj.phone_number:
             obj.phone_number = obj.customer.phone or ''
-        
+
         if not obj.password_hash or obj.password_hash == '' or obj.password_hash == '123456789':
             obj.password_hash = make_password('123456789')
-        
+
         super().save_model(request, obj, form, change)
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):

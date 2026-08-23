@@ -1,4 +1,3 @@
-
 from django.db import models
 
 
@@ -9,7 +8,7 @@ class Customer(models.Model):
         (INDIVIDUAL, 'Individual'),
         (DEALER, 'Dealer'),
     ]
-    
+
     id = models.IntegerField(primary_key=True)
     cnic = models.CharField(max_length=20, null=False, unique=True)
     name = models.CharField(max_length=100)
@@ -22,11 +21,11 @@ class Customer(models.Model):
     type = models.CharField(max_length=20, choices=TYPE_CHOICES, default=INDIVIDUAL)
     is_deleted = models.BooleanField(default=False)
     created_at = models.DateTimeField()
-    
+
     class Meta:
         db_table = 'customers'
         managed = False
-    
+
     def __str__(self):
         return self.name
 
@@ -38,11 +37,11 @@ class ProductModel(models.Model):
     engine_capacity = models.CharField(max_length=20, null=True)
     pct_code = models.CharField(max_length=20, null=True)
     item_code = models.CharField(max_length=50, null=True)
-    
+
     class Meta:
         db_table = 'product_models'
         managed = False
-    
+
     def __str__(self):
         return self.model_name
 
@@ -54,7 +53,7 @@ class Motorcycle(models.Model):
         (IN_STOCK, 'In Stock'),
         (SOLD, 'Sold'),
     ]
-    
+
     id = models.IntegerField(primary_key=True)
     product_model = models.ForeignKey(ProductModel, on_delete=models.DO_NOTHING, db_column='product_model_id')
     vin = models.CharField(max_length=50, null=True, unique=True)
@@ -66,11 +65,11 @@ class Motorcycle(models.Model):
     sale_price = models.FloatField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=IN_STOCK)
     purchase_date = models.DateTimeField()
-    
+
     class Meta:
         db_table = 'motorcycles'
         managed = False
-    
+
     def __str__(self):
         return f"{self.chassis_number} - {self.product_model.model_name}"
 
@@ -84,7 +83,7 @@ class FinanceCreditSale(models.Model):
         (CLOSED, 'Closed'),
         (OVERDUE, 'Overdue'),
     ]
-    
+
     id = models.IntegerField(primary_key=True)
     sale_id = models.CharField(max_length=50, unique=True)
     customer = models.ForeignKey(Customer, on_delete=models.DO_NOTHING, db_column='customer_id')
@@ -106,11 +105,11 @@ class FinanceCreditSale(models.Model):
     credit_type = models.CharField(max_length=50, default='Advanced Separate Finance')
     notes = models.CharField(max_length=500, null=True)
     created_at = models.DateTimeField()
-    
+
     class Meta:
         db_table = 'finance_credit_sales'
         managed = False
-    
+
     def __str__(self):
         return f"{self.sale_id} - {self.customer_name}"
 
@@ -124,7 +123,7 @@ class FinanceInstallment(models.Model):
         (PAID, 'Paid'),
         (PARTIAL, 'Partial'),
     ]
-    
+
     id = models.IntegerField(primary_key=True)
     payment_id = models.CharField(max_length=50, unique=True)
     sale = models.ForeignKey(FinanceCreditSale, on_delete=models.DO_NOTHING, db_column='sale_id')
@@ -150,12 +149,12 @@ class FinanceInstallment(models.Model):
     paid_total = models.FloatField(default=0.0)
     paid_at = models.DateTimeField(null=True)
     created_at = models.DateTimeField()
-    
+
     class Meta:
         db_table = 'finance_installments'
         managed = False
         ordering = ['-payment_date']
-    
+
     def __str__(self):
         return f"{self.payment_id} - {self.paid_amount}"
 
@@ -172,12 +171,12 @@ class FinanceLedger(models.Model):
     balance = models.FloatField(default=0.0)
     entry_date = models.DateTimeField()
     created_at = models.DateTimeField()
-    
+
     class Meta:
         db_table = 'finance_ledger'
         managed = False
         ordering = ['-entry_date']
-    
+
     def __str__(self):
         return f"{self.ledger_id} - {self.entry_type}"
 
@@ -189,11 +188,11 @@ class CustomerPortalAuth(models.Model):
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         db_table = 'customer_portal_auth'
         managed = True
-    
+
     def __str__(self):
         return f"{self.customer.name} - {self.phone_number}"
 
@@ -207,27 +206,27 @@ class CreditSale(models.Model):
         (CLOSED, 'Closed'),
         (OVERDUE, 'Overdue'),
     ]
-    
+
     id = models.IntegerField(primary_key=True)
     sale_date = models.DateTimeField()
     customer = models.ForeignKey(Customer, on_delete=models.DO_NOTHING, db_column='buyer_id')
     buyer_type = models.CharField(max_length=20)
     duration_months = models.IntegerField(default=0)
     duration_days = models.IntegerField(default=0)
-    
+
     total_cash_price = models.FloatField(default=0.0)
     total_credit_price = models.FloatField(default=0.0)
     advance_payment = models.FloatField(default=0.0)
     advance_payment_mode = models.CharField(max_length=50, default='Cash')
     remaining_amount = models.FloatField(default=0.0)
-    
+
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=ACTIVE)
     created_at = models.DateTimeField()
-    
+
     class Meta:
         db_table = 'credit_sales'
         managed = False
-    
+
     def __str__(self):
         return f"Credit Sale {self.id} - {self.customer.name}"
 
@@ -240,11 +239,11 @@ class CreditSaleItem(models.Model):
     color = models.CharField(max_length=30, null=True)
     cash_price = models.FloatField()
     credit_price = models.FloatField()
-    
+
     class Meta:
         db_table = 'credit_sale_items'
         managed = False
-    
+
     def __str__(self):
         return f"{self.model} - {self.chassis_number}"
 
@@ -260,11 +259,11 @@ class CreditPayment(models.Model):
     payment_mode = models.CharField(max_length=50, default='Cash')
     invoice_reference = models.CharField(max_length=50, null=True)
     created_at = models.DateTimeField()
-    
+
     class Meta:
         db_table = 'credit_payments'
         managed = False
-    
+
     def __str__(self):
         return f"{self.id} - {self.customer.name}"
 
@@ -281,11 +280,11 @@ class BuyerLedger(models.Model):
     reference_id = models.IntegerField(null=True)
     reference_type = models.CharField(max_length=20, null=True)
     created_at = models.DateTimeField()
-    
+
     class Meta:
         db_table = 'buyer_ledger'
         managed = False
-    
+
     def __str__(self):
         return f"{self.id} - {self.customer.name}"
 
@@ -297,14 +296,14 @@ class SpareLedgerTransaction(models.Model):
         (CREDIT, 'Credit'),
         (DEBIT, 'Debit'),
     ]
-    
+
     BANK = 'BANK'
     HARD_CASH = 'HARD_CASH'
     CASH_TYPE_CHOICES = [
         (BANK, 'Bank'),
         (HARD_CASH, 'Cash'),
     ]
-    
+
     id = models.IntegerField(primary_key=True)
     timestamp = models.DateTimeField()
     trans_type = models.CharField(max_length=10, choices=TRANS_TYPE_CHOICES)
@@ -314,12 +313,12 @@ class SpareLedgerTransaction(models.Model):
     cash_type = models.CharField(max_length=20, choices=CASH_TYPE_CHOICES, default=HARD_CASH)
     created_by_user_id = models.IntegerField(null=True)
     month_key = models.CharField(max_length=7, null=True)
-    
+
     class Meta:
         db_table = 'spare_ledger_transactions'
         managed = False
         ordering = ['-timestamp']
-    
+
     def __str__(self):
         return f"{self.id} - {self.trans_type} - {self.amount}"
 
@@ -329,7 +328,7 @@ class SpareLedgerMonthlyClose(models.Model):
     STATUS_CHOICES = [
         (CLOSED, 'Closed'),
     ]
-    
+
     id = models.IntegerField(primary_key=True)
     month_key = models.CharField(max_length=7, unique=True)
     closed_at = models.DateTimeField()
@@ -339,11 +338,11 @@ class SpareLedgerMonthlyClose(models.Model):
     closing_balance = models.FloatField(default=0.0)
     carried_forward = models.FloatField(default=0.0)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=CLOSED)
-    
+
     class Meta:
         db_table = 'spare_ledger_monthly_close'
         managed = False
         ordering = ['-month_key']
-    
+
     def __str__(self):
         return f"{self.month_key} - {self.closing_balance}"
