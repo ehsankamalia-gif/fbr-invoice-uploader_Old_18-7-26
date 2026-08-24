@@ -13,7 +13,7 @@ from .models import (
     Customer, FinanceCreditSale, FinanceInstallment, FinanceLedger,
     ProductModel, Motorcycle, CustomerPortalAuth,
     CreditSale, BuyerLedger, CreditSaleItem, CreditPayment,
-    SpareLedgerTransaction, SpareLedgerMonthlyClose
+    SpareLedgerTransaction, SpareLedgerMonthlyClose, CapturedData
 )
 
 
@@ -1296,6 +1296,34 @@ def custom_admin_spare_ledger_monthly_summary_view(request):
     }
     
     return render(request, "portal/custom_admin/spare_ledger_monthly_summary.html", context)
+
+
+@staff_member_required
+def custom_admin_captured_data_view(request):
+    search_query = request.GET.get('search', '')
+    
+    captured_data = CapturedData.objects.filter(is_deleted=False)
+    
+    if search_query:
+        captured_data = captured_data.filter(
+            Q(name__icontains=search_query) |
+            Q(father__icontains=search_query) |
+            Q(cnic__icontains=search_query) |
+            Q(cell__icontains=search_query) |
+            Q(chassis_number__icontains=search_query) |
+            Q(engine_number__icontains=search_query) |
+            Q(model__icontains=search_query)
+        )
+    
+    captured_data = captured_data.order_by('-created_at')
+    
+    context = {
+        'title': 'Captured Data',
+        'captured_data': captured_data,
+        'search_query': search_query,
+    }
+    
+    return render(request, 'portal/custom_admin/captured_data.html', context)
 
 
 @staff_member_required

@@ -346,3 +346,25 @@ class SpareLedgerMonthlyClose(models.Model):
 
     def __str__(self):
         return f"{self.month_key} - {self.closing_balance}"
+
+
+class CapturedData(models.Model):
+    id = models.IntegerField(primary_key=True)
+    name = models.CharField(max_length=100, null=True)
+    father = models.CharField(max_length=100, null=True)
+    cnic = models.CharField(max_length=20, null=True)
+    cell = models.CharField(max_length=20, null=True)
+    chassis_number = models.CharField(max_length=50, null=True)
+    engine_number = models.CharField(max_length=50, null=True)
+    model = models.CharField(max_length=50, null=True)
+    color = models.CharField(max_length=30, null=True)
+    address = models.CharField(max_length=255, null=True)
+    is_deleted = models.BooleanField(default=False)
+    created_at = models.DateTimeField()
+
+    class Meta:
+        db_table = 'captured_data'
+        managed = False
+
+    def __str__(self):
+        return f"{self.name} - {self.chassis_number}"
