@@ -80,7 +80,6 @@ from app.db.models import (
     InvoiceItem,
     SpareLedgerTransaction,
     CustomerType,
-    CapturedData,
     AdvanceBooking,
 )
 from app.api.schemas import InvoiceCreate, InvoiceItemCreate
@@ -91,7 +90,7 @@ from app.services.api_server_manager import get_api_server_status, start_api_ser
 from app.services.dealer_service import dealer_service
 from app.services.customer_service import customer_service
 from app.services.advance_booking_service import advance_booking_service
-from app.services.form_capture_service import form_capture_service
+
 from app.services.backup_service import backup_service
 from app.services.print_service_v2 import print_service_v2
 from app.qt_ui.dealer_search_dialog import DealerSearchDialog
@@ -420,72 +419,6 @@ class InvoiceSubmissionWorker(QThread):
             self.error.emit(str(e))
         finally:
             db.close()
-
-@dataclass
-class CapturedDataRow:
-    id: int
-    chassis_number: str
-    engine_number: str
-    model: str
-    color: str
-    name: str
-    cnic: str
-    created_at: dt.datetime
-
-class CapturedDataTableModel(QAbstractTableModel):
-    def __init__(self, rows: List[CapturedDataRow] | None = None) -> None:
-        super().__init__()
-        self._rows = rows or []
-        self._headers = ["CHASSIS", "ENGINE", "MODEL", "COLOR", "CUSTOMER", "CNIC", "CAPTURED AT"]
-
-    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
-        return len(self._rows)
-
-    def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:
-        return len(self._headers)
-
-    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> any:
-        if not index.isValid():
-            return None
-            
-        if role == Qt.ItemDataRole.TextAlignmentRole:
-            return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-
-        if role != Qt.ItemDataRole.DisplayRole:
-            return None
-        
-        row = self._rows[index.row()]
-        col = index.column()
-        
-        if col == 0: return str(row.chassis_number or "")
-        if col == 1: return str(row.engine_number or "")
-        if col == 2: return str(row.model or "")
-        if col == 3: return str(row.color or "")
-        if col == 4: return str(row.name or "")
-        if col == 5: return str(row.cnic or "")
-        if col == 6: return row.created_at.strftime("%Y-%m-%d %H:%M") if row.created_at else ""
-        return None
-
-    def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.ItemDataRole.DisplayRole) -> any:
-        if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
-            return self._headers[section]
-        return None
-
-    def update_rows(self, rows: List[CapturedData]) -> None:
-        self.beginResetModel()
-        self._rows = [
-            CapturedDataRow(
-                id=r.id,
-                chassis_number=r.chassis_number,
-                engine_number=r.engine_number,
-                model=r.model,
-                color=r.color,
-                name=r.name,
-                cnic=r.cnic,
-                created_at=r.created_at
-            ) for r in rows
-        ]
-        self.endResetModel()
 
 class _ClickableFilter(QObject):
     """Event filter to make any widget clickable by emitting a callback on left-click release."""
@@ -864,11 +797,6 @@ class MainWindow(QMainWindow):
         self.campaign_progress_signal.connect(self._handle_campaign_progress)
         self.campaign_complete_signal.connect(self._handle_campaign_complete)
 
-        # Auto-refresh timer for Captured Data
-        self._captured_data_timer = QTimer(self)
-        self._captured_data_timer.setInterval(3000) # Faster refresh: 3 seconds
-        self._captured_data_timer.timeout.connect(self._reload_captured_data)
-
         # Auto-refresh timer for SMS Campaigns
         self._sms_campaigns_timer = QTimer(self)
         self._sms_campaigns_timer.setInterval(5000) # Every 5 seconds
@@ -879,8 +807,7 @@ class MainWindow(QMainWindow):
         self._api_server_status_timer.setInterval(3000)
         self._api_server_status_timer.timeout.connect(self._refresh_api_server_status)
 
-        # Register Data Capture Callback
-        form_capture_service.on_data_captured = self._on_browser_data_captured
+
 
         # Initialize Professional Updater
         self._init_updater()
@@ -1233,7 +1160,7 @@ class MainWindow(QMainWindow):
         self._add_page("invoice", self._create_invoice_page(), "Invoice")
         self._add_page("print_document", self._create_print_document_page(), "Print Document")
         self._add_page("inventory", self._create_inventory_page(), "Inventory")
-        self._add_page("captured_data", self._create_captured_data_page(), "Captured Data")
+
         self._add_page("prices", self._create_prices_page(), "Prices")
         self._add_page("customers", self._create_customers_page(), "Customers")
         self._add_page("dealers", self._create_dealers_page(), "Dealers")
@@ -1265,7 +1192,7 @@ class MainWindow(QMainWindow):
             "whatsapp": "📱",
             "settings": "⚙️",
             "welcome": "👋",
-            "captured_data": "📁",
+
             "print_document": "🖨️",
             "dms_automation": "🤖",
             "excise": "📋",
@@ -1275,7 +1202,7 @@ class MainWindow(QMainWindow):
         self.menu_groups = {
             "GENERAL": ["dashboard", "welcome"],
             "SALES": ["invoice", "reports", "advance_booking", "print_document", "excise"],
-            "INVENTORY": ["inventory", "prices", "spare_ledger", "captured_data"],
+            "INVENTORY": ["inventory", "prices", "spare_ledger"],
             "DIRECTORY": ["customers", "dealers"],
             "AUTOMATION": ["dms_automation"],
             "PORTAL": ["portal_accounts", "credit_ledger"],
@@ -1568,10 +1495,6 @@ class MainWindow(QMainWindow):
         for k, btn in self._nav_buttons.items():
             btn.setChecked(k == key)
         
-        # Always stop auto-refresh unless we are on captured_data page
-        if hasattr(self, "_captured_data_timer"):
-            self._captured_data_timer.stop()
-
         # Trigger refresh if page has a refresh method
         if key == "welcome":
             self._refresh_welcome_stats()
@@ -1585,9 +1508,6 @@ class MainWindow(QMainWindow):
             self._reload_customers()
         elif key == "dealers":
             self._reload_dealers()
-        elif key == "captured_data":
-            self._reload_captured_data()
-            self._captured_data_timer.start() # Start auto-refresh while on this page
 
     def _on_focus_changed(self, old: QWidget | None, now: QWidget | None) -> None:
         """Automatically scrolls the invoice form to ensure the focused widget is visible."""
@@ -5633,19 +5553,6 @@ class MainWindow(QMainWindow):
         header_layout.addLayout(header_v_box)
         header_layout.addStretch(1)
 
-        # Consolidated Sync & Capture Button
-        sync_capture_btn = QPushButton("🔄 Sync & Capture Data")
-        sync_capture_btn.setStyleSheet("background-color: #3498db; color: white; border: none; font-weight: bold; padding: 10px 20px; border-radius: 8px;")
-        sync_capture_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        sync_capture_btn.clicked.connect(self._on_sync_and_capture_clicked)
-        header_layout.addWidget(sync_capture_btn)
-
-        view_cap_btn = QPushButton("📁 View Captured")
-        view_cap_btn.setStyleSheet("background-color: #1abc9c; color: white; border: none; font-weight: bold; padding: 10px 20px; border-radius: 8px;")
-        view_cap_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        view_cap_btn.clicked.connect(self._on_view_captured_clicked)
-        header_layout.addWidget(view_cap_btn)
-
         layout.addWidget(header_widget)
 
         # Filter Card
@@ -5736,179 +5643,6 @@ class MainWindow(QMainWindow):
         self._reload_inventory()
 
         return page
-
-    def _on_sync_and_capture_clicked(self) -> None:
-        """Sequential workflow: Import inventory then launch capture browser."""
-        # Step 1: Open the Import Dialog
-        dialog = WebImportDialog(self)
-        dialog.exec()
-        
-        # Step 2: Automatically trigger capture browser launch after import
-        self._on_launch_capture_clicked()
-
-    def _on_launch_capture_clicked(self) -> None:
-        """Launches the background capture browser."""
-        try:
-            # Default to Atlas Honda Portal base URL
-            target_url = "https://dealers.ahlportal.com"
-            form_capture_service.start_capture_session(target_url)
-            QMessageBox.information(self, "Browser Launched", "Capture browser has been launched.\nNavigate to the portal to begin capturing data.")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to launch browser: {e}")
-
-    def _on_view_captured_clicked(self) -> None:
-        """Switches to the captured data page."""
-        self._select_page("captured_data")
-
-    def _on_browser_data_captured(self, chassis: str) -> None:
-        """Callback from background service when data is captured."""
-        # Use QTimer to ensure this runs on main thread
-        QTimer.singleShot(0, lambda: self._handle_background_capture(chassis))
-
-    def _handle_background_capture(self, chassis: str) -> None:
-        if not self.isVisible():
-            return
-            
-        # If we are on invoice page, try to auto-fill
-        if self.stack.currentWidget() == self._pages.get("invoice"):
-            if chassis:
-                self.invoice_chassis_input.setText(chassis)
-                self._on_chassis_selected(chassis)
-                QMessageBox.information(self, "Data Captured", f"Imported details for chassis: {chassis}")
-            else:
-                QMessageBox.information(self, "Data Captured", "New data was captured from the browser.")
-        elif self.stack.currentWidget() == self._pages.get("captured_data"):
-            self._reload_captured_data()
-            
-    def _create_captured_data_page(self) -> QWidget:
-        page = QWidget(self)
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(25)
-
-        # Header
-        header_widget = QWidget()
-        header_layout = QHBoxLayout(header_widget)
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        
-        header_v_box = QVBoxLayout()
-        header = QLabel("Captured Customer Data")
-        header.setObjectName("pageHeader")
-        header_v_box.addWidget(header)
-        
-        self.captured_last_updated_label = QLabel("Last updated: Never")
-        self.captured_last_updated_label.setStyleSheet("color: #7f8c8d; font-size: 11px;")
-        header_v_box.addWidget(self.captured_last_updated_label)
-        
-        header_subtitle = QLabel("Review and manage data captured from the browser sessions.")
-        header_subtitle.setStyleSheet("color: #7f8c8d; font-size: 13px;")
-        header_v_box.addWidget(header_subtitle)
-        
-        header_layout.addLayout(header_v_box)
-        header_layout.addStretch(1)
-        
-        back_btn = QPushButton("← Back to Inventory")
-        back_btn.setObjectName("resetButton")
-        back_btn.clicked.connect(lambda: self._select_page("inventory"))
-        header_layout.addWidget(back_btn)
-        
-        layout.addWidget(header_widget)
-
-        # Table
-        self.captured_table_model = CapturedDataTableModel()
-        self.captured_table_view = QTableView()
-        self.captured_table_view.setModel(self.captured_table_model)
-        self.captured_table_view.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
-        self.captured_table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.captured_table_view.verticalHeader().setVisible(False)
-        self.captured_table_view.setAlternatingRowColors(True)
-        self.captured_table_view.setShowGrid(True)
-        self.captured_table_view.setStyleSheet("""
-            QTableView { 
-                background-color: white; 
-                border: 1px solid #e0e0e0; 
-                border-radius: 12px; 
-                gridline-color: #f1f1f1;
-                color: #2c3e50;
-            }
-            QHeaderView::section {
-                background-color: #f8f9fa;
-                color: #5a6268;
-                padding: 10px;
-                border: none;
-                border-bottom: 2px solid #e9ecef;
-                font-weight: bold;
-            }
-        """)
-        # Install Auto Scroll Manager
-        self.captured_table_auto_scroll = AutoScrollManager(self)
-        self.captured_table_auto_scroll.install_on_widget(self.captured_table_view)
-        
-        layout.addWidget(self.captured_table_view, 1)
-
-        # Actions
-        btn_bar = QHBoxLayout()
-        btn_bar.addStretch(1)
-        
-        refresh_btn = QPushButton("↻ Refresh List")
-        refresh_btn.clicked.connect(self._reload_captured_data)
-        btn_bar.addWidget(refresh_btn)
-        
-        delete_btn = QPushButton("🗑 Delete Selected")
-        delete_btn.setStyleSheet("background-color: #e74c3c; color: white;")
-        delete_btn.clicked.connect(self._on_delete_captured_clicked)
-        btn_bar.addWidget(delete_btn)
-        
-        layout.addLayout(btn_bar)
-        
-        return page
-
-    def _reload_captured_data(self) -> None:
-        db = SessionLocal()
-        try:
-            # Query the correct model
-            rows = db.query(CapturedData).filter(CapturedData.is_deleted == False).order_by(CapturedData.created_at.desc()).all()
-            
-            # Diagnostic logging (using print to ensure it shows up in some contexts)
-            # print(f"DEBUG: Reloading captured data. Found {len(rows)} records. Timer active: {self._captured_data_timer.isActive()}")
-            
-            # Update the model and notify the view
-            self.captured_table_model.update_rows(rows)
-            
-            # Ensure the table is visible and updating
-            self.captured_table_view.viewport().update()
-            
-            # Update last updated label
-            if hasattr(self, "captured_last_updated_label"):
-                now = dt.datetime.now().strftime("%H:%M:%S")
-                self.captured_last_updated_label.setText(f"Auto-refreshing: {now}")
-                self.captured_last_updated_label.setStyleSheet("color: #27ae60; font-weight: bold; font-size: 11px;") # Green color when active
-            
-        except Exception as e:
-            logger.error(f"CRITICAL: Failed to reload captured data: {e}", exc_info=True)
-            if hasattr(self, "captured_last_updated_label"):
-                self.captured_last_updated_label.setText(f"Refresh Error: {e}")
-                self.captured_last_updated_label.setStyleSheet("color: #e74c3c; font-size: 11px;")
-        finally:
-            db.close()
-
-    def _on_delete_captured_clicked(self) -> None:
-        selection = self.captured_table_view.selectionModel().selectedRows()
-        if not selection:
-            return
-            
-        row = selection[0].row()
-        record = self.captured_table_model._rows[row]
-        
-        reply = QMessageBox.question(self, "Confirm Delete", f"Delete captured data for {record.chassis_number}?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        if reply == QMessageBox.StandardButton.Yes:
-            db = SessionLocal()
-            try:
-                db.query(CapturedData).filter(CapturedData.id == record.id).update({"is_deleted": True})
-                db.commit()
-                self._reload_captured_data()
-            finally:
-                db.close()
 
     def _create_prices_page(self) -> QWidget:
         page = QWidget(self)
@@ -6567,23 +6301,6 @@ class MainWindow(QMainWindow):
             
             suggestions = [r[0] for r in results]
             
-            # Also search in Captured Data - EXCLUDE already uploaded
-            # To exclude from captured data, we need to check if the captured chassis 
-            # matches any chassis already in fiscalized invoices
-            uploaded_chassis = db.query(Motorcycle.chassis_number).join(InvoiceItem).join(Invoice).filter(
-                Invoice.is_fiscalized == True
-            ).subquery()
-
-            captured_results = db.query(CapturedData.chassis_number).filter(
-                CapturedData.is_deleted == False,
-                CapturedData.chassis_number.ilike(f"%{query_text}%"),
-                ~CapturedData.chassis_number.in_(uploaded_chassis)
-            ).limit(10).all()
-            
-            for r in captured_results:
-                if r[0] not in suggestions:
-                    suggestions.append(r[0])
-            
             self._chassis_completer_model.setStringList(suggestions)
             if suggestions:
                 popup = self.invoice_chassis_completer.popup()
@@ -6619,30 +6336,7 @@ class MainWindow(QMainWindow):
                 self.invoice_chassis_input.clear()
                 return
 
-            # 1. Search in Captured Data (Priority for Buyer Info)
-            cap = db.query(CapturedData).filter(CapturedData.chassis_number == chassis, CapturedData.is_deleted == False).first()
-            if cap:
-                # Populate Buyer Details
-                if cap.cnic: self.invoice_buyer_cnic_input.setText(cap.cnic)
-                if cap.name: self.invoice_buyer_name_input.setText(cap.name.upper())
-                if cap.father: self.invoice_buyer_father_input.setText(cap.father.upper())
-                if cap.cell: self.invoice_buyer_phone_input.setText(cap.cell)
-                if cap.address: self.invoice_buyer_address_input.setText(cap.address.upper())
-                
-                # Populate Vehicle Details from Capture
-                if cap.engine_number: self.invoice_engine_input.setText(cap.engine_number.upper())
-                
-                if cap.model:
-                    model_idx = self.invoice_model_combo.findText(cap.model, Qt.MatchFlag.MatchContains)
-                    if model_idx >= 0:
-                        self.invoice_model_combo.setCurrentIndex(model_idx)
-                
-                if cap.color:
-                    color_idx = self.invoice_color_combo.findText(cap.color, Qt.MatchFlag.MatchContains)
-                    if color_idx >= 0:
-                        self.invoice_color_combo.setCurrentIndex(color_idx)
-
-            # 2. Search in Motorcycle Inventory (Priority for Pricing)
+            # 1. Search in Motorcycle Inventory (Priority for Pricing)
             bike = db.query(Motorcycle).filter(Motorcycle.chassis_number == chassis).first()
             if bike:
                 self.invoice_chassis_input.blockSignals(True)
@@ -11270,7 +10964,7 @@ class MainWindow(QMainWindow):
                     settings_service.unsubscribe(self._settings_subscription_token)
             except Exception:
                 pass
-            form_capture_service.stop_capture_session()
+
             
             # Cleanup DB connections
             close_all_db_connections()
