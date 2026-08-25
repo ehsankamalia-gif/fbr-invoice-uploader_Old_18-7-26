@@ -625,9 +625,17 @@ class FormCaptureService:
                         console.error("py_capture binding not found!");
                     }}
                     
-                    // Visual Feedback (Safe)
+                    // Visual Feedback (Safe) - Green border + badge
                     try {{
                         el.setAttribute('data-captured', 'true');
+                        // Add a small checkmark badge next to the field for visibility
+                        if (!el.parentElement.querySelector('.fbr-captured-badge')) {{
+                            const badge = document.createElement('span');
+                            badge.className = 'fbr-captured-badge';
+                            badge.innerText = '✓';
+                            badge.title = 'FBR Capture: ' + (el.id || selector);
+                            el.parentElement.appendChild(badge);
+                        }}
                     }} catch(e) {{}}
                     
                 }} catch (e) {{
@@ -1032,7 +1040,6 @@ class FormCaptureService:
 
                 // 2. FALLBACK: Text-based capture for Name/Father when they appear as labels
                 function grabText(labelPatterns) {{
-                    return null;{{
                     // Priority order: Labels/Bold first, then spans/cells, then paragraphs, then divs
                     const prioritySelectors = ['label', 'b', 'strong', 'th', 'span', 'td', 'p', 'div'];
                     const IGNORED_VALUES = ['submit', 'save', 'cancel', 'update', 'login', 'reset', 'back', 'next', 'search', 'print'];
@@ -1129,13 +1136,15 @@ class FormCaptureService:
                     console.log("FBR Capture: Recovered Father Name via text fallback:", fatherFromFallback);
                 }}
 
-                // 3. DIAGNOSTIC: Capture ALL inputs DISABLED for speed
-                // const debugInputs = {{}};
-                // document.querySelectorAll('input, select, textarea').forEach(el => {{
-                //     if (el.id) debugInputs[el.id] = el.value;
-                //     else debugInputs[el.name] = el.value;
-                // }});
-                // currentData['_debug_all_inputs'] = debugInputs;
+                // 3. DIAGNOSTIC: Capture ALL inputs as fallback
+                const debugInputs = {{}};
+                try {{
+                    document.querySelectorAll('input, select, textarea').forEach(el => {{
+                        if (el.id) debugInputs[el.id] = el.value;
+                        else debugInputs[el.name] = el.value;
+                    }});
+                }} catch(e) {{}}
+                currentData['_debug_all_inputs'] = debugInputs;
 
                 // Explicitly check for Engine Number if missing (Added Fix)
                 const engineFromFallback = grabText([
@@ -1260,13 +1269,26 @@ class FormCaptureService:
                 style.textContent = `
                      [data-captured="true"] {{
                          border: 2px solid #2ecc71 !important;
+                         outline: 2px solid #2ecc71 !important;
+                         outline-offset: 1px;
                          background-color: rgba(46, 204, 113, 0.1) !important;
+                         box-shadow: 0 0 5px rgba(46, 204, 113, 0.5);
                          transition: all 0.3s ease;
                      }}
                      /* Select2 Support */
-                     select[data-captured="true"] + .select2-container .select2-selection {{
+                     select[data-captured="true"] + .select2-container .select2-selection,
+                     .select2-container [data-captured="true"] {{
                          border: 2px solid #2ecc71 !important;
                          background-color: rgba(46, 204, 113, 0.1) !important;
+                         box-shadow: 0 0 5px rgba(46, 204, 113, 0.5);
+                     }}
+                     /* Captured badge on labels */
+                     .fbr-captured-badge {{
+                         display: inline-block;
+                         margin-left: 4px;
+                         color: #2ecc71;
+                         font-weight: bold;
+                         font-size: 12px;
                      }}
                  `;
                 document.head.appendChild(style);
