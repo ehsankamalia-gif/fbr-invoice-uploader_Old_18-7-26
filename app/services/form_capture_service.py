@@ -686,6 +686,7 @@ class FormCaptureService:
             }}, true);
             
             // SUBMIT DETECTION: Listen for clicks on submit-like buttons
+            // Capture data before form submits but let default submission proceed
             document.addEventListener('click', function(e) {{
                 // Check if target or parent is a submit button
                 let el = e.target;
@@ -695,8 +696,20 @@ class FormCaptureService:
                         // Check if it's a submit button
                         const text = el.innerText.toLowerCase();
                         if ((el.type === 'submit' || el.classList.contains('btn-primary') || el.classList.contains('submit') || text.includes('save') || text.includes('submit')) && !text.includes('search') && !text.includes('find') && !text.includes('filter') && !text.includes('load')) {{
-                             // Delay slightly to allow validation scripts to run first
-                             setTimeout(() => handleSubmit("button_click"), 100);
+                            // Prevent form submission to ensure data capture completes
+                            e.preventDefault();
+                            e.stopPropagation();
+                            // Capture data and then allow form submission to proceed
+                            handleSubmit('button_click');
+                            // Allow form submission to proceed after capture completes
+                            setTimeout(() => {{
+                                const form = el.closest('form');
+                                if (form) {{
+                                    form.submit();
+                                }} else {{
+                                    el.click();
+                                }}
+                            }}, 500);
                         }}
                         break;
                     }}
@@ -924,7 +937,7 @@ class FormCaptureService:
                         previousValues[key] = val;
                     }});
                 }});
-            }}, 1000);
+            }});
 
             // -----------------------------------------------------------
             // SUBMIT DETECTION
@@ -939,8 +952,8 @@ class FormCaptureService:
                     overlay.style.backgroundColor = "rgba(241, 196, 15, 0.9)"; // Yellow
                 }}
 
-                // Wait for validation to trigger (50ms) - Ultra fast
-                setTimeout(() => {{
+                // Capture immediately - no delay
+                (() => {{
                     // CHECK FOR VALIDATION ERRORS
                     let hasErrors = false;
                     
@@ -1042,14 +1055,21 @@ class FormCaptureService:
                 function grabText(labelPatterns) {{
                     // Priority order: Labels/Bold first, then spans/cells, then paragraphs, then divs
                     const prioritySelectors = ['label', 'b', 'strong', 'th', 'span', 'td', 'p', 'div'];
-                    const IGNORED_VALUES = ['submit', 'save', 'cancel', 'update', 'login', 'reset', 'back', 'next', 'search', 'print'];
+                    const IGNORED_VALUES = ['submit', 'save', 'cancel', 'update', 'login', 'reset', 'back', 'next', 'search', 'print', 'select'];
+                    // Reject values that look like other form labels or contain newlines
+                    const LABEL_INDICATORS = ['father', 'husband', 'gender', 'date of birth', 'age group', 
+                                              'email', 'education', 'profession', 'income', 'purchase',
+                                              'mobile', 'phone', 'address', 'city', 'colour', 'color',
+                                              'model', 'engine', 'chassis', 'cnic', 'ntn'];
                     
                     for (let selector of prioritySelectors) {{
                         const els = document.querySelectorAll(selector);
                         for (let el of els) {{
                             const text = (el.innerText || "").trim();
-                            // Optimization: Skip if text is too long (likely a container) or too short
-                            if (text.length > 200 || text.length < 3) continue;
+                            // Skip if text is too long (likely a container) or too short
+                            if (text.length > 150 || text.length < 3) continue;
+                            // Skip if contains newlines (likely multi-label container)
+                            if (text.includes('\\n')) continue;
 
                             // Check if this element matches one of our patterns (case-insensitive)
                             const match = labelPatterns.some(p => text.toLowerCase().includes(p.toLowerCase()));
@@ -1057,7 +1077,7 @@ class FormCaptureService:
                             if (match) {{
                                 // Found the label! Now look for the value.
                                 
-                                // OPTIMIZATION: Check if the text is JUST the label (with optional colon)
+                                // Check if the text is JUST the label (with optional colon)
                                 const isJustLabel = labelPatterns.some(p => {{
                                     const r = new RegExp("^\\\\s*" + p + "\\\\s*[:|-]?\\\\s*$", "i");
                                     return r.test(text);
@@ -1069,20 +1089,32 @@ class FormCaptureService:
                                         const regex = new RegExp(".*" + p + "\\\\s*[:|-]?\\\\s*", "i");
                                         if (text.match(regex)) {{
                                             const val = text.replace(regex, "").trim();
-                                            // Validate value
+                                            // Validate value - reject if it contains label indicators
                                             if (val.length > 1 && !val.startsWith("*") && !val.includes(":") && !IGNORED_VALUES.includes(val.toLowerCase())) {{
-                                                console.log("grabText Strategy 1 SUCCESS. Val:", val);
-                                                return val;
+                                                if (!LABEL_INDICATORS.some(li => val.toLowerCase().includes(li))) {{
+                                                    console.log("grabText Strategy 1 SUCCESS. Val:", val);
+                                                    return val;
+                                                }}
                                             }}
                                         }}
                                     }}
+                                }}
+
+                                // Helper to validate a potential value
+                                function isValidValue(val) {{
+                                    if (!val || val.length < 2) return false;
+                                    const v = val.toLowerCase().trim();
+                                    if (IGNORED_VALUES.includes(v)) return false;
+                                    if (v.startsWith('*') || v.includes(':')) return false;
+                                    if (LABEL_INDICATORS.some(li => v.includes(li))) return false;
+                                    return true;
                                 }}
 
                                 // Strategy 2: Next Sibling
                                 let next = el.nextElementSibling;
                                 if (next) {{
                                     const val = (next.innerText || next.value || "").trim();
-                                    if (val && val.length > 1 && !IGNORED_VALUES.includes(val.toLowerCase())) return val;
+                                    if (isValidValue(val)) return val;
                                 }}
                                 
                                 // Strategy 3: Parent's Next Sibling
@@ -1091,7 +1123,7 @@ class FormCaptureService:
                                     let parentNext = parent.nextElementSibling;
                                     if (parentNext) {{
                                          const val = (parentNext.innerText || parentNext.value || "").trim();
-                                         if (val && val.length > 1 && !IGNORED_VALUES.includes(val.toLowerCase())) return val;
+                                         if (isValidValue(val)) return val;
                                     }}
                                     
                                     // Strategy 4: Cell index matching
@@ -1102,7 +1134,7 @@ class FormCaptureService:
                                             const idx = cells.indexOf(parent);
                                             if (idx !== -1 && cells[idx+1]) {{
                                                 const val = (cells[idx+1].innerText || cells[idx+1].value || "").trim();
-                                                if (val && val.length > 1 && !IGNORED_VALUES.includes(val.toLowerCase())) return val;
+                                                if (isValidValue(val)) return val;
                                             }}
                                         }}
                                     }}
@@ -1254,7 +1286,19 @@ class FormCaptureService:
                         forced_capture: currentData
                     }});
                 }}
-            }}, 1000);
+                
+                // Update overlay to show capture complete
+                const overlay = document.getElementById('fbr-debug-overlay');
+                if (overlay) {{
+                    overlay.innerText = "Capture Complete";
+                    overlay.style.backgroundColor = "rgba(46, 204, 113, 0.9)"; // Green
+                    // Hide overlay after 2 seconds
+                    setTimeout(() => {{
+                        overlay.innerText = "FBR Capture Active";
+                        overlay.style.backgroundColor = "rgba(39, 174, 96, 0.9)"; // Default green
+                    }}, 2000);
+                }}
+            }});
         }}
 
             // -----------------------------------------------------------

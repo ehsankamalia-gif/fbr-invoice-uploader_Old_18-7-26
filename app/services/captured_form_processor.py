@@ -140,16 +140,34 @@ class CapturedFormProcessor:
                     cnic_parts.append((target_field, value))
 
         # FALLBACK: Check for missing fields using diagnostic map
+        # Also OVERRIDE if the existing value is empty, garbage, or just a label
+        GARBAGE_PATTERNS = ["submit", "save", "cancel", "search", "reset", "print", "back", "next",
+                           "father", "husband", "gender", "date of birth", "age group", "select"]
+        
         for selector, target_field in self.mapping.items():
+            # Check if we should try the fallback
+            existing_val = result.get(target_field)
+            should_fallback = False
+            
             if target_field not in result:
+                should_fallback = True
+            elif not existing_val or not str(existing_val).strip():
+                should_fallback = True
+            elif len(str(existing_val)) > 100 or "\n" in str(existing_val):
+                # Contains newlines or is too long - likely garbage
+                should_fallback = True
+            elif any(p in str(existing_val).lower() for p in GARBAGE_PATTERNS):
+                should_fallback = True
+                
+            if should_fallback:
                 # Try to find it in diagnostic_map
                 # Selector is like "#txt_full_name" -> look for "txt_full_name"
                 clean_key = selector.replace('#', '').replace('.', '').lower()
                 
                 if clean_key in diagnostic_map:
                     val = diagnostic_map[clean_key]
-                    if val:
-                        logger.info(f"Fallback: Found {target_field} via diagnostic map key {clean_key}")
+                    if val and str(val).strip():
+                        logger.info(f"Fallback: Found {target_field} via diagnostic map key {clean_key} (was: '{existing_val}')")
                         result[target_field] = val
                         
                         if target_field.startswith("buyer_cnic_part"):
