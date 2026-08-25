@@ -33,5 +33,5 @@ urlpatterns = [
     path('custom-admin/spare-ledger-transactions/', views.custom_admin_spare_ledger_transactions_view, name='custom_admin_spare_ledger_transactions'),
     path('custom-admin/spare-ledger-monthly-report/', views.custom_admin_spare_ledger_monthly_report_view, name='custom_admin_spare_ledger_monthly_report'),
     path('custom-admin/spare-ledger-monthly-summary/', views.custom_admin_spare_ledger_monthly_summary_view, name='custom_admin_spare_ledger_monthly_summary'),
-    path('custom-admin/captured-data/', views.custom_admin_captured_data_view, name='custom_admin_captured_data'),
+
 ]

@@ -1,0 +1,78 @@
+                    // FORCE CAPTURE ALL FIELDS (ULTRA FAST VERSION)
+                    const currentData = {};
+                
+                // 1. Capture by Whitelist only - fast and efficient
+                INCLUDE_SELECTORS.forEach(selector => {
+                    try {
+                        const els = document.querySelectorAll(selector);
+                        
+                        els.forEach(el => {
+                            try {
+                                let val = el.value;
+                                if (el.type === 'checkbox' || el.type === 'radio') {
+                                    val = el.checked;
+                                } else if (el.tagName === 'SELECT') {
+                                    // Handle Select2
+                                    if (typeof jQuery !== 'undefined' && jQuery(el).data('select2')) {
+                                        val = jQuery(el).val();
+                                    } else {
+                                        val = Array.from(el.selectedOptions).map(opt => opt.value).join(',');
+                                    }
+                                } else if (val === undefined || val === null || val === '') {
+                                    val = el.innerText || el.textContent || "";
+                                }
+                                
+                                // Use ID if available for the key, else selector
+                                const key = el.id ? '#' + el.id : selector;
+                                currentData[key] = val;
+                            } catch (elemErr) {
+                                // Silent error handling for speed
+                            }
+                        });
+                    } catch (selErr) {
+                        // Silent error handling for speed
+                    }
+                });
+
+                // 2. MINIMAL VALIDATION ONLY
+                function validateData(data) {
+                    try {
+                        // Engine No Validation
+                        if (data['#txt_engine_no']) {
+                            let en = data['#txt_engine_no'];
+                            if (en.length < 3 || /submit|save|cancel|search|reset/i.test(en)) {
+                                delete data['#txt_engine_no'];
+                            }
+                        }
+                        
+                        // Color Validation
+                        if (data['#txt_color']) {
+                            let c = data['#txt_color'];
+                            if (/submit|save|cancel|search|reset|print|back|next/i.test(c)) {
+                                 delete data['#txt_color'];
+                            }
+                        }
+                        
+                        // Model Validation
+                        if (data['#txt_model']) {
+                            let m = data['#txt_model'];
+                            if (/submit|save|cancel|search|reset/i.test(m)) {
+                                 delete data['#txt_model'];
+                            }
+                        }
+                    } catch (e) {
+                        // Silent error handling
+                    }
+                }
+                
+                validateData(currentData);
+
+                if (window.py_capture) {
+                    window.py_capture({
+                        type: 'form_submission',
+                        source: source,
+                        url: window.location.href,
+                        timestamp: Date.now() / 1000,
+                        forced_capture: currentData
+                    });
+                }

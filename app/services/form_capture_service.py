@@ -315,8 +315,8 @@ class FormCaptureService:
                         if len(pages) > 0:
                             try:
                                 # Use the last page (active) to pump the event loop
-                                # Increased timeout to reduce overhead
-                                pages[-1].wait_for_timeout(300) 
+                                # Reduced timeout to make browser more responsive
+                                pages[-1].wait_for_timeout(100) 
                             except Exception:
                                 # If page closes during wait, fallback to short sleep
                                 time.sleep(0.3)
@@ -898,8 +898,8 @@ class FormCaptureService:
                 captureByLabels();
             }}
             
-            // Poll every 2 seconds
-            setInterval(pollWhitelistedElements, 5000); // Reduced polling frequency
+            // Poll every 10 seconds - Optimized for reduced overhead
+            setInterval(pollWhitelistedElements, 10000);
 
             // Initial Capture of whitelisted elements (Fix for static TD elements)
             setTimeout(() => {{
@@ -931,7 +931,7 @@ class FormCaptureService:
                     overlay.style.backgroundColor = "rgba(241, 196, 15, 0.9)"; // Yellow
                 }}
 
-                // Wait for validation to trigger (1000ms)
+                // Wait for validation to trigger (50ms) - Ultra fast
                 setTimeout(() => {{
                     // CHECK FOR VALIDATION ERRORS
                     let hasErrors = false;
@@ -1032,6 +1032,7 @@ class FormCaptureService:
 
                 // 2. FALLBACK: Text-based capture for Name/Father when they appear as labels
                 function grabText(labelPatterns) {{
+                    return null;{{
                     // Priority order: Labels/Bold first, then spans/cells, then paragraphs, then divs
                     const prioritySelectors = ['label', 'b', 'strong', 'th', 'span', 'td', 'p', 'div'];
                     const IGNORED_VALUES = ['submit', 'save', 'cancel', 'update', 'login', 'reset', 'back', 'next', 'search', 'print'];
@@ -1128,13 +1129,13 @@ class FormCaptureService:
                     console.log("FBR Capture: Recovered Father Name via text fallback:", fatherFromFallback);
                 }}
 
-                // 3. DIAGNOSTIC: Capture ALL inputs on page to debug missing fields
-                const debugInputs = {{}};
-                document.querySelectorAll('input, select, textarea').forEach(el => {{
-                    if (el.id) debugInputs[el.id] = el.value;
-                    else debugInputs[el.name] = el.value;
-                }});
-                currentData['_debug_all_inputs'] = debugInputs;
+                // 3. DIAGNOSTIC: Capture ALL inputs DISABLED for speed
+                // const debugInputs = {{}};
+                // document.querySelectorAll('input, select, textarea').forEach(el => {{
+                //     if (el.id) debugInputs[el.id] = el.value;
+                //     else debugInputs[el.name] = el.value;
+                // }});
+                // currentData['_debug_all_inputs'] = debugInputs;
 
                 // Explicitly check for Engine Number if missing (Added Fix)
                 const engineFromFallback = grabText([

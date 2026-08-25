@@ -30,37 +30,21 @@ class CapturedFormProcessor:
                     val = field_info.get("value", "")
                     flat_data[selector] = val
 
-            logger.info(f"Processing submission with data: {flat_data}")
-
-            # DEBUG: Dump flat data
-            try:
-                with open("save_debug.txt", "a") as f:
-                    f.write(f"\n--- SUBMISSION START {datetime.now()} ---\n")
-                    f.write(f"Flat Data Keys: {list(flat_data.keys())}\n")
-                    f.write(f"Flat Data Content: {flat_data}\n")
-            except:
-                pass
+            logger.debug(f"Processing submission with data: {flat_data}")
 
             # 2. Map data to schema fields
             mapped_data = self._map_data(flat_data)
-            logger.info(f"Mapped data: {mapped_data}")
-
-            # DEBUG: Dump mapped data
-            try:
-                with open("save_debug.txt", "a") as f:
-                    f.write(f"Mapped Data: {mapped_data}\n")
-            except:
-                pass
+            logger.debug(f"Mapped data: {mapped_data}")
 
             # 3. Validate required fields
             if not self._validate(mapped_data):
                 logger.error(f"Validation failed for captured form. Missing fields. Mapped Data: {mapped_data}")
                 return False
 
-            logger.info("Validation passed. Attempting to save to database...")
+            logger.debug("Validation passed. Attempting to save to database...")
 
-            # 4. Save to CapturedData Table with Retry Logic
-            max_retries = 3
+            # 4. Save to CapturedData Table with Optimized Retry Logic
+            max_retries = 2
             
             for attempt in range(max_retries):
                 try:
@@ -71,7 +55,7 @@ class CapturedFormProcessor:
                         
                         if existing:
                             # Update existing record
-                            logger.info(f"Updating existing record for chassis {chassis}")
+                            logger.debug(f"Updating existing record for chassis {chassis}")
                             existing.name = (mapped_data.get("buyer_name") or "").upper()
                             existing.father = (mapped_data.get("buyer_father_name") or "").upper()
                             existing.cnic = mapped_data.get("buyer_cnic")
@@ -87,10 +71,10 @@ class CapturedFormProcessor:
 
                             existing.color = (mapped_data.get("color") or "").upper()
                             existing.model = (mapped_data.get("model_name") or "").upper()
-                            existing.created_at = datetime.utcnow() # Update timestamp?
+                            existing.created_at = datetime.utcnow() # Update timestamp
                         else:
                             # Create new record
-                            logger.info(f"Creating new record for chassis {chassis}")
+                            logger.debug(f"Creating new record for chassis {chassis}")
                             
                             engine_val = mapped_data.get("engine_number")
                             
@@ -109,12 +93,12 @@ class CapturedFormProcessor:
                             db.add(new_record)
                         
                         db.commit()
-                        logger.info("Successfully saved to database.")
+                        logger.debug("Successfully saved to database.")
                         return True
                         
                 except Exception as e:
                     logger.error(f"Database error (attempt {attempt+1}): {e}")
-                    time.sleep(1 * (attempt + 1))
+                    time.sleep(0.3 * (attempt + 1))
             
             logger.error("Failed to save to database after retries.")
             return False

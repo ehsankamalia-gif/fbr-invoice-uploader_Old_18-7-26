@@ -286,7 +286,13 @@ def main() -> None:
         print(f"Database initialization failed: {e}")
 
     startup.set_status("Starting reporting…")
-    start_reporting_server()
+    # Start server in background thread to avoid blocking splash screen
+    import threading
+    threading.Thread(
+        target=start_reporting_server,
+        daemon=True,
+        name="ReportingServerStartup"
+    ).start()
 
     startup.set_status("Loading user interface…")
     from app.qt_ui.main_window import MainWindow
