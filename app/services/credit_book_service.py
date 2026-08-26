@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
-from app.db.models import CreditBook, Customer, Motorcycle, Price, CapturedData
+from app.db.models import CreditBook, Customer, Motorcycle, Price
 from typing import List, Optional, Dict, Any
 import datetime as dt
 from app.core.logger import logger
@@ -106,19 +106,6 @@ class CreditBookService:
                     "engine_no": motorcycle.engine_number
                 }
             
-            # If not found in Motorcycle, try CapturedData as fallback
-            captured = db.query(CapturedData).filter(
-                CapturedData.chassis_number == chassis_no
-            ).first()
-            
-            if captured:
-                return {
-                    "model": captured.model,
-                    "color": captured.color,
-                    "price": 0.0, # Price not usually in captured data
-                    "engine_no": captured.engine_number
-                }
-                
             return None
         finally:
             db.close()

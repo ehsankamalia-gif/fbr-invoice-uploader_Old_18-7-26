@@ -25,10 +25,8 @@ from app.ui.spare_ledger_frame import SpareLedgerFrame
 from app.services.dealer_service import dealer_service
 from app.services.customer_service import customer_service
 from app.services.backup_service import backup_service
-from app.services.form_capture_service import form_capture_service
 from app.services.update_service import UpdateService
 from app.services.sync_service import sync_service
-from app.ui.captured_data_frame import CapturedDataFrame
 from app.ui.welcome_frame import WelcomeFrame
 from app.ui.autocomplete_entry import AutocompleteEntry
 from app.ui.stock_summary_frame import StockSummaryFrame
@@ -45,7 +43,7 @@ from reporting.server import start_reporting_server
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
-from app.db.models import Motorcycle, Invoice, Customer, CustomerType, CapturedData
+from app.db.models import Motorcycle, Invoice, Customer, CustomerType
 
 
 import logging
@@ -138,7 +136,6 @@ class App(ctk.CTk):
         self.create_print_frame()
         self.create_backup_frame()
         self.create_spare_ledger_frame()
-        self.create_captured_data_frame()
 
         self.select_frame_by_name("home")
         
@@ -153,9 +150,6 @@ class App(ctk.CTk):
         # Start Sync Service
         sync_service.set_status_callback(self.on_sync_status_change)
         sync_service.start()
-        
-        # Register Data Capture Callback
-        form_capture_service.on_data_captured = self.on_browser_data_captured
         
         # Handle Window Close
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -195,10 +189,6 @@ class App(ctk.CTk):
             auto_git_manager.stop()
         except Exception:
             pass
-        try:
-            form_capture_service.stop_capture_session()
-        except Exception as e:
-            print(f"Error stopping capture: {e}")
         try:
             sync_service.stop()
         except Exception as e:
@@ -258,40 +248,6 @@ class App(ctk.CTk):
                     pass
         except Exception as e:
             logger.error(f"Invoice form sync failed: {e}", exc_info=True)
-
-    def on_browser_data_captured(self, chassis):
-        """Called when data is captured in the background browser."""
-        # Use after() to ensure UI updates on main thread
-        if self.winfo_exists():
-             self.after(0, lambda: self._handle_bg_capture(chassis))
-
-    def _handle_bg_capture(self, chassis):
-        # If we are on the invoice frame, try to auto-fill
-        # and maybe show a notification
-        if hasattr(self, "invoice_frame") and self.invoice_frame.winfo_viewable():
-            if chassis:
-                # Set chassis and trigger auto-fill
-                self.chassis_var.set(chassis)
-                self.auto_fill_chassis()
-                messagebox.showinfo("Data Captured", f"Successfully imported details for chassis: {chassis}")
-            else:
-                messagebox.showinfo("Data Captured", "New data was captured from the browser.\nYou can now use 'Fetch Last' or enter a chassis number.")
-
-    def fetch_last_captured_record(self):
-        """Fetches the most recent record from CapturedData and fills the form."""
-        db = SessionLocal()
-        try:
-            last = db.query(CapturedData).order_by(CapturedData.created_at.desc()).first()
-            if last:
-                self.chassis_var.set(last.chassis_number)
-                self.auto_fill_chassis()
-                messagebox.showinfo("Success", f"Loaded last captured data for {last.chassis_number}")
-            else:
-                messagebox.showwarning("No Data", "No captured data found in database.")
-        except Exception as e:
-             messagebox.showerror("Error", f"Failed to fetch captured data: {e}")
-        finally:
-             db.close()
 
     def on_sync_status_change(self, is_online, pending_count):
         """Called by background thread, so must use after to update UI safely"""
@@ -358,8 +314,6 @@ class App(ctk.CTk):
                 "command": None,
                 "subitems": [
                     ("Inventory Stock", "inventory", self.inventory_button_event),
-                    ("Captured Customer Data", "captured_data", self.captured_data_button_event),
-                    ("Launch Capture Browser", "capture_live", self.form_capture_button_event),
                     ("Customers", "customer", self.customer_button_event),
                     ("Dealers", "dealer", self.dealer_button_event),
                     ("Price List", "pricelist", self.open_price_list)
@@ -1973,10 +1927,6 @@ class App(ctk.CTk):
         self.backup_frame = BackupFrame(self, corner_radius=0, fg_color="transparent")
         self.backup_frame.grid_columnconfigure(0, weight=1)
 
-    def create_captured_data_frame(self):
-        self.captured_data_frame = CapturedDataFrame(self, corner_radius=0, fg_color="transparent")
-        self.captured_data_frame.grid_columnconfigure(0, weight=1)
-
     def create_welcome_frame(self):
         self.welcome_frame = WelcomeFrame(self, self.dismiss_welcome)
         # Use high rowspan/columnspan to cover the entire grid (sidebar + content)
@@ -2165,7 +2115,6 @@ class App(ctk.CTk):
             "customer": (getattr(self, "customer_frame", None), lambda: self.customer_frame.load_customers()),
             "backup": (getattr(self, "backup_frame", None), lambda: self.backup_frame.refresh_history()),
             "print_invoice": (getattr(self, "print_invoice_frame", None), None),
-            "captured_data": (getattr(self, "captured_data_frame", None), lambda: self.captured_data_frame.load_data()),
             "spare_ledger": (getattr(self, "spare_ledger_frame", None), lambda: self.spare_ledger_frame.refresh()),
         }
 
@@ -2258,9 +2207,6 @@ class App(ctk.CTk):
 
 
 
-    def captured_data_button_event(self):
-        self.select_frame_by_name("captured_data")
-
     def open_price_list(self):
         PriceListDialog(self)
 
@@ -2275,21 +2221,6 @@ class App(ctk.CTk):
             webbrowser.open("http://127.0.0.1:9000/")
         except Exception as e:
             messagebox.showerror("Error", f"Unable to open reporting portal: {e}")
-
-    def form_capture_button_event(self):
-        """Launch the Browser for Import / Capture"""
-        if form_capture_service.is_running:
-             messagebox.showinfo("Browser Running", "The browser is already running.\nYou can use 'Import' or 'Capture' features now.")
-             return
-
-        # Default to Atlas Honda Portal base URL
-        target_url = "https://dealers.ahlportal.com"
-        
-        try:
-            form_capture_service.start_capture_session(target_url)
-            messagebox.showinfo("Browser Launched", "Browser launched successfully.\nYou can now use 'Import' or 'Capture' features.")
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to launch browser: {e}")
 
     def _populate_bike_details(self, bike):
         """Helper to populate form fields from bike object"""
@@ -2668,42 +2599,6 @@ class App(ctk.CTk):
                     self.chassis_feedback_label.configure(text="⚠️ Not Found", text_color="orange")
                 else:
                     self.chassis_feedback_label.configure(text="Not Found", text_color="red")
-
-            # Populate customer info from captured_data if exists
-            try:
-                cap = db.query(CapturedData).filter(CapturedData.chassis_number == chassis).first()
-                if cap:
-                    if cap.cnic:
-                        self.buyer_cnic_var.set(cap.cnic)
-                    if cap.name:
-                        self.buyer_name_var.set(cap.name)
-                    if cap.father:
-                        self.father_name_var.set(cap.father)
-                    if cap.cell:
-                        self.buyer_cell_var.set(cap.cell)
-                    if cap.address:
-                        self.buyer_address_var.set(cap.address)
-                    if cap.engine_number and not self.engine_var.get().strip():
-                        self.engine_var.set(cap.engine_number)
-                    
-                    # Also populate model and color if not already set (e.g. from inventory)
-                    if cap.model and not self.model_combo.get().strip():
-                        # Find closest match in model_combo values
-                        for val in self.model_combo._values:
-                            if cap.model.upper() in val.upper() or val.upper() in cap.model.upper():
-                                self.model_combo.set(val)
-                                self.on_model_change(val)
-                                break
-                    
-                    if cap.color and not self.color_combo.get().strip():
-                        # Try to match color
-                        for val in self.color_combo._values:
-                            if cap.color.upper() in val.upper() or val.upper() in cap.color.upper():
-                                self.color_combo.set(val)
-                                self.on_color_change(val)
-                                break
-            except Exception as ce:
-                print(f"Captured data lookup error: {ce}")
         except Exception as e:
             print(f"Auto-fill error: {e}")
             self.chassis_feedback_label.configure(text="Error", text_color="red")
