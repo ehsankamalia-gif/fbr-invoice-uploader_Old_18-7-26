@@ -5772,6 +5772,7 @@ class MainWindow(QMainWindow):
         # If we are on invoice page, try to auto-fill
         if self.stack.currentWidget() == self._pages.get("invoice"):
             if chassis:
+                logger.info(f"DEBUG [bg_capture] Auto-filling chassis: '{chassis}'")
                 self.invoice_chassis_input.setText(chassis)
                 self._on_chassis_selected(chassis)
                 QMessageBox.information(self, "Data Captured", f"Imported details for chassis: {chassis}")
@@ -6580,6 +6581,8 @@ class MainWindow(QMainWindow):
                 ~CapturedData.chassis_number.in_(uploaded_chassis)
             ).limit(10).all()
             
+            logger.info(f"DEBUG [chassis_search] query='{query_text}', inventory_results={len(results)}, captured_results={len(captured_results)}, suggestions={suggestions + [r[0] for r in captured_results]}")
+            
             for r in captured_results:
                 if r[0] not in suggestions:
                     suggestions.append(r[0])
@@ -6621,7 +6624,9 @@ class MainWindow(QMainWindow):
 
             # 1. Search in Captured Data (Priority for Buyer Info)
             cap = db.query(CapturedData).filter(CapturedData.chassis_number == chassis, CapturedData.is_deleted == False).first()
+            logger.info(f"DEBUG [_on_chassis_selected] chassis={chassis}, cap_found={cap is not None}")
             if cap:
+                logger.info(f"DEBUG [cap data] cnic='{cap.cnic}' name='{cap.name}' father='{cap.father}' cell='{cap.cell}' addr='{cap.address}' engine='{cap.engine_number}' model='{cap.model}' color='{cap.color}'")
                 # Populate Buyer Details
                 if cap.cnic: self.invoice_buyer_cnic_input.setText(cap.cnic)
                 if cap.name: self.invoice_buyer_name_input.setText(cap.name.upper())
@@ -6634,16 +6639,19 @@ class MainWindow(QMainWindow):
                 
                 if cap.model:
                     model_idx = self.invoice_model_combo.findText(cap.model, Qt.MatchFlag.MatchContains)
+                    logger.info(f"DEBUG [cap model] model='{cap.model}', model_idx={model_idx}, combo_values={[self.invoice_model_combo.itemText(i) for i in range(self.invoice_model_combo.count())]}")
                     if model_idx >= 0:
                         self.invoice_model_combo.setCurrentIndex(model_idx)
                 
                 if cap.color:
                     color_idx = self.invoice_color_combo.findText(cap.color, Qt.MatchFlag.MatchContains)
+                    logger.info(f"DEBUG [cap color] color='{cap.color}', color_idx={color_idx}")
                     if color_idx >= 0:
                         self.invoice_color_combo.setCurrentIndex(color_idx)
 
             # 2. Search in Motorcycle Inventory (Priority for Pricing)
             bike = db.query(Motorcycle).filter(Motorcycle.chassis_number == chassis).first()
+            logger.info(f"DEBUG [_on_chassis_selected] bike_found={bike is not None}")
             if bike:
                 self.invoice_chassis_input.blockSignals(True)
                 self.invoice_chassis_input.setText(bike.chassis_number)
@@ -6677,7 +6685,7 @@ class MainWindow(QMainWindow):
             self._check_invoice_form_completeness()
                     
         except Exception as e:
-            logger.error(f"Chassis selection error: {e}")
+            logger.error(f"Chassis selection error: {e}", exc_info=True)
         finally:
             db.close()
 
@@ -6845,6 +6853,7 @@ class MainWindow(QMainWindow):
             self.invoice_buyer_cnic_input.blockSignals(False)
         cnic = formatted.strip()
         if not cnic or len(cnic) < 15:
+            logger.info(f"DEBUG [_on_invoice_cnic_changed] CNIC too short or empty: '{cnic}' len={len(cnic)} - clearing buyer fields")
             self.invoice_buyer_name_input.clear()
             self.invoice_buyer_father_input.clear()
             self.invoice_buyer_phone_input.clear()
@@ -6854,7 +6863,9 @@ class MainWindow(QMainWindow):
         try:
             customer = db.query(Customer).filter(Customer.cnic == cnic).first()
             if not customer:
+                logger.info(f"DEBUG [_on_invoice_cnic_changed] No customer found for CNIC: '{cnic}'")
                 return
+            logger.info(f"DEBUG [_on_invoice_cnic_changed] Customer found: id={customer.id}, name='{customer.name}'")
             if customer.name:
                 self.invoice_buyer_name_input.setText(customer.name)
             if customer.father_name:
@@ -6869,7 +6880,8 @@ class MainWindow(QMainWindow):
             self._is_dealer_selected = (customer.type == CustomerType.DEALER)
             self._recalculate_invoice_totals()
             self._check_invoice_form_completeness()
-        except Exception:
+        except Exception as e:
+            logger.error(f"DEBUG [_on_invoice_cnic_changed] Exception: {e}", exc_info=True)
             return
         finally:
             db.close()

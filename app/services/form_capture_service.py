@@ -10,12 +10,22 @@ from playwright.sync_api import sync_playwright, Page
 from app.services.captured_form_processor import CapturedFormProcessor
 from app.services.settings_service import settings_service
 
-# Configure logging
-logging.basicConfig(
-    filename='capture_debug.log',
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+# Configure logging with a dedicated logger so it works regardless of import order
+_capture_logger = logging.getLogger("form_capture_service")
+_capture_logger.setLevel(logging.DEBUG)
+# Remove any existing handlers to avoid duplicates
+_capture_logger.handlers.clear()
+# Add file handler
+_capture_fh = logging.FileHandler('capture_debug.log', mode='a', encoding='utf-8')
+_capture_fh.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+_capture_logger.addHandler(_capture_fh)
+# Also add a stream handler for console visibility
+_capture_sh = logging.StreamHandler()
+_capture_sh.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+_capture_logger.addHandler(_capture_sh)
+
+# Log startup immediately
+_capture_logger.info("FormCaptureService module loaded")
 
 class FormCaptureService:
     _instance = None
@@ -53,7 +63,7 @@ class FormCaptureService:
         self.load_config()
         self.processor = CapturedFormProcessor(self.config)
         self._ensure_output_file()
-        logging.info(f"Output file path: {self.output_file.absolute()}")
+        _capture_logger.info(f"Output file path: {self.output_file.absolute()}")
         self._initialized = True
 
     def _ensure_output_file(self):
@@ -96,7 +106,7 @@ class FormCaptureService:
                 if not self.config["login_config"].get("password"):
                     self.config["login_config"]["password"] = password
         except Exception as e:
-            logging.error(f"Failed to load credentials from settings_service: {e}")
+            _capture_logger.error(f"Failed to load credentials from settings_service: {e}")
 
         if "output_file" in self.config:
             self.output_file = Path(self.config["output_file"])
@@ -111,7 +121,7 @@ class FormCaptureService:
                 except Exception:
                     pass
         except Exception as e:
-            logging.error(f"Failed to push login config to runtime: {e}")
+            _capture_logger.error(f"Failed to push login config to runtime: {e}")
 
     def start_capture_session(self, url=None):
         if self.is_running:
@@ -164,7 +174,7 @@ class FormCaptureService:
             self.session_data = {"pages": {}}
             self._save_data()
             self.current_batch = 0
-            logging.info("Session data cleared by user request.")
+            _capture_logger.info("Session data cleared by user request.")
 
     def execute_task(self, callback):
         """
@@ -195,7 +205,7 @@ class FormCaptureService:
                 user_data_dir = Path("browser_profile")
                 user_data_dir.mkdir(exist_ok=True)
                 
-                logging.info(f"Launching persistent browser context at {user_data_dir.absolute()}")
+                _capture_logger.info(f"Launching persistent browser context at {user_data_dir.absolute()}")
                 
                 # Launch persistent context to preserve history and passwords
                 # Using channel="chrome" to use the actual Chrome browser if installed
@@ -225,17 +235,17 @@ class FormCaptureService:
                     self.page = self.context.new_page()
                 
                 # Listen to console logs for debugging
-                self.page.on("console", lambda msg: logging.debug(f"Browser Console: {msg.text}"))
+                self.page.on("console", lambda msg: _capture_logger.debug(f"Browser Console: {msg.text}"))
                 
                 # Handle new pages (popups)
                 def handle_page(new_p):
-                    logging.info(f"New page detected: {new_p.url}")
-                    new_p.on("console", lambda msg: logging.debug(f"Page Console: {msg.text}"))
+                    _capture_logger.info(f"New page detected: {new_p.url}")
+                    new_p.on("console", lambda msg: _capture_logger.debug(f"Page Console: {msg.text}"))
                 
                 self.context.on("page", handle_page)
                 
                 if start_url:
-                    logging.info(f"Navigating to {start_url}")
+                    _capture_logger.info(f"Navigating to {start_url}")
                     
                     # RETRY LOGIC for Navigation
                     max_retries = 3
@@ -244,13 +254,13 @@ class FormCaptureService:
                             self.page.goto(start_url, timeout=30000)
                             break # Success
                         except Exception as e:
-                            logging.warning(f"Navigation failed (attempt {attempt+1}/{max_retries}): {e}")
+                            _capture_logger.warning(f"Navigation failed (attempt {attempt+1}/{max_retries}): {e}")
                             if attempt < max_retries - 1:
                                 sleep_time = 2 ** (attempt + 1) # Exponential backoff: 2, 4, 8 sec
-                                logging.info(f"Retrying navigation in {sleep_time}s...")
+                                _capture_logger.info(f"Retrying navigation in {sleep_time}s...")
                                 time.sleep(sleep_time)
                             else:
-                                logging.error(f"Navigation failed after {max_retries} attempts. Aborting session.")
+                                _capture_logger.error(f"Navigation failed after {max_retries} attempts. Aborting session.")
                                 raise e
                 
                 # ATTEMPT LOGIN PREFILL (Only if data exists in settings)
@@ -269,16 +279,16 @@ class FormCaptureService:
                             # Only fill if the field is empty (to respect browser's saved passwords)
                             current_val = self.page.input_value(user_sel)
                             if not current_val:
-                                logging.info("Login fields detected and empty. Attempting to prefill...")
+                                _capture_logger.info("Login fields detected and empty. Attempting to prefill...")
                                 self.page.fill(user_sel, dealer_code)
                                 self.page.fill(pass_sel, password)
-                                logging.info("Login fields prefilled successfully.")
+                                _capture_logger.info("Login fields prefilled successfully.")
                             else:
-                                logging.info("Login fields already contain data (possibly from saved passwords). Skipping prefill.")
+                                _capture_logger.info("Login fields already contain data (possibly from saved passwords). Skipping prefill.")
                         except:
                             pass
                 except Exception as e:
-                    logging.error(f"Error during login prefill check: {e}")
+                    _capture_logger.error(f"Error during login prefill check: {e}")
                 
                 # Keep the browser open until stopped
                 while self.is_running:
@@ -301,14 +311,14 @@ class FormCaptureService:
                                 action = self.pending_action
                                 self.pending_action = None # Clear immediately
                                 if action == 'reload':
-                                    logging.info("Executing scheduled reload...")
+                                    _capture_logger.info("Executing scheduled reload...")
                                     self.page.reload()
                                 elif action == 'goto_start' and self.pending_url:
-                                    logging.info(f"Executing scheduled navigation to {self.pending_url}...")
+                                    _capture_logger.info(f"Executing scheduled navigation to {self.pending_url}...")
                                     self.page.goto(self.pending_url)
                                     self.pending_url = None
                             except Exception as nav_ex:
-                                logging.error(f"Error executing pending action: {nav_ex}")
+                                _capture_logger.error(f"Error executing pending action: {nav_ex}")
 
                         # Check if any page is still open
                         pages = self.context.pages
@@ -321,14 +331,14 @@ class FormCaptureService:
                                 # If page closes during wait, fallback to short sleep
                                 time.sleep(0.3)
                         else:
-                            logging.info("All pages closed, stopping session.")
+                            _capture_logger.info("All pages closed, stopping session.")
                             break
                     except Exception as e:
-                        print(f"Browser loop error: {e}")
+                        _capture_logger.error(f"Browser loop error: {e}")
                         break
                         
         except Exception as e:
-            print(f"Playwright error: {e}")
+            _capture_logger.error(f"Playwright error: {e}")
         finally:
             self.is_running = False
 
@@ -336,16 +346,16 @@ class FormCaptureService:
         """Callback for window.py_capture(data)"""
         try:
             # DEBUG RAW DATA - Only log to console, not to file
-            logging.debug(f"Captured Data Received: {data}")
+            _capture_logger.debug(f"Captured Data Received: {data}")
             
             # Check for Form Submission
             if data.get("type") == "form_submission":
-                logging.info("Form Submission Event Detected!")
+                _capture_logger.info("Form Submission Event Detected!")
                 
                 # MERGE FORCED CAPTURE DATA
                 forced_data = data.get("forced_capture", {})
                 if forced_data:
-                    logging.info(f"Merging {len(forced_data)} forced capture fields...")
+                    _capture_logger.info(f"Merging {len(forced_data)} forced capture fields...")
                     page_url = data.get("url", "unknown_url")
                     
                     if page_url not in self.session_data["pages"]:
@@ -365,11 +375,11 @@ class FormCaptureService:
                     eng_present = 1 if forced_data.get("#txt_engine_no") else 0
                     col_present = 1 if forced_data.get("#txt_color") else 0
                     mod_present = 1 if forced_data.get("#txt_model") else 0
-                    logging.info(f"METRIC:CAPTURE_QUALITY:engine={eng_present},color={col_present},model={mod_present}")
+                    _capture_logger.info(f"METRIC:CAPTURE_QUALITY:engine={eng_present},color={col_present},model={mod_present}")
 
-                success = self.processor.process_submission(self.session_data)
+                success = self.processor.process_submission(forced_data)
                 if success:
-                    logging.info("Invoice saved successfully. Clearing session data.")
+                    _capture_logger.info("Invoice saved successfully. Clearing session data.")
                     
                     # Notify listener if registered
                     if self.on_data_captured:
@@ -382,18 +392,26 @@ class FormCaptureService:
                                     chassis = page.get("fields", {}).get("#txt_chassis_no", {}).get("value")
                                     if chassis: break
                             
-                            logging.info(f"Triggering on_data_captured callback with chassis: {chassis}")
+                            _capture_logger.info(f"Triggering on_data_captured callback with chassis: {chassis}")
                             self.on_data_captured(chassis)
                         except Exception as cb_ex:
-                            logging.error(f"Error in on_data_captured callback: {cb_ex}")
+                            _capture_logger.error(f"Error in on_data_captured callback: {cb_ex}")
 
                     self.clear_session_data()
+                else:
+                    _capture_logger.error(f"FAILED to save captured data to database. Session data keys: {list(self.session_data.get('pages', {}).keys())}")
+                    # Try to log the chassis number for debugging
+                    for url, page in self.session_data.get("pages", {}).items():
+                        chassis_val = page.get("fields", {}).get("#txt_chassis_no", {}).get("value", "")
+                        if chassis_val:
+                            _capture_logger.error(f"FAILED save for chassis: {chassis_val}")
+                            break
                     
                 # Always save after form submission
                 self._save_data()
                 self.current_batch = 0
                 
-                logging.info("Submission captured. Waiting for next action.")
+                _capture_logger.info("Submission captured. Waiting for next action.")
                 # Removed forced reload to allow validation checks on page
 
                         
@@ -409,7 +427,7 @@ class FormCaptureService:
                 elif self.page:
                     page_url = self.page.url
             except Exception as e:
-                logging.error(f"Error getting page URL (using fallback): {e}")
+                _capture_logger.error(f"Error getting page URL (using fallback): {e}")
 
             # Initialize page entry if not exists
             if page_url not in self.session_data["pages"]:
@@ -427,16 +445,16 @@ class FormCaptureService:
                 self.current_batch += 1
                 
                 if self.current_batch >= self.batch_size:
-                    logging.debug(f"Data updated in memory for {page_url}. Batch size {self.batch_size} reached. Saving data...")
+                    _capture_logger.debug(f"Data updated in memory for {page_url}. Batch size {self.batch_size} reached. Saving data...")
                     self._save_data()
                     self.current_batch = 0
                 else:
-                    logging.debug(f"Data updated in memory for {page_url}. Batch size {self.current_batch}/{self.batch_size}")
+                    _capture_logger.debug(f"Data updated in memory for {page_url}. Batch size {self.current_batch}/{self.batch_size}")
             else:
-                logging.warning(f"No selector in captured data: {data}")
+                _capture_logger.warning(f"No selector in captured data: {data}")
                 
         except Exception as e:
-            logging.error(f"Error handling captured data: {e}")
+            _capture_logger.error(f"Error handling captured data: {e}")
 
     def _save_data(self):
         """Persist data to JSON file"""
@@ -458,10 +476,10 @@ class FormCaptureService:
                 else:
                     temp_file.rename(self.output_file)
                 
-                logging.debug("File saved successfully.")
+                _capture_logger.debug("File saved successfully.")
                 
             except Exception as e:
-                logging.error(f"Error saving data: {e}")
+                _capture_logger.error(f"Error saving data: {e}")
 
 
     def _get_injection_script(self):
@@ -525,16 +543,6 @@ class FormCaptureService:
                         p.value = pass;
                         try {{ u.dispatchEvent(new Event('input', {{ bubbles: true }})); }} catch(e){{}}
                         try {{ p.dispatchEvent(new Event('input', {{ bubbles: true }})); }} catch(e){{}}
-                        // u.setAttribute('data-prefilled', 'true');
-                        // p.setAttribute('data-prefilled', 'true');
-                        // Visual feedback removed
-                        /*
-                        const overlay = document.getElementById('fbr-debug-overlay');
-                        if (overlay) {{
-                            overlay.innerText = 'Login Prefilled';
-                            overlay.style.backgroundColor = 'rgba(46, 204, 113, 0.9)';
-                        }}
-                        */
                         return true;
                     }}
                 }} catch (e) {{
@@ -963,8 +971,6 @@ class FormCaptureService:
                                 
                                 hasErrors = true;
                                 console.log("Validation Error Found:", el);
-                                // Highlight
-                                // try {{ el.style.border = '2px solid red'; }} catch(e){{}}
                             }}
                         }});
                     }});
@@ -1209,31 +1215,29 @@ class FormCaptureService:
                 // VALIDATION & CLEANUP
                 function validateData(data) {{
                     try {{
-                        // Engine No Validation
+                        // Engine No Validation - Only reject if clearly a button/label text
                         if (data['#txt_engine_no']) {{
                             let en = data['#txt_engine_no'];
-                            // Reject if contains invalid chars or is too short or is a button text
-                            // RELAXED: Changed length check from 4 to 3
-                            if (en.length < 3 || /submit|save|cancel|search|reset/i.test(en)) {{
+                            // Use exact match for common button texts to avoid rejecting valid data
+                            if (/^(submit|save|cancel|search|reset|print|back|next|login|logout|update|delete)$/i.test(en.trim())) {{
                                 console.warn("FBR Capture: Invalid Engine No rejected:", en);
                                 delete data['#txt_engine_no'];
                             }}
                         }}
                         
-                        // Color Validation
+                        // Color Validation - Only reject if clearly a button/label text
                         if (data['#txt_color']) {{
                             let c = data['#txt_color'];
-                            // RELAXED: Removed length > 20 check
-                            if (/submit|save|cancel|search|reset|print|back|next/i.test(c)) {{
+                            if (/^(submit|save|cancel|search|reset|print|back|next|login|logout|update|delete)$/i.test(c.trim())) {{
                                  console.warn("FBR Capture: Invalid Color rejected:", c);
                                  delete data['#txt_color'];
                             }}
                         }}
                         
-                        // Model Validation
+                        // Model Validation - Only reject if clearly a button/label text
                         if (data['#txt_model']) {{
                             let m = data['#txt_model'];
-                            if (/submit|save|cancel|search|reset/i.test(m)) {{
+                            if (/^(submit|save|cancel|search|reset|print|back|next|login|logout|update|delete)$/i.test(m.trim())) {{
                                  console.warn("FBR Capture: Invalid Model rejected:", m);
                                  delete data['#txt_model'];
                             }}

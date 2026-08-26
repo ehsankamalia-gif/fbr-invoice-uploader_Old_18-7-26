@@ -19,16 +19,28 @@ class CapturedFormProcessor:
         """
         Processes the captured session data, maps it to CapturedData model, 
         and saves it to the database.
+        
+        Accepts either:
+        1. Full session_data dict with "pages" key (legacy)
+        2. A flat dict directly (when forced_data is passed)
         """
         try:
-            # 1. Flatten data from all pages
-            flat_data = {}
-            pages = session_data.get("pages", {})
-            for url, page_data in pages.items():
-                fields = page_data.get("fields", {})
-                for selector, field_info in fields.items():
-                    val = field_info.get("value", "")
-                    flat_data[selector] = val
+            # 1. Flatten data - handle both full session_data and direct flat data
+            if "pages" in session_data:
+                # Legacy: flatten from all pages (skip stale data from previous sessions)
+                flat_data = {}
+                pages = session_data.get("pages", {})
+                # Only use the LAST page's data (most recent)
+                page_urls = list(pages.keys())
+                if page_urls:
+                    last_page = pages[page_urls[-1]]
+                    fields = last_page.get("fields", {})
+                    for selector, field_info in fields.items():
+                        val = field_info.get("value", "")
+                        flat_data[selector] = val
+            else:
+                # Direct flat data
+                flat_data = session_data
 
             logger.debug(f"Processing submission with data: {flat_data}")
 
@@ -38,7 +50,9 @@ class CapturedFormProcessor:
 
             # 3. Validate required fields
             if not self._validate(mapped_data):
-                logger.error(f"Validation failed for captured form. Missing fields. Mapped Data: {mapped_data}")
+                logger.error(f"VALIDATION FAILED for captured form. Mapped Data: {mapped_data}")
+                # Log flat_data keys for debugging
+                logger.error(f"Flat data keys available: {list(flat_data.keys())}")
                 return False
 
             logger.debug("Validation passed. Attempting to save to database...")
@@ -132,6 +146,20 @@ class CapturedFormProcessor:
                 id_part = '#' + selector.split('#')[-1]
                 target_field = self.mapping.get(id_part)
             
+            # FALLBACK: If still not mapped, check if the key is an element ID 
+            # (like "#engine_no") that matches a CSS substring selector in the mapping
+            # (e.g., "input[id*='engine']" → matches id containing "engine")
+            if not target_field and selector.startswith('#') and len(selector) > 1:
+                el_id = selector[1:]  # Remove the '#' prefix
+                for map_selector, map_field in self.mapping.items():
+                    if '*=' in map_selector:
+                        import re as re_module
+                        match = re_module.search(r"\*='([^']+)'", map_selector)
+                        if match and match.group(1) in el_id:
+                            target_field = map_field
+                            logger.info(f"Fallback: Matched selector '{selector}' to field '{map_field}' via CSS substring selector '{map_selector}'")
+                            break
+            
             if target_field:
                 result[target_field] = value
                 
@@ -154,6 +182,17 @@ class CapturedFormProcessor:
                         
                         if target_field.startswith("buyer_cnic_part"):
                             cnic_parts.append((target_field, val))
+        
+        # FINAL FALLBACK: Check for chassis_number in _debug_all_inputs directly
+        if "chassis_number" not in result and diagnostic_map:
+            # Look for common chassis number keys in diagnostic_map
+            for chassis_key in ["chassis_no", "txt_chassis_no", "chassis"]:
+                if chassis_key in diagnostic_map:
+                    val = diagnostic_map[chassis_key]
+                    if val:
+                        logger.info(f"Final Fallback: Found chassis_number via diagnostic_map key '{chassis_key}': {val}")
+                        result["chassis_number"] = val
+                        break
 
         # Reconstruct CNIC if parts are found
         if cnic_parts:
