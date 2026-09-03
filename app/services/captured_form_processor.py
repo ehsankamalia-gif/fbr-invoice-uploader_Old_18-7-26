@@ -155,6 +155,26 @@ class CapturedFormProcessor:
                         if target_field.startswith("buyer_cnic_part"):
                             cnic_parts.append((target_field, val))
 
+        # AGGRESSIVE FALLBACK: Scan diagnostic_map for chassis/frame/vin if chassis_number still missing
+        if "chassis_number" not in result and diagnostic_map:
+            for dk, dv in diagnostic_map.items():
+                dk_lower = dk.lower()
+                if any(kw in dk_lower for kw in ['chassis', 'frame_no', 'vin', 'frame']):
+                    if dv and len(str(dv).strip()) >= 3:
+                        logger.info(f"Aggressive fallback: Found chassis_number via diagnostic key '{dk}' = '{dv}'")
+                        result["chassis_number"] = dv
+                        break
+
+        # AGGRESSIVE FALLBACK: Scan diagnostic_map for engine if engine_number still missing
+        if "engine_number" not in result and diagnostic_map:
+            for dk, dv in diagnostic_map.items():
+                dk_lower = dk.lower()
+                if 'engine' in dk_lower or 'eng_no' in dk_lower:
+                    if dv and len(str(dv).strip()) >= 3:
+                        logger.info(f"Aggressive fallback: Found engine_number via diagnostic key '{dk}' = '{dv}'")
+                        result["engine_number"] = dv
+                        break
+
         # Reconstruct CNIC if parts are found
         if cnic_parts:
             # Sort by part number (part1, part2, part3)
@@ -212,6 +232,11 @@ class CapturedFormProcessor:
         
         if missing:
             logger.error(f"Validation Error: Missing fields {missing}")
+            # Log all available mapped data keys for debugging
+            available_keys = list(data.keys())
+            logger.error(f"Validation Error: Available mapped data keys: {available_keys}")
+            for k, v in data.items():
+                logger.error(f"Validation Error:   {k} = '{v}'")
             return False
 
         # 2. Format Validation

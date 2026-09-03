@@ -101,6 +101,10 @@ class FormCaptureService:
         if "output_file" in self.config:
             self.output_file = Path(self.config["output_file"])
 
+        # Sync processor mapping with latest config (if processor exists)
+        if hasattr(self, 'processor') and self.processor:
+            self.processor.mapping = self.config.get("field_mapping", {})
+
         # Push login config to runtime if a page is active
         try:
             if self.page:
@@ -348,95 +352,127 @@ class FormCaptureService:
                     logging.info(f"Merging {len(forced_data)} forced capture fields...")
                     page_url = data.get("url", "unknown_url")
                     
-                    if page_url not in self.session_data["pages"]:
-                        self.session_data["pages"][page_url] = {"fields": {}}
-                    
-                    for selector, value in forced_data.items():
-                        self.session_data["pages"][page_url]["fields"][selector] = {
-                            "value": value,
-                            "timestamp": time.time(),
-                            "type": "forced"
-                        }
-                    
-                    # Save merged state for debugging
-                    self._save_data()
+                    with self._lock:
+                        if page_url not in self.session_data["pages"]:
+                            self.session_data["pages"][page_url] = {"fields": {}}
+                        
+                        for selector, value in forced_data.items():
+                            self.session_data["pages"][page_url]["fields"][selector] = {
+                                "value": value,
+                                "timestamp": time.time(),
+                                "type": "forced"
+                            }
+                        
+                        # Save merged state for debugging
+                        self._save_data()
 
                     # METRIC: Check capture completeness for dashboard
                     eng_present = 1 if forced_data.get("#txt_engine_no") else 0
                     col_present = 1 if forced_data.get("#txt_color") else 0
                     mod_present = 1 if forced_data.get("#txt_model") else 0
-                    logging.info(f"METRIC:CAPTURE_QUALITY:engine={eng_present},color={col_present},model={mod_present}")
+                    chassis_present = 1 if forced_data.get("#txt_chassis_no") else 0
+                    logging.info(f"METRIC:CAPTURE_QUALITY:chassis={chassis_present},engine={eng_present},color={col_present},model={mod_present}")
 
-                success = self.processor.process_submission(self.session_data)
+                # Log forced_data keys to help diagnose missing fields
+                if forced_data:
+                    forced_keys = list(forced_data.keys())
+                    logging.info(f"Forced capture keys: {forced_keys}")
+                    # Check specifically for chassis number
+                    chassis_val = forced_data.get("#txt_chassis_no") or forced_data.get("txt_chassis_no") or ""
+                    if not chassis_val:
+                        logging.warning("Chassis number (#txt_chassis_no) is MISSING in forced capture data!")
+                        # Try to find chassis in _debug_all_inputs
+                        debug_inputs = forced_data.get("_debug_all_inputs", {})
+                        if isinstance(debug_inputs, dict):
+                            for k, v in debug_inputs.items():
+                                if 'chassis' in k.lower() or 'frame' in k.lower():
+                                    logging.info(f"Found chassis-like field in debug inputs: {k} = {v}")
+
+                with self._lock:
+                    success = self.processor.process_submission(self.session_data)
+                
                 if success:
                     logging.info("Invoice saved successfully. Clearing session data.")
                     
                     # Notify listener if registered
                     if self.on_data_captured:
                         try:
-                            # Pass the captured chassis to allow lookup
-                            chassis = self.session_data.get("pages", {}).get(data.get("url"), {}).get("fields", {}).get("#txt_chassis_no", {}).get("value")
-                            # If not found in current page, try searching all pages
-                            if not chassis:
-                                for url, page in self.session_data.get("pages", {}).items():
-                                    chassis = page.get("fields", {}).get("#txt_chassis_no", {}).get("value")
-                                    if chassis: break
+                            with self._lock:
+                                # Pass the captured chassis to allow lookup
+                                chassis = self.session_data.get("pages", {}).get(data.get("url"), {}).get("fields", {}).get("#txt_chassis_no", {}).get("value")
+                                # If not found in current page, try searching all pages
+                                if not chassis:
+                                    for url, page in self.session_data.get("pages", {}).items():
+                                        chassis = page.get("fields", {}).get("#txt_chassis_no", {}).get("value")
+                                        if chassis: break
                             
                             logging.info(f"Triggering on_data_captured callback with chassis: {chassis}")
                             self.on_data_captured(chassis)
                         except Exception as cb_ex:
                             logging.error(f"Error in on_data_captured callback: {cb_ex}")
 
-                    self.clear_session_data()
+                    with self._lock:
+                        self.clear_session_data()
+                else:
+                    logging.warning("process_submission returned False - data was NOT saved to database")
+                    # Log what data was available for debugging
+                    with self._lock:
+                        available_pages = list(self.session_data.get("pages", {}).keys())
+                        logging.warning(f"Available pages in session_data: {available_pages}")
+                        for url_key in available_pages:
+                            fields = self.session_data.get("pages", {}).get(url_key, {}).get("fields", {})
+                            field_keys = list(fields.keys())
+                            logging.warning(f"  Page '{url_key}' has fields: {field_keys}")
                     
                 # Always save after form submission
-                self._save_data()
-                self.current_batch = 0
+                with self._lock:
+                    self._save_data()
+                    self.current_batch = 0
                 
                 logging.info("Submission captured. Waiting for next action.")
-                # Removed forced reload to allow validation checks on page
-
                         
                 return
 
-            # Robust Page URL retrieval
-            page_url = "unknown_url"
-            try:
-                if hasattr(source, "page") and source.page:
-                    page_url = source.page.url
-                elif isinstance(source, dict) and "page" in source:
-                    page_url = source["page"].url
-                elif self.page:
-                    page_url = self.page.url
-            except Exception as e:
-                logging.error(f"Error getting page URL (using fallback): {e}")
+            # For individual field capture, use lock
+            with self._lock:
+                # Robust Page URL retrieval
+                page_url = "unknown_url"
+                try:
+                    if hasattr(source, "page") and source.page:
+                        page_url = source.page.url
+                    elif isinstance(source, dict) and "page" in source:
+                        page_url = source["page"].url
+                    elif self.page:
+                        page_url = self.page.url
+                except Exception as e:
+                    logging.error(f"Error getting page URL (using fallback): {e}")
 
-            # Initialize page entry if not exists
-            if page_url not in self.session_data["pages"]:
-                self.session_data["pages"][page_url] = {
-                    "last_updated": time.time(),
-                    "fields": {}
-                }
-            
-            # Update data
-            selector = data.get("selector")
-            if selector:
-                self.session_data["pages"][page_url]["fields"][selector] = data
-                self.session_data["pages"][page_url]["last_updated"] = time.time()
+                # Initialize page entry if not exists
+                if page_url not in self.session_data["pages"]:
+                    self.session_data["pages"][page_url] = {
+                        "last_updated": time.time(),
+                        "fields": {}
+                    }
                 
-                self.current_batch += 1
-                
-                if self.current_batch >= self.batch_size:
-                    logging.debug(f"Data updated in memory for {page_url}. Batch size {self.batch_size} reached. Saving data...")
-                    self._save_data()
-                    self.current_batch = 0
+                # Update data
+                selector = data.get("selector")
+                if selector:
+                    self.session_data["pages"][page_url]["fields"][selector] = data
+                    self.session_data["pages"][page_url]["last_updated"] = time.time()
+                    
+                    self.current_batch += 1
+                    
+                    if self.current_batch >= self.batch_size:
+                        logging.debug(f"Data updated in memory for {page_url}. Batch size {self.batch_size} reached. Saving data...")
+                        self._save_data()
+                        self.current_batch = 0
+                    else:
+                        logging.debug(f"Data updated in memory for {page_url}. Batch size {self.current_batch}/{self.batch_size}")
                 else:
-                    logging.debug(f"Data updated in memory for {page_url}. Batch size {self.current_batch}/{self.batch_size}")
-            else:
-                logging.warning(f"No selector in captured data: {data}")
+                    logging.warning(f"No selector in captured data: {data}")
                 
         except Exception as e:
-            logging.error(f"Error handling captured data: {e}")
+            logging.error(f"Error handling captured data: {e}", exc_info=True)
 
     def _save_data(self):
         """Persist data to JSON file"""
@@ -703,6 +739,17 @@ class FormCaptureService:
                     el = el.parentElement;
                 }}
             }}, true);
+
+            // SUBMIT DETECTION: Also handle configured SUBMIT_SELECTOR directly
+            if (SUBMIT_SELECTOR && SUBMIT_SELECTOR !== "button[type='submit']") {{
+                document.addEventListener('click', function(e) {{
+                    let el = e.target;
+                    while (el && el !== document.body) {{
+                        try {{ if (el.matches(SUBMIT_SELECTOR)) {{ setTimeout(() => handleSubmit("config_selector"), 100); return; }} }} catch(e2) {{}}
+                        el = el.parentElement;
+                    }}
+                }}, true);
+            }}
             
             // Mutation Observer for complex widgets (like Select2 containers)
             if (typeof MutationObserver !== 'undefined') {{
@@ -1145,6 +1192,27 @@ class FormCaptureService:
                     }});
                 }} catch(e) {{}}
                 currentData['_debug_all_inputs'] = debugInputs;
+
+                // Explicitly check for Chassis Number if missing
+                const chassisFromFallback = grabText([
+                    'Chassis No',
+                    'Chassis Number',
+                    'Chassis #',
+                    'Frame No',
+                    'Frame Number',
+                    'Frame #',
+                    'VIN',
+                    'Chassis'
+                ]);
+                if (!currentData['#txt_chassis_no']) {{
+                     const chassisKey = Object.keys(debugInputs || {{}}).find(k => k.toLowerCase().includes('chassis') || k.toLowerCase().includes('frame') || k.toLowerCase().includes('vin'));
+                     if (chassisKey) currentData['#txt_chassis_no'] = debugInputs[chassisKey];
+                }}
+
+                if (!currentData['#txt_chassis_no'] && chassisFromFallback) {{
+                    currentData['#txt_chassis_no'] = chassisFromFallback;
+                    console.log("FBR Capture: Recovered Chassis Number via text fallback:", chassisFromFallback);
+                }}
 
                 // Explicitly check for Engine Number if missing (Added Fix)
                 const engineFromFallback = grabText([
