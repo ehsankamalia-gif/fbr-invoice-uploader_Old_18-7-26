@@ -5,7 +5,6 @@ from app.db.models import Invoice, InvoiceItem, Motorcycle, Customer, CustomerTy
 from app.api.schemas import InvoiceCreate
 from app.api.fbr_client import fbr_client
 from app.core.logger import logger
-from app.services.captured_data_service import captured_data_service
 from datetime import datetime
 from typing import Optional
 import json
@@ -376,15 +375,6 @@ class InvoiceService:
                     f"FBR SUCCESS: Invoice {invoice.invoice_number} fiscalized as {returned_fbr_id} "
                     f"(USIN={invoice.usin}, verified={is_verified}, iris={iris_validated})"
                 )
-
-                # Auto-delete captured data if chassis exists (Cleanup after successful FBR upload)
-                try:
-                    for item in invoice.items:
-                        # Access motorcycle via relationship to get chassis number
-                        if item.motorcycle and item.motorcycle.chassis_number:
-                            captured_data_service.delete_by_chassis(db, item.motorcycle.chassis_number)
-                except Exception as cleanup_err:
-                     logger.error(f"Error cleaning up captured data for invoice {invoice.invoice_number}: {cleanup_err}")
 
             elif is_echo:
                 # Echo detected -> Treat as failure

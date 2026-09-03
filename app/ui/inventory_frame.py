@@ -3,7 +3,6 @@ import threading
 from tkinter import messagebox, ttk, filedialog, Menu
 from app.db.session import SessionLocal
 from app.db.models import Motorcycle, Supplier, ProductModel
-from app.services.scraper_service import HondaScraper
 from app.utils.url_manager import UrlManager
 from sqlalchemy import or_
 from app.services.price_service import price_service
@@ -27,13 +26,6 @@ class InventoryFrame(ctk.CTkFrame):
 
         self.import_web_btn = ctk.CTkButton(self.header_frame, text="Import Inventory", command=self.open_web_import_dialog, fg_color="#E67E22", hover_color="#D35400")
         self.import_web_btn.pack(side="right", padx=10)
-        
-        # New Capture Buttons
-        self.capture_btn = ctk.CTkButton(self.header_frame, text="Launch Capture", command=self.launch_capture_browser, fg_color="#3498DB", hover_color="#2980B9")
-        self.capture_btn.pack(side="right", padx=10)
-        
-        self.view_captured_btn = ctk.CTkButton(self.header_frame, text="View Captured", command=self.view_captured_data, fg_color="#1ABC9C", hover_color="#16A085")
-        self.view_captured_btn.pack(side="right", padx=10)
 
         # Stats Badges
         self.stats_frame = ctk.CTkFrame(self.header_frame, fg_color="transparent")
@@ -391,16 +383,6 @@ class InventoryFrame(ctk.CTkFrame):
     def open_add_dialog(self):
         AddMotorcycleDialog(self)
 
-    def launch_capture_browser(self):
-        """Calls the main window's capture browser event."""
-        if hasattr(self.master, "form_capture_button_event"):
-            self.master.form_capture_button_event()
-
-    def view_captured_data(self):
-        """Switches view to the captured data frame."""
-        if hasattr(self.master, "captured_data_button_event"):
-            self.master.captured_data_button_event()
-
     def open_web_import_dialog(self):
         WebImportDialog(self)
 
@@ -417,7 +399,6 @@ class WebImportDialog(ctk.CTkToplevel):
         self.attributes("-topmost", True)
         self.after(100, lambda: self.attributes("-topmost", False)) # Disable topmost after 100ms to allow other windows
         
-        self.scraper = HondaScraper()
         self.scraped_data = []
         self.url_manager = UrlManager()
         
@@ -446,14 +427,7 @@ class WebImportDialog(ctk.CTkToplevel):
         
         # Check if browser is already running
         btn_text = "1. Launch Browser"
-        state = "normal"
-        fg_color = None # Default
-        
-        if self.scraper.capture_service.is_running:
-            btn_text = "1. Connect & Login"
-            fg_color = "#2980B9" # Blue
-            
-        self.launch_btn = ctk.CTkButton(self, text=btn_text, command=self.launch_browser, state=state, fg_color=fg_color)
+        self.launch_btn = ctk.CTkButton(self, text="1. Launch Browser", command=self.launch_browser)
         self.launch_btn.grid(row=0, column=3, padx=20, pady=10)
 
         # 1.5 Credentials (New)
@@ -563,64 +537,13 @@ class WebImportDialog(ctk.CTkToplevel):
             messagebox.showwarning("Empty URL", "Please enter a URL to save.")
             return
             
-        SaveUrlOptionsDialog(self, url, self.url_manager, self.scraper, username, password)
+        SaveUrlOptionsDialog(self, url, self.url_manager, None, username, password)
 
     def launch_browser(self):
-        url = self.url_entry.get()
-        username = self.username_entry.get()
-        password = self.password_entry.get()
-        
-        if not url:
-            messagebox.showerror("Error", "Please enter a URL first")
-            return
-            
-        # Auto-save credentials for convenience
-        if username or password:
-            try:
-                from app.services.settings_service import settings_service
-                settings_service.save_honda_credentials(username, password)
-            except Exception as e:
-                print(f"Failed to auto-save credentials: {e}")
-
-        self.scrape_btn.configure(text="Launching...", state="disabled")
-        self.launch_btn.configure(state="disabled")
-        
-        def login_worker():
-            try:
-                self.scraper.login(url, username=username, password=password)
-                self.after(0, lambda: self.scrape_btn.configure(state="normal", text="2. Scrape Page"))
-                self.after(0, lambda: self.launch_btn.configure(state="normal", text="1. Connect & Login", fg_color="#2980B9"))
-            except Exception as e:
-                msg = str(e)
-                def show_error():
-                    if "ERR_NAME_NOT_RESOLVED" in msg:
-                        messagebox.showerror("Connection Error", "Could not connect to the portal.\n\nPlease check:\n1. Your internet connection\n2. The URL (should be https://dealers.ahlportal.com)")
-                    else:
-                        messagebox.showerror("Error", f"Failed to launch browser: {e}")
-                    self.scrape_btn.configure(state="normal", text="2. Scrape Page")
-                    self.launch_btn.configure(state="normal", text="1. Launch Browser")
-                self.after(0, show_error)
-
-        threading.Thread(target=login_worker, daemon=True).start()
+        messagebox.showinfo("Not Available", "Web import functionality has been removed.")
 
     def start_scrape(self):
-        self.scrape_btn.configure(state="disabled", text="Scraping...")
-        
-        def update_status(msg):
-            self.after(0, lambda: self.scrape_btn.configure(text=msg))
-
-        def scrape_worker():
-            try:
-                if self.pagination_var.get():
-                    new_data = self.scraper.scrape_all_pages(max_pages=1000, status_callback=update_status)
-                else:
-                    new_data = self.scraper.scrape_current_page()
-                
-                self.after(0, lambda: self._on_scrape_complete(new_data))
-            except Exception as e:
-                self.after(0, lambda: self._on_scrape_error(e))
-
-        threading.Thread(target=scrape_worker, daemon=True).start()
+        messagebox.showinfo("Not Available", "Web import functionality has been removed.")
 
     def _on_scrape_complete(self, new_data):
         try:
@@ -730,10 +653,6 @@ class WebImportDialog(ctk.CTkToplevel):
             db.close()
 
     def on_close(self):
-        try:
-            self.scraper.close()
-        except:
-            pass
         self.destroy()
 
 class AddMotorcycleDialog(ctk.CTkToplevel):
@@ -1036,16 +955,8 @@ class SaveUrlOptionsDialog(ctk.CTkToplevel):
             messagebox.showerror("Error", f"Failed to save setting: {e}")
             
     def save_to_bookmarks(self):
-        if not self.scraper or not self.scraper.page:
-            messagebox.showwarning("Browser Not Open", "Please launch the browser first to use this feature.")
-            return
-            
-        try:
-            self.scraper.trigger_bookmark_dialog()
-            messagebox.showinfo("Action Sent", "Bookmark dialog triggered in the browser.\nPlease complete the save in the browser window.")
-            self.destroy()
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to trigger bookmark: {e}")
+        messagebox.showinfo("Not Available", "This feature is no longer available.")
+        self.destroy()
 
     def save_as_shortcut(self):
         filename = filedialog.asksaveasfilename(

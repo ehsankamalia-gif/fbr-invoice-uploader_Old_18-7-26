@@ -1,16 +1,13 @@
-import pymysql
+import json
+with open('captured_forms.json', 'r', encoding='utf-8') as f:
+    data = json.load(f)
 
-conn = pymysql.connect(host='127.0.0.1', user='root', password='', db='honda_fbr')
-cursor = conn.cursor()
-
-print("Checking invoice_items...")
-cursor.execute("SELECT COUNT(*) FROM invoice_items WHERE motorcycle_id IS NULL AND (chassis_number IS NOT NULL OR engine_number IS NOT NULL)")
-count = cursor.fetchone()[0]
-print(f"Items with missing motorcycle_id but present chassis/engine: {count}")
-
-print("Checking invoices buyer info...")
-cursor.execute("SELECT COUNT(DISTINCT buyer_cnic) FROM invoices WHERE buyer_cnic IS NOT NULL")
-count = cursor.fetchone()[0]
-print(f"Unique buyers in invoices: {count}")
-
-conn.close()
+# Get the main customer profile page
+if 'https://dealers.ahlportal.com/dealersv2/dealers/customer_profile' in data['pages']:
+    page = data['pages']['https://dealers.ahlportal.com/dealersv2/dealers/customer_profile']
+    print('Last updated:', page['last_updated'])
+    print('Fields captured:', len(page['fields']))
+    print('Key fields:')
+    for field in ['#txt_chassis_no', '#txt_engine_no', '#txt_full_name', '#txt_address', '#txt_cell_no']:
+        if field in page['fields']:
+            print('  %s: %r' % (field, page['fields'][field]['value']))
