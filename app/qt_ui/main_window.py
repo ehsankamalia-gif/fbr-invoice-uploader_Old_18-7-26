@@ -848,6 +848,12 @@ class MainWindow(QMainWindow):
         self._nav_buttons: Dict[str, NavigationButton] = {}
         self._dealer_completer_map: Dict[str, int] = {}
         self._is_dealer_selected: bool = False
+        # Last values looked up from the invoice form, so a completed CNIC/NTN is
+        # queried once instead of on every subsequent keystroke.
+        self._last_cnic_toast: str | None = None
+        self._last_cnic_autofill: str | None = None
+        self._last_ntn_lookup: str | None = None
+        self._upload_status_style: str | None = None
         self._is_sidebar_collapsed: bool = False # Track sidebar state
         self._ab_last_width = 0  # Track last width for advance booking page responsive layouts
         self._api_server_launch_in_progress = False
@@ -891,7 +897,9 @@ class MainWindow(QMainWindow):
         self._active_fbr_settings_snapshot = settings_service.get_active_settings()
         self._last_settings_revision = settings_service.get_revision()
         self._refresh_api_server_status()
-        self._api_server_status_timer.start()
+        # The timer is started only while the Settings page is open. Its status probe
+        # is a blocking socket connect (0.75s when the port is closed) on the GUI
+        # thread, which stalled typing everywhere else in the app.
 
         self._update_app_branding(self._active_fbr_settings_snapshot.get("business_name", "Ehsan Trader"))
         try:
@@ -1571,6 +1579,14 @@ class MainWindow(QMainWindow):
         # Always stop auto-refresh unless we are on captured_data page
         if hasattr(self, "_captured_data_timer"):
             self._captured_data_timer.stop()
+
+        # Same for the API server probe: it only feeds widgets on the Settings page.
+        if hasattr(self, "_api_server_status_timer"):
+            if key == "settings":
+                self._refresh_api_server_status()
+                self._api_server_status_timer.start()
+            else:
+                self._api_server_status_timer.stop()
 
         # Trigger refresh if page has a refresh method
         if key == "welcome":
@@ -2965,11 +2981,20 @@ class MainWindow(QMainWindow):
                 formatted = formatted[:13] + "-" + formatted[13:]
             if len(formatted) > 15:
                 formatted = formatted[:15]
+            if len(formatted) != 15:
+                # Leaving a complete CNIC re-arms the check for the next one.
+                self._last_cnic_toast = None
             if formatted != text:
+                # Signals stay blocked: an unblocked setText re-emits textChanged and
+                # runs every slot on this field a second time for one keystroke.
+                self.invoice_buyer_cnic_input.blockSignals(True)
                 self.invoice_buyer_cnic_input.setText(formatted)
-            
-            # Real-time CNIC validation for invoice
-            if len(formatted) == 15:
+                self.invoice_buyer_cnic_input.blockSignals(False)
+
+            # Real-time CNIC validation for invoice.
+            # Guarded so a complete CNIC is checked once, not on every later keystroke.
+            if len(formatted) == 15 and formatted != self._last_cnic_toast:
+                self._last_cnic_toast = formatted
                 db_check = SessionLocal()
                 try:
                     existing = db_check.query(Customer).filter(Customer.cnic == formatted).first()
@@ -6553,17 +6578,19 @@ class MainWindow(QMainWindow):
             
         db = SessionLocal()
         try:
-            # Subquery to find already uploaded motorcycles
-            uploaded_motorcycle_ids = db.query(InvoiceItem.motorcycle_id).join(Invoice).filter(
+            # Correlated EXISTS for already-uploaded motorcycles. Equivalent to the
+            # NOT IN (subquery) it replaces (motorcycle_id is never NULL here), but
+            # MySQL plans it far better - this runs on every pause while typing.
+            already_uploaded = db.query(InvoiceItem.id).join(Invoice).filter(
                 Invoice.is_fiscalized == True,
-                InvoiceItem.motorcycle_id.isnot(None)
-            ).subquery()
+                InvoiceItem.motorcycle_id == Motorcycle.id
+            ).exists()
 
             # Search in Motorcycle Inventory - EXCLUDE already uploaded
             results = db.query(Motorcycle.chassis_number).filter(
                 Motorcycle.status == "IN_STOCK",
                 Motorcycle.chassis_number.ilike(f"%{query_text}%"),
-                ~Motorcycle.id.in_(uploaded_motorcycle_ids)
+                ~already_uploaded
             ).limit(10).all()
             
             suggestions = [r[0] for r in results]
@@ -6822,7 +6849,15 @@ class MainWindow(QMainWindow):
     def _on_invoice_ntn_changed(self, text: str) -> None:
         ntn = text.strip()
         if not ntn:
+            self._last_ntn_lookup = None
             return
+
+        # This ran a query per keystroke. An NTN is 7 digits (optionally +check digit),
+        # so anything shorter cannot match, and the same value never needs re-querying.
+        if len(ntn) < 7 or ntn == self._last_ntn_lookup:
+            return
+        self._last_ntn_lookup = ntn
+
         db = SessionLocal()
         try:
             customer = db.query(Customer).filter(Customer.ntn == ntn).first()
@@ -6853,12 +6888,20 @@ class MainWindow(QMainWindow):
             self.invoice_buyer_cnic_input.blockSignals(False)
         cnic = formatted.strip()
         if not cnic or len(cnic) < 15:
+            self._last_cnic_autofill = None
             logger.info(f"DEBUG [_on_invoice_cnic_changed] CNIC too short or empty: '{cnic}' len={len(cnic)} - clearing buyer fields")
             self.invoice_buyer_name_input.clear()
             self.invoice_buyer_father_input.clear()
             self.invoice_buyer_phone_input.clear()
             self.invoice_buyer_address_input.clear()
             return
+
+        # Auto-fill is per distinct CNIC. Without this the lookup, the four setText
+        # calls and their signal cascades repeated on every keystroke once complete.
+        if cnic == self._last_cnic_autofill:
+            return
+        self._last_cnic_autofill = cnic
+
         db = SessionLocal()
         try:
             customer = db.query(Customer).filter(Customer.cnic == cnic).first()
@@ -7127,12 +7170,12 @@ class MainWindow(QMainWindow):
                 """
                 
             self.invoice_upload_status_label.setText(status_text)
-            self.invoice_upload_status_label.setStyleSheet(style)
-            
+            self._apply_upload_status_style(style)
+
         except Exception as e:
             logger.error("Error updating invoice upload status: %s", e)
             self.invoice_upload_status_label.setText("⚠️ Error loading status")
-            self.invoice_upload_status_label.setStyleSheet("""
+            self._apply_upload_status_style("""
                 QLabel {
                     font-size: 11px; 
                     color: #dc3545;
@@ -7143,6 +7186,14 @@ class MainWindow(QMainWindow):
                     min-width: 120px;
                 }
             """)
+
+    def _apply_upload_status_style(self, style: str) -> None:
+        """setStyleSheet re-polishes the widget every call, and this runs on a 5s
+        timer whose value rarely changes, so only apply it when it actually differs."""
+        if style == self._upload_status_style:
+            return
+        self._upload_status_style = style
+        self.invoice_upload_status_label.setStyleSheet(style)
 
     def _submit_invoice(self) -> None:
         if not self.invoice_submit_btn.isEnabled():

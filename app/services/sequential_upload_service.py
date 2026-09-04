@@ -3,6 +3,7 @@ import threading
 import time
 from typing import List, Optional
 from datetime import datetime, timedelta
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
 from app.db.models import Invoice
@@ -209,19 +210,20 @@ class SequentialUploadService:
         """Returns the current state of the upload queue."""
         db = SessionLocal()
         try:
-            # Get counts by status
-            pending_count = db.query(Invoice)\
-                .filter(Invoice.sync_status == "PENDING").count()
-                
-            processing_count = db.query(Invoice)\
-                .filter(Invoice.is_processing == True).count()
-                
-            failed_count = db.query(Invoice)\
-                .filter(Invoice.sync_status == "FAILED").count()
-                
-            synced_count = db.query(Invoice)\
-                .filter(Invoice.sync_status == "SYNCED").count()
-                
+            # Get counts by status. One aggregate instead of four COUNT(*) round
+            # trips, because the invoice screen polls this every 5 seconds.
+            totals = db.query(
+                func.sum(case((Invoice.sync_status == "PENDING", 1), else_=0)),
+                func.sum(case((Invoice.is_processing == True, 1), else_=0)),
+                func.sum(case((Invoice.sync_status == "FAILED", 1), else_=0)),
+                func.sum(case((Invoice.sync_status == "SYNCED", 1), else_=0)),
+            ).one()
+
+            pending_count = int(totals[0] or 0)
+            processing_count = int(totals[1] or 0)
+            failed_count = int(totals[2] or 0)
+            synced_count = int(totals[3] or 0)
+
             # Get upcoming invoices
             upcoming = db.query(Invoice)\
                 .filter(

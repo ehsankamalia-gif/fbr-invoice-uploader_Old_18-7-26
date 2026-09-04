@@ -380,7 +380,6 @@ class FormCaptureService:
                     eng_present = 1 if forced_data.get("#txt_engine_no") else 0
                     col_present = 1 if forced_data.get("#txt_color") else 0
                     mod_present = 1 if forced_data.get("#txt_model") else 0
-<<<<<<< HEAD
                     chassis_present = 1 if forced_data.get("#txt_chassis_no") else 0
                     logging.info(f"METRIC:CAPTURE_QUALITY:chassis={chassis_present},engine={eng_present},color={col_present},model={mod_present}")
 
@@ -402,11 +401,6 @@ class FormCaptureService:
                 with self._lock:
                     success = self.processor.process_submission(self.session_data)
                 
-=======
-                    _capture_logger.info(f"METRIC:CAPTURE_QUALITY:engine={eng_present},color={col_present},model={mod_present}")
-
-                success = self.processor.process_submission(forced_data)
->>>>>>> 0d07d35b60c68e1d566c6d3058a8141acd945221
                 if success:
                     _capture_logger.info("Invoice saved successfully. Clearing session data.")
                     
@@ -427,7 +421,6 @@ class FormCaptureService:
                         except Exception as cb_ex:
                             _capture_logger.error(f"Error in on_data_captured callback: {cb_ex}")
 
-<<<<<<< HEAD
                     with self._lock:
                         self.clear_session_data()
                 else:
@@ -440,24 +433,12 @@ class FormCaptureService:
                             fields = self.session_data.get("pages", {}).get(url_key, {}).get("fields", {})
                             field_keys = list(fields.keys())
                             logging.warning(f"  Page '{url_key}' has fields: {field_keys}")
-=======
-                    self.clear_session_data()
-                else:
-                    _capture_logger.error(f"FAILED to save captured data to database. Session data keys: {list(self.session_data.get('pages', {}).keys())}")
-                    # Try to log the chassis number for debugging
-                    for url, page in self.session_data.get("pages", {}).items():
-                        chassis_val = page.get("fields", {}).get("#txt_chassis_no", {}).get("value", "")
-                        if chassis_val:
-                            _capture_logger.error(f"FAILED save for chassis: {chassis_val}")
-                            break
->>>>>>> 0d07d35b60c68e1d566c6d3058a8141acd945221
                     
                 # Always save after form submission
                 with self._lock:
                     self._save_data()
                     self.current_batch = 0
                 
-<<<<<<< HEAD
                 logging.info("Submission captured. Waiting for next action.")
                         
                 return
@@ -475,25 +456,6 @@ class FormCaptureService:
                         page_url = self.page.url
                 except Exception as e:
                     logging.error(f"Error getting page URL (using fallback): {e}")
-=======
-                _capture_logger.info("Submission captured. Waiting for next action.")
-                # Removed forced reload to allow validation checks on page
-
-                        
-                return
-
-            # Robust Page URL retrieval
-            page_url = "unknown_url"
-            try:
-                if hasattr(source, "page") and source.page:
-                    page_url = source.page.url
-                elif isinstance(source, dict) and "page" in source:
-                    page_url = source["page"].url
-                elif self.page:
-                    page_url = self.page.url
-            except Exception as e:
-                _capture_logger.error(f"Error getting page URL (using fallback): {e}")
->>>>>>> 0d07d35b60c68e1d566c6d3058a8141acd945221
 
                 # Initialize page entry if not exists
                 if page_url not in self.session_data["pages"]:
@@ -502,7 +464,6 @@ class FormCaptureService:
                         "fields": {}
                     }
                 
-<<<<<<< HEAD
                 # Update data
                 selector = data.get("selector")
                 if selector:
@@ -522,21 +483,6 @@ class FormCaptureService:
                 
         except Exception as e:
             logging.error(f"Error handling captured data: {e}", exc_info=True)
-=======
-                self.current_batch += 1
-                
-                if self.current_batch >= self.batch_size:
-                    _capture_logger.debug(f"Data updated in memory for {page_url}. Batch size {self.batch_size} reached. Saving data...")
-                    self._save_data()
-                    self.current_batch = 0
-                else:
-                    _capture_logger.debug(f"Data updated in memory for {page_url}. Batch size {self.current_batch}/{self.batch_size}")
-            else:
-                _capture_logger.warning(f"No selector in captured data: {data}")
-                
-        except Exception as e:
-            _capture_logger.error(f"Error handling captured data: {e}")
->>>>>>> 0d07d35b60c68e1d566c6d3058a8141acd945221
 
     def _save_data(self):
         """Persist data to JSON file"""

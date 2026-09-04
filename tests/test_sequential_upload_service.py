@@ -92,8 +92,8 @@ class TestSequentialUploadService(unittest.TestCase):
         mock_db = MagicMock()
         mock_session_local.return_value = mock_db
         
-        # Configure counts to return 0
-        mock_db.query.return_value.filter.return_value.count.side_effect = [0, 0, 0, 0]
+        # Counts come back as one aggregate row: pending, processing, failed, synced
+        mock_db.query.return_value.one.return_value = (0, 0, 0, 0)
         # Configure queries to return empty lists
         mock_db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
         mock_db.query.return_value.filter.return_value.first.return_value = None
