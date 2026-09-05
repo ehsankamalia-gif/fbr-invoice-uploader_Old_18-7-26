@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QTextEdit, QCheckBox, QFrame, QGridLayout, 
     QMessageBox, QProgressBar
 )
+from app.services.scraper_service import HondaScraper
 from app.utils.url_manager import UrlManager
 from app.db.session import SessionLocal
 from app.db.models import Motorcycle, ProductModel
@@ -24,7 +25,8 @@ class WebImportDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Import Inventory from Web")
         self.setMinimumSize(800, 650)
-        
+
+        self.scraper = HondaScraper()
         self.scraped_data = []
         self.url_manager = UrlManager()
         
@@ -169,7 +171,12 @@ class WebImportDialog(QDialog):
             self.username_entry.setText(settings.HONDA_PORTAL_USERNAME)
         if settings.HONDA_PORTAL_PASSWORD:
             self.password_entry.setText(settings.HONDA_PORTAL_PASSWORD)
-            
+
+        if self.scraper.capture_service.is_running:
+            self.launch_btn.setText("1. Connect & Login")
+            self.launch_btn.setStyleSheet("background-color: #2980B9; color: white;")
+            self.scrape_btn.setEnabled(True)
+
     def _toggle_password(self, checked):
         self.password_entry.setEchoMode(QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password)
 
@@ -190,8 +197,25 @@ class WebImportDialog(QDialog):
             QMessageBox.critical(self, "Error", f"Failed to save credentials: {e}")
 
     def _launch_browser(self):
-        QMessageBox.information(self, "Not Available", "Web import functionality has been removed.")
-        return
+        url = self.url_entry.text().strip()
+        username = self.username_entry.text().strip()
+        password = self.password_entry.text().strip()
+
+        if not url:
+            QMessageBox.warning(self, "Error", "Please enter a URL first")
+            return
+
+        self.launch_btn.setEnabled(False)
+        self.launch_btn.setText("Launching...")
+
+        def login_worker():
+            try:
+                self.scraper.login(url, username=username, password=password)
+                self.status_update.emit("Browser ready")
+            except Exception as e:
+                self.scrape_error.emit(str(e))
+
+        threading.Thread(target=login_worker, daemon=True).start()
 
     def _on_status_update(self, status):
         if status == "Browser ready":
@@ -203,8 +227,25 @@ class WebImportDialog(QDialog):
             self.scrape_btn.setText(status)
 
     def _start_scrape(self):
-        QMessageBox.information(self, "Not Available", "Web import functionality has been removed.")
-        return
+        self.scrape_btn.setEnabled(False)
+        self.scrape_btn.setText("Scraping...")
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0) # Indeterminate
+
+        def scrape_worker():
+            try:
+                if self.pagination_check.isChecked():
+                    new_data = self.scraper.scrape_all_pages(
+                        max_pages=1000,
+                        status_callback=lambda msg: self.status_update.emit(msg)
+                    )
+                else:
+                    new_data = self.scraper.scrape_current_page()
+                self.scrape_complete.emit(new_data)
+            except Exception as e:
+                self.scrape_error.emit(str(e))
+
+        threading.Thread(target=scrape_worker, daemon=True).start()
 
     def _on_scrape_complete(self, new_data):
         self.scrape_btn.setEnabled(True)
