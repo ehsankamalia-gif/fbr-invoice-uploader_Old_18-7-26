@@ -1,0 +1,24 @@
+Enter file in which to save the key (/home/ubuntu/.ssh/id_ed25519):
+SHA256:O6vbzGEG/F5hTGwRtVLyRxV35e7kAhqtXkTv8wAea0E aws-django-server
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAxZYOzbMFtvV5vKH6QOizwoOivNDPpw8lVsFdUf8PNH aws-django-server
+
+
+
+sparepartsadmin
+
+spareparts123
+
+
+
+
+
+
+
+
+
+
+
+
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHSNt1KxXOEz3KHeB5iylbtSUY/I8lL6IXfRNcYW3HNJ ehsan.kamalia@gmail.com = ssh key for fbr-invoice-uploader2
+
+API Token for fbr-invoice-uploader2  =  ATATT3xFfGF0fbXCmUaQlH4NZU6wGm7sQ8ahJyo1c0xRH75TZuGgpJFGAw_FD5ubBniNs9YkP9AYDITzheB6eHS27NElz3tqimh7MMIt4U98027w_c-GktjBYL5Ly4PgGUB7uiApIHFAODq4xeOkNLyADLytuM2MvqKUPCU3ujpJGah_dirX6WQ=7291BF
