@@ -59,7 +59,9 @@ def get_db() -> Session:
 
 
 def _reporting_root_dir() -> Path:
-    return Path(__file__).resolve().parent.parent / "exports" / "reports"
+    from app.core.paths import data_dir
+
+    return data_dir() / "exports" / "reports"
 
 
 def _get_role(role_header: Optional[str]) -> str:

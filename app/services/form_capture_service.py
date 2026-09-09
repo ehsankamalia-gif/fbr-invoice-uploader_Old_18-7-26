@@ -7,6 +7,7 @@ import queue
 from pathlib import Path
 from datetime import datetime
 from playwright.sync_api import sync_playwright, Page
+from app.core.paths import data_dir, data_path, resource_path
 from app.services.captured_form_processor import CapturedFormProcessor
 from app.services.settings_service import settings_service
 
@@ -16,7 +17,7 @@ _capture_logger.setLevel(logging.DEBUG)
 # Remove any existing handlers to avoid duplicates
 _capture_logger.handlers.clear()
 # Add file handler
-_capture_fh = logging.FileHandler('capture_debug.log', mode='a', encoding='utf-8')
+_capture_fh = logging.FileHandler(data_path('capture_debug.log'), mode='a', encoding='utf-8')
 _capture_fh.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 _capture_logger.addHandler(_capture_fh)
 # Also add a stream handler for console visibility
@@ -42,8 +43,8 @@ class FormCaptureService:
         if self._initialized:
             return
         
-        self.config_path = Path("capture_config.json")
-        self.output_file = Path("captured_forms.json")
+        self.config_path = data_path("capture_config.json")
+        self.output_file = data_path("captured_forms.json")
         self.is_running = False
         self.browser = None
         self.playwright = None
@@ -80,13 +81,33 @@ class FormCaptureService:
             with open(self.config_path, 'r') as f:
                 self.config = json.load(f)
         else:
-            self.config = {
-                "target_domains": ["dealers.ahlportal.com"],
-                "exclude_selectors": ["input[type='password']"],
-                "debounce_ms": 300,
-                "output_file": "captured_forms.json"
-            }
-            # Save default config
+            # Prefer the configuration shipped with the build. Falling straight
+            # through to the bare defaults below leaves include_selectors and
+            # field_mapping empty, which silently disables customer data
+            # capture - the failure this fallback exists to prevent.
+            self.config = None
+            bundled = resource_path("capture_config.json")
+            try:
+                if bundled.exists() and bundled != self.config_path:
+                    with open(bundled, 'r') as f:
+                        self.config = json.load(f)
+                    _capture_logger.info(f"Restored capture config from bundled copy: {bundled}")
+            except Exception as e:
+                _capture_logger.error(f"Could not read bundled capture config: {e}")
+
+            if not self.config:
+                _capture_logger.warning(
+                    "No capture config found; using minimal defaults. "
+                    "Field capture will be limited until a full config is restored."
+                )
+                self.config = {
+                    "target_domains": ["dealers.ahlportal.com"],
+                    "exclude_selectors": ["input[type='password']"],
+                    "debounce_ms": 300,
+                    "output_file": "captured_forms.json"
+                }
+
+            # Save resolved config
             with open(self.config_path, 'w') as f:
                 json.dump(self.config, f, indent=2)
 
@@ -109,7 +130,9 @@ class FormCaptureService:
             _capture_logger.error(f"Failed to load credentials from settings_service: {e}")
 
         if "output_file" in self.config:
-            self.output_file = Path(self.config["output_file"])
+            configured = Path(self.config["output_file"])
+            # Config stores a bare filename; keep it inside the writable data dir.
+            self.output_file = configured if configured.is_absolute() else data_path(str(configured))
 
         # Sync processor mapping with latest config (if processor exists)
         if hasattr(self, 'processor') and self.processor:
@@ -206,7 +229,7 @@ class FormCaptureService:
                 self.playwright = p
                 
                 # Path for persistent browser data (history, passwords, etc.)
-                user_data_dir = Path("browser_profile")
+                user_data_dir = data_dir() / "browser_profile"
                 user_data_dir.mkdir(exist_ok=True)
                 
                 _capture_logger.info(f"Launching persistent browser context at {user_data_dir.absolute()}")
@@ -302,7 +325,13 @@ class FormCaptureService:
                             while not self.task_queue.empty():
                                 task, result_q = self.task_queue.get_nowait()
                                 try:
-                                    res = task(self.page)
+                                    # Use the most recently opened/active tab, not the
+                                    # original self.page reference. The dealer portal
+                                    # opens sections in new tabs; without this, tasks
+                                    # queued via execute_task() (login, scraping) kept
+                                    # silently operating on the stale first tab.
+                                    active_page = self.context.pages[-1] if self.context.pages else self.page
+                                    res = task(active_page)
                                     result_q.put(res)
                                 except Exception as task_ex:
                                     result_q.put(task_ex)
@@ -978,7 +1007,21 @@ class FormCaptureService:
             // -----------------------------------------------------------
             function handleSubmit(source) {{
                 console.log("Submit detected via " + source);
-                
+
+                // This same generic submit listener fires on every portal page
+                // (delivery, stock-in, dealer_stock, etc.), but the force-capture
+                // pipeline below is customer-profile specific (chassis/engine/
+                // name/CNIC/etc.). Without this guard, submitting an unrelated
+                // page's form got force-mapped into CapturedData too, producing
+                // garbage rows (e.g. a delivery-page submit once saved with
+                // chassis_number set to a date string picked up by the label
+                // text-fallback). Only proceed if this page actually has the
+                // customer-profile chassis field.
+                if (!document.querySelector('#txt_chassis_no')) {{
+                    console.log("Submit ignored: not a customer-profile page (no #txt_chassis_no found).");
+                    return;
+                }}
+
                 // Visual Feedback
                 const overlay = document.getElementById('fbr-debug-overlay');
                 if (overlay) {{

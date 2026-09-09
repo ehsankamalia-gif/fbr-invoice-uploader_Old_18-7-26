@@ -5,7 +5,21 @@ import time
 from typing import List, Dict, Optional
 from app.services.form_capture_service import FormCaptureService
 
-logger = logging.getLogger(__name__)
+# A bare logging.getLogger(__name__) here has no handler anywhere in its
+# hierarchy (app/core/logger.py only wires up a logger named after
+# settings.APP_NAME, which this doesn't match), so every warning/error below
+# was being silently discarded - invisible in the packaged app (pythonw has
+# no console). Route it into the same capture_debug.log the rest of the
+# browser-automation subsystem already writes to, so failures are visible.
+logger = logging.getLogger("scraper_service")
+logger.setLevel(logging.DEBUG)
+if not logger.handlers:
+    from app.core.paths import data_path
+
+    _fh = logging.FileHandler(data_path("capture_debug.log"), mode="a", encoding="utf-8")
+    _fh.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - [Scraper] %(message)s"))
+    logger.addHandler(_fh)
+    logger.propagate = False
 
 class HondaScraper:
     def __init__(self):
@@ -109,11 +123,14 @@ class HondaScraper:
                 # We raise exception so the caller knows it failed
                 raise e
 
-        # Execute the task
+        # Execute the task. Re-raise on failure (rather than swallowing it) so
+        # the dialog reports the real error instead of always claiming
+        # "Browser ready" even when navigation/login genuinely failed.
         try:
             self.capture_service.execute_task(login_task)
         except Exception as e:
-             logger.warning(f"Auto-login could not complete: {e}. Please login manually.")
+            logger.error(f"Auto-login could not complete: {e}")
+            raise
 
     def _apply_layout_fixes(self, page):
         pass

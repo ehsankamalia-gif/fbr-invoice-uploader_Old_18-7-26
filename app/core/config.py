@@ -9,8 +9,17 @@ from pydantic import BaseModel, ConfigDict, Field
 def get_env_path():
     """Get the path to .env file, considering both script and frozen (EXE) modes."""
     if getattr(sys, 'frozen', False):
-        # Running as a bundled EXE
-        return Path(sys.executable).parent / ".env"
+        # Installed EXE: the install folder (often Program Files) is not
+        # writable, so settings live in the per-user data folder. An .env
+        # placed next to the EXE still wins, which keeps portable/USB setups
+        # and existing installs working.
+        beside_exe = Path(sys.executable).parent / ".env"
+        if beside_exe.exists():
+            return beside_exe
+
+        from app.core.paths import data_dir
+
+        return data_dir() / ".env"
     else:
         # Running as a script
         return Path(__file__).resolve().parent.parent.parent / ".env"
@@ -49,26 +58,107 @@ def _pick_env_value(key: str) -> str:
     selected = SANDBOX if FBR_ENV == "SANDBOX" else PRODUCTION
     return selected.get(key) or os.getenv(key, "")
 
-def get_database_url() -> str:
-    """Construct database URL from environment variables with professional persistent paths."""
-    server = os.getenv("DB_SERVER")
-    if server:
-        user = os.getenv("DB_USER", "root")
-        password = os.getenv("DB_PASSWORD", "")
-        port = os.getenv("DB_PORT", "3306")
-        name = os.getenv("DB_NAME", "fbr_invoice_uploader")
-        encoded_password = urllib.parse.quote_plus(password)
-        return f"mysql+pymysql://{user}:{encoded_password}@{server}:{port}/{name}"
-    
-    # Professional persistent path for SQLite in %APPDATA%
+def _sqlite_fallback_url() -> str:
+    """Persistent per-user SQLite path, used when no database server is present."""
     if sys.platform == "win32":
         app_data = os.getenv("APPDATA")
         db_dir = Path(app_data) / "EhsanTraderFBR"
         db_dir.mkdir(parents=True, exist_ok=True)
         db_path = db_dir / "fbr_invoices.db"
         return f"sqlite:///{db_path}"
-    
+
     return os.getenv("DB_URL", "sqlite:///./fbr_invoices.db")
+
+
+def _mysql_url() -> str:
+    user = os.getenv("DB_USER", "root")
+    password = os.getenv("DB_PASSWORD", "")
+    server = os.getenv("DB_SERVER")
+    port = os.getenv("DB_PORT", "3306")
+    name = os.getenv("DB_NAME", "fbr_invoice_uploader")
+    encoded_password = urllib.parse.quote_plus(password)
+    return f"mysql+pymysql://{user}:{encoded_password}@{server}:{port}/{name}"
+
+
+def _server_is_listening(host: str, port: str, timeout: float = 1.5) -> bool:
+    """Cheap TCP probe so a missing Laragon/XAMPP doesn't block startup."""
+    import socket
+
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True
+    except (OSError, ValueError):
+        return False
+
+
+def _backend_marker_path() -> Path:
+    from app.core.paths import data_path
+
+    return data_path("db_backend.json")
+
+
+def _remembered_backend() -> str:
+    """Returns 'mysql' once this install has successfully used a MySQL server.
+
+    This matters for safety: if the machine already keeps its data in MySQL and
+    the server merely isn't running yet, we must NOT quietly switch to an empty
+    SQLite file. In that case the existing connection-error path is correct.
+    """
+    try:
+        marker = _backend_marker_path()
+        if marker.exists():
+            import json
+
+            return str(json.loads(marker.read_text()).get("backend") or "")
+    except Exception:
+        pass
+    return ""
+
+
+def remember_backend(backend: str) -> None:
+    """Records the backend after a verified successful connection."""
+    try:
+        import json
+
+        _backend_marker_path().write_text(json.dumps({"backend": backend}, indent=2))
+    except Exception:
+        pass
+
+
+_DB_URL_CACHE: str | None = None
+
+
+def get_database_url() -> str:
+    """Construct database URL, auto-detecting a local MySQL server (Laragon/XAMPP).
+
+    Precedence:
+      1. DB_SERVER configured and the server answers  -> MySQL (database is
+         created automatically by app.db.session.create_mysql_db_if_missing)
+      2. DB_SERVER configured, server silent, but this install previously used
+         MySQL -> still MySQL, so the user gets a clear "start your server"
+         error rather than a silently empty database
+      3. Otherwise -> per-user SQLite, so the app runs on a machine with no
+         database server installed at all
+    """
+    global _DB_URL_CACHE
+    if _DB_URL_CACHE:
+        return _DB_URL_CACHE
+
+    server = os.getenv("DB_SERVER")
+    if server:
+        port = os.getenv("DB_PORT", "3306")
+        if _server_is_listening(server, port) or _remembered_backend() == "mysql":
+            _DB_URL_CACHE = _mysql_url()
+            return _DB_URL_CACHE
+
+    _DB_URL_CACHE = _sqlite_fallback_url()
+    return _DB_URL_CACHE
+
+
+def reset_database_url_cache() -> None:
+    """Forces re-detection, e.g. after database settings are changed in the UI."""
+    global _DB_URL_CACHE
+    _DB_URL_CACHE = None
 
 class Settings(BaseModel):
     model_config = ConfigDict(case_sensitive=True)
@@ -108,7 +198,10 @@ def reload_settings():
     global settings, FBR_ENV, SANDBOX, PRODUCTION
     
     load_dotenv(dotenv_path=env_path, override=True)
-    
+
+    # Database settings may have changed; re-detect on next lookup.
+    reset_database_url_cache()
+
     # Re-read global env vars
     FBR_ENV = os.getenv("FBR_ENV", "SANDBOX").upper()
     

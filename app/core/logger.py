@@ -3,10 +3,11 @@ import sys
 import os
 from pathlib import Path
 from app.core.config import settings
+from app.core.paths import data_dir
 
 # Create logs directory
-log_dir = Path("logs")
-log_dir.mkdir(exist_ok=True)
+log_dir = data_dir() / "logs"
+log_dir.mkdir(parents=True, exist_ok=True)
 
 class Logger:
     def __init__(self, name: str, log_file: str = "app.log"):

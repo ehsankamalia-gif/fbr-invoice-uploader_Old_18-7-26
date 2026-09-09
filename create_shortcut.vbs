@@ -15,14 +15,14 @@ If Not fso.FileExists(targetScript) Then
 End If
 
 ' Create Shortcut
+' Always launch through run_silent.vbs rather than pointing straight at
+' venv\Scripts\pythonw.exe. A shortcut to the environment's interpreter breaks
+' with "did not find executable at ..." as soon as that Python is upgraded,
+' uninstalled, or the project is copied elsewhere; run_silent.vbs detects the
+' installed Python and repairs the environment instead.
 Set oShellLink = WshShell.CreateShortcut(strDesktop & "\Honda FBR Uploader.lnk")
-If fso.FileExists(pythonwPath) And fso.FileExists(mainScript) Then
-    oShellLink.TargetPath = pythonwPath
-    oShellLink.Arguments = chr(34) & mainScript & chr(34)
-Else
-    oShellLink.TargetPath = "wscript.exe"
-    oShellLink.Arguments = chr(34) & targetScript & chr(34)
-End If
+oShellLink.TargetPath = "wscript.exe"
+oShellLink.Arguments = chr(34) & targetScript & chr(34)
 oShellLink.WorkingDirectory = currentDir
 oShellLink.WindowStyle = 1
 oShellLink.Description = "Launch Honda FBR Uploader (Silent)"

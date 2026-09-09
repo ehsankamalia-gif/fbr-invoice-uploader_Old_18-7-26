@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from app.core.logger import logger
+from app.core.paths import data_dir
 
 
 _FR_CANDIDATE_DIR_NAMES = [
@@ -134,7 +135,7 @@ def is_fastreports_available() -> bool:
 
 def ensure_templates_dir() -> Path:
     """Return (and create) the directory used to store .frx templates."""
-    root = Path(os.getcwd()) if Path.cwd().is_absolute() else Path(__file__).resolve().parent.parent.parent
+    root = data_dir()
     target = root / "exports" / "templates_frx"
     target.mkdir(parents=True, exist_ok=True)
     return target

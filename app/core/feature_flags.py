@@ -3,6 +3,8 @@ import logging
 from pathlib import Path
 from typing import Dict, Any
 
+from app.core.paths import data_path
+
 logger = logging.getLogger(__name__)
 
 class FeatureFlagManager:
@@ -10,7 +12,7 @@ class FeatureFlagManager:
     Manages modular feature flags for the application.
     Allows enabling/disabling features without code changes.
     """
-    FLAGS_FILE = Path("feature_flags.json")
+    FLAGS_FILE = data_path("feature_flags.json")
     DEFAULT_FLAGS = {
         "new_dashboard": False,
         "advanced_reports": False,

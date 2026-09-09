@@ -13,6 +13,7 @@ from PyQt6.QtCore import Qt, QUrl, QObject, QCoreApplication, QTimer, pyqtSlot
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 
 from app.core.logger import logger
+from app.core.paths import data_dir
 from app.services.settings_service import settings_service
 
 QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
@@ -107,14 +108,14 @@ def _apply_urdu_font_to_html(html: str) -> str:
 
 
 def _invoice_layout_file_path() -> Path:
-    root = Path(os.getcwd())
+    root = data_dir()
     target_dir = root / "exports" / "print_layouts"
     target_dir.mkdir(parents=True, exist_ok=True)
     return target_dir / "invoice_layout_positions.json"
 
 
 def _authority_layout_file_path() -> Path:
-    root = Path(os.getcwd())
+    root = data_dir()
     target_dir = root / "exports" / "print_layouts"
     target_dir.mkdir(parents=True, exist_ok=True)
     return target_dir / "authority_letter_layout_positions.json"

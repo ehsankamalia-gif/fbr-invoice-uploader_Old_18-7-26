@@ -50,6 +50,10 @@ def test_validation_rejects_invalid_data():
                 <p>Vehicle Color: Save</p>
                 
                 <input type="hidden" id="txt_engine_no" value="">
+                <!-- Marks this as a customer-profile page. The injector only
+                     force-captures on submit when this field is present, so
+                     unrelated portal pages no longer create captured records. -->
+                <input type="hidden" id="txt_chassis_no" value="CH-TEST-1234">
             </div>
             
             <button id="submit_btn">Submit</button>
@@ -118,6 +122,10 @@ def test_validation_accepts_valid_data():
                 <p>Vehicle Model: Toyota Corolla</p>
                 <p>Vehicle Color: White</p>
                 <input type="hidden" id="txt_engine_no" value="">
+                <!-- Marks this as a customer-profile page. The injector only
+                     force-captures on submit when this field is present, so
+                     unrelated portal pages no longer create captured records. -->
+                <input type="hidden" id="txt_chassis_no" value="CH-TEST-1234">
             </div>
             <button id="submit_btn">Submit</button>
         </body>

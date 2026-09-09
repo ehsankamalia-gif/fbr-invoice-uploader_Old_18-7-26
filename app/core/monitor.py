@@ -5,13 +5,15 @@ import os
 from datetime import datetime
 from typing import Dict, Any
 
+from app.core.paths import data_path
+
 # Create a specialized logger for updates and performance
 update_logger = logging.getLogger("update_monitor")
 update_logger.setLevel(logging.INFO)
 
 # Ensure a dedicated log file for monitoring
 if not update_logger.handlers:
-    fh = logging.FileHandler("system_monitor.log")
+    fh = logging.FileHandler(data_path("system_monitor.log"))
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     fh.setFormatter(formatter)
     update_logger.addHandler(fh)

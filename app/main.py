@@ -42,6 +42,21 @@ def bootstrap() -> bool:
 
 
 def main() -> None:
+    # Seed the writable data folder before anything reads configuration.
+    try:
+        project_root = Path(__file__).resolve().parent.parent
+        if str(project_root) not in sys.path:
+            sys.path.append(str(project_root))
+        from app.core.provision import ensure_first_run_setup
+
+        ensure_first_run_setup()
+    except Exception as exc:
+        _show_startup_error(
+            f"Failed to prepare the application data folder.\n\n{exc}",
+            "Startup Error",
+        )
+        raise SystemExit(1)
+
     if not bootstrap():
         raise SystemExit(1)
 

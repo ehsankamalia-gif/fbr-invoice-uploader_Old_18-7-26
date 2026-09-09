@@ -1,31 +1,27 @@
 @echo off
 TITLE Honda FBR Invoice Uploader - Setup
+cd /d "%~dp0"
 echo ===================================================
 echo      Honda FBR Invoice Uploader - First Time Setup
 echo ===================================================
 echo.
 
-:: Check if Python is installed
-python --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [ERROR] Python is not found! 
-    echo Please install Python 3.10 or later from python.org and try again.
-    echo Make sure to check "Add Python to PATH" during installation.
+echo [1/4] Detecting Python and preparing the virtual environment...
+:: Finds Python wherever it is installed and creates or repairs the
+:: environment, so setup works on a computer it was not built on.
+call "%~dp0scripts\ensure_python.bat"
+if errorlevel 1 (
     pause
-    exit /b
+    exit /b 1
 )
+echo       Using Python: %APP_PY%
 
-echo [1/4] Creating virtual environment...
-python -m venv venv
+echo [2/4] Installing dependencies...
+"%APP_PY%" -m pip install --upgrade pip
+"%APP_PY%" -m pip install -r requirements.txt
 
-echo [2/4] Activating virtual environment...
-call venv\Scripts\activate
-
-echo [3/4] Installing dependencies...
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-echo Installing Playwright browsers...
-python -m playwright install
+echo [3/4] Installing Playwright browser support...
+"%APP_PY%" -m playwright install
 
 echo [4/4] Configuring environment...
 if not exist .env (
@@ -36,7 +32,7 @@ if not exist .env (
 )
 
 echo Initializing database...
-python -c "from app.db.session import init_db; init_db()"
+"%APP_PY%" -c "from app.db.session import init_db; init_db()"
 
 echo.
 echo ===================================================

@@ -21,22 +21,27 @@ class Bootstrapper:
         self.requirements_file = project_root / "requirements.txt"
         self.venv_dir = project_root / "venv"
         self.os_type = platform.system()
+        self.is_frozen = getattr(sys, "frozen", False)
         
     def check_environment(self) -> bool:
         """Runs the complete environment setup process."""
         logger.info(f"Starting environment check on {self.os_type}...")
-        
+
         try:
-            # 1. Verify and install dependencies
-            if not self.verify_dependencies():
-                logger.warning("Dependencies missing. Attempting automatic installation...")
-                if not self.install_dependencies():
-                    logger.error("Failed to install dependencies automatically.")
-                    return False
-            
+            # 1. Verify and install dependencies.
+            # A packaged build ships its own dependencies and has no pip or
+            # requirements.txt to work with, so this step only applies to
+            # source installs.
+            if not self.is_frozen:
+                if not self.verify_dependencies():
+                    logger.warning("Dependencies missing. Attempting automatic installation...")
+                    if not self.install_dependencies():
+                        logger.error("Failed to install dependencies automatically.")
+                        return False
+
             # 2. Setup necessary directories
             self.setup_directories()
-            
+
             # 3. Environment Variables (.env)
             self.setup_env_file()
 
@@ -77,20 +82,39 @@ class Bootstrapper:
             logger.error(f"Pip installation failed: {e}")
             return False
 
+    def _writable_root(self) -> Path:
+        """Where runtime files belong.
+
+        Normally the configured project root. In a packaged build that root is a
+        temporary extraction folder, so runtime files go to the data folder.
+        """
+        if not self.is_frozen:
+            return self.project_root
+
+        from app.core.paths import data_dir
+
+        return data_dir()
+
     def setup_directories(self):
         """Creates required application directories if they don't exist."""
+        root = self._writable_root()
         dirs = ["logs", "backups", "temp", "exports"]
         for d in dirs:
-            path = self.project_root / d
+            path = root / d
             if not path.exists():
                 logger.info(f"Creating directory: {d}")
                 path.mkdir(parents=True, exist_ok=True)
 
     def setup_env_file(self):
         """Creates a default .env file if missing."""
-        env_file = self.project_root / ".env"
+        env_file = self._writable_root() / ".env"
         env_example = self.project_root / ".env.example"
-        
+
+        if self.is_frozen and not env_example.exists():
+            from app.core.paths import resource_dir
+
+            env_example = resource_dir() / ".env.example"
+
         if not env_file.exists():
             if env_example.exists():
                 logger.info("Creating .env from .env.example")

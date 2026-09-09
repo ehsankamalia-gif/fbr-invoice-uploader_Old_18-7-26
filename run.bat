@@ -6,17 +6,13 @@ if /i "%~1"=="--console" (
     exit /b %errorlevel%
 )
 
-if not exist "%~dp0venv\Scripts\pythonw.exe" (
-    echo Virtual environment not found. Please run setup.bat first.
-    pause
-    exit /b 1
-)
-
 if not exist "%~dp0run_silent.vbs" (
     echo Silent launcher not found: "%~dp0run_silent.vbs"
     pause
     exit /b 1
 )
 
+:: run_silent.vbs verifies the Python environment and repairs it if the
+:: interpreter it was built against is no longer present.
 start "" wscript.exe "%~dp0run_silent.vbs"
 exit /b 0

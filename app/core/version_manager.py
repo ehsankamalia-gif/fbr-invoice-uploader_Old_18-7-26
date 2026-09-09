@@ -3,13 +3,15 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
 
+from app.core.paths import data_path
+
 logger = logging.getLogger(__name__)
 
 class VersionManager:
     """
     Manages the application version and compatibility checks.
     """
-    VERSION_FILE = Path("version.json")
+    VERSION_FILE = data_path("version.json")
     DEFAULT_VERSION = {
         "major": 1,
         "minor": 0,

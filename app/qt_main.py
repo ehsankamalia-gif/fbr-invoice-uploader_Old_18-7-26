@@ -22,6 +22,13 @@ from PyQt6.QtWidgets import (
     QTimeEdit,
 )
 
+# Seed the writable data folder before anything below imports app.core.config,
+# which reads .env at import time. This module is the packaged entry point, so
+# an installed copy provisions itself here.
+from app.core.provision import ensure_first_run_setup
+
+ensure_first_run_setup()
+
 from app.db.session import check_connection, init_db
 from app.qt_ui.copy_support import CopySupportManager
 from reporting.server import start_reporting_server

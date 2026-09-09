@@ -6,6 +6,7 @@ import zipfile
 import os
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
+from app.core.paths import data_dir
 from app.core.version_manager import VersionManager
 
 logger = logging.getLogger(__name__)
@@ -15,8 +16,8 @@ class UpdateService:
     Handles the detection, downloading, and application of updates.
     """
     UPDATE_CHECK_URL = "https://api.github.com/repos/your-org/your-repo/releases/latest" # Example URL
-    UPDATE_DIR = Path("updates")
-    BACKUP_DIR = Path("backups")
+    UPDATE_DIR = data_dir() / "updates"
+    BACKUP_DIR = data_dir() / "backups"
 
     @classmethod
     def check_for_updates(cls) -> Optional[Dict[str, Any]]:

@@ -48,6 +48,18 @@ connect_args = {}
 if "sqlite" in db_url:
     connect_args["check_same_thread"] = False
 
+def _probe_connect_args(url: str) -> dict:
+    """Connection args for a short-lived probe.
+
+    'connect_timeout' is a network-driver option; sqlite3 rejects it outright,
+    which previously made every SQLite probe fail and silently drop the app onto
+    an in-memory database.
+    """
+    if "sqlite" in url:
+        return {"check_same_thread": False, "timeout": 5}
+    return {"connect_timeout": 5}
+
+
 def _ensure_critical_tables(target_engine):
     """Verifies and creates missing critical tables if create_all failed."""
     try:
@@ -74,39 +86,40 @@ def _ensure_critical_tables(target_engine):
                 logger.info(f"'customers' table exists on {target_engine.url}.")
 
             # --- Schema Fix for Credit Ledger Normalization ---
+            # These repair databases created by older versions. A freshly
+            # created database already matches the current models, so each step
+            # is applied only when the legacy column is actually present -
+            # otherwise one inapplicable statement would abort the rest.
             if not is_sqlite:
                 logger.info("Running MySQL schema normalization fix...")
-                # 1. Fix credit_sales
-                # Check if buyer_id exists
-                res = conn.execute(text("SHOW COLUMNS FROM credit_sales LIKE 'buyer_id'")).fetchone()
-                if not res:
-                    conn.execute(text("ALTER TABLE credit_sales ADD COLUMN buyer_id INT, ADD FOREIGN KEY (buyer_id) REFERENCES customers(id)"))
-                    logger.info("Added buyer_id to credit_sales")
-                
-                # Make buyer_name nullable
-                conn.execute(text("ALTER TABLE credit_sales MODIFY COLUMN buyer_name VARCHAR(100) NULL"))
-                
-                # 2. Fix credit_payments
-                res = conn.execute(text("SHOW COLUMNS FROM credit_payments LIKE 'buyer_id'")).fetchone()
-                if not res:
-                    conn.execute(text("ALTER TABLE credit_payments ADD COLUMN buyer_id INT, ADD FOREIGN KEY (buyer_id) REFERENCES customers(id)"))
-                    logger.info("Added buyer_id to credit_payments")
-                
-                # Check for penalty and discount columns
-                res = conn.execute(text("SHOW COLUMNS FROM credit_payments LIKE 'penalty_amount'")).fetchone()
-                if not res:
-                    conn.execute(text("ALTER TABLE credit_payments ADD COLUMN penalty_amount FLOAT DEFAULT 0.0, ADD COLUMN discount_amount FLOAT DEFAULT 0.0, ADD COLUMN net_amount FLOAT NULL"))
+
+                def column_exists(table: str, column: str) -> bool:
+                    return conn.execute(
+                        text(f"SHOW COLUMNS FROM {table} LIKE '{column}'")
+                    ).fetchone() is not None
+
+                for table in ("credit_sales", "credit_payments", "buyer_ledger"):
+                    if not column_exists(table, "buyer_id"):
+                        conn.execute(text(
+                            f"ALTER TABLE {table} ADD COLUMN buyer_id INT, "
+                            f"ADD FOREIGN KEY (buyer_id) REFERENCES customers(id)"
+                        ))
+                        logger.info(f"Added buyer_id to {table}")
+
+                    # Legacy installs carry a NOT NULL buyer_name; new ones have
+                    # no such column at all.
+                    if column_exists(table, "buyer_name"):
+                        conn.execute(text(
+                            f"ALTER TABLE {table} MODIFY COLUMN buyer_name VARCHAR(100) NULL"
+                        ))
+
+                if not column_exists("credit_payments", "penalty_amount"):
+                    conn.execute(text(
+                        "ALTER TABLE credit_payments ADD COLUMN penalty_amount FLOAT DEFAULT 0.0, "
+                        "ADD COLUMN discount_amount FLOAT DEFAULT 0.0, ADD COLUMN net_amount FLOAT NULL"
+                    ))
                     logger.info("Added penalty/discount columns to credit_payments")
 
-                conn.execute(text("ALTER TABLE credit_payments MODIFY COLUMN buyer_name VARCHAR(100) NULL"))
-                
-                # 3. Fix buyer_ledger
-                res = conn.execute(text("SHOW COLUMNS FROM buyer_ledger LIKE 'buyer_id'")).fetchone()
-                if not res:
-                    conn.execute(text("ALTER TABLE buyer_ledger ADD COLUMN buyer_id INT, ADD FOREIGN KEY (buyer_id) REFERENCES customers(id)"))
-                    logger.info("Added buyer_id to buyer_ledger")
-                conn.execute(text("ALTER TABLE buyer_ledger MODIFY COLUMN buyer_name VARCHAR(100) NULL"))
-                
                 conn.commit()
                 logger.info("Schema normalization fix completed.")
 
@@ -154,11 +167,16 @@ def init_db(strict: bool = False):
             if "mysql" in new_db_url:
                 create_mysql_db_if_missing()
 
-            probe_engine = create_engine(new_db_url, connect_args={"connect_timeout": 5})
+            probe_engine = create_engine(new_db_url, connect_args=_probe_connect_args(new_db_url))
             with probe_engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
             probe_engine.dispose()
-            
+
+            # Remember which backend actually worked, so a later start with the
+            # server stopped reports a clear error instead of silently opening
+            # an empty SQLite database.
+            config.remember_backend("mysql" if "mysql" in new_db_url else "sqlite")
+
             # 3. If probe succeeds, update global engine and SessionLocal
             logger.info("Probe successful. Updating global database engine...")
             close_all_db_connections()
@@ -221,7 +239,7 @@ def check_connection() -> tuple[bool, str]:
         if not test_db_url:
             return False, "DATABASE_MISSING"
             
-        test_engine = create_engine(test_db_url, connect_args={"connect_timeout": 5})
+        test_engine = create_engine(test_db_url, connect_args=_probe_connect_args(test_db_url))
         with test_engine.connect() as conn:
             conn.execute(text("SELECT 1"))
         test_engine.dispose()
@@ -652,6 +670,9 @@ def _migration_v11_ensure_finance_created_at(conn) -> bool:
 
 def _migration_v12_nullable_loan_id(conn) -> bool:
     """Makes loan_id column nullable in finance_installments table."""
+    # MySQL-only syntax; a fresh SQLite database already matches the models.
+    if "sqlite" in str(engine.url):
+        return True
     try:
         # Check if loan_id column exists
         try:
@@ -675,6 +696,9 @@ def _migration_v12_nullable_loan_id(conn) -> bool:
 
 def _migration_v13_nullable_installment_no(conn) -> bool:
     """Makes installment_no column nullable in finance_installments table."""
+    # MySQL-only syntax; a fresh SQLite database already matches the models.
+    if "sqlite" in str(engine.url):
+        return True
     try:
         try:
             conn.execute(text("SHOW COLUMNS FROM finance_installments LIKE 'installment_no'"))
@@ -695,6 +719,9 @@ def _migration_v13_nullable_installment_no(conn) -> bool:
 
 def _migration_v14_nullable_due_date(conn) -> bool:
     """Makes due_date column nullable in finance_installments table."""
+    # MySQL-only syntax; a fresh SQLite database already matches the models.
+    if "sqlite" in str(engine.url):
+        return True
     try:
         try:
             conn.execute(text("SHOW COLUMNS FROM finance_installments LIKE 'due_date'"))
@@ -715,6 +742,9 @@ def _migration_v14_nullable_due_date(conn) -> bool:
 
 def _migration_v15_comprehensive_finance_fix(conn) -> bool:
     """Makes all reporting-specific columns nullable with defaults in finance_installments."""
+    # MySQL-only syntax; a fresh SQLite database already matches the models.
+    if "sqlite" in str(engine.url):
+        return True
     try:
         cols_to_fix = [
             "principal_due", "interest_due", "fees_due", "total_due",
