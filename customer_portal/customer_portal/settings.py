@@ -24,8 +24,25 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'rest_framework',
     'portal',
 ]
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.SessionAuthentication',
+        'portal.api_auth.CustomerSessionAuthentication',
+    ],
+    # Deliberately empty: every view sets its own permission_classes explicitly,
+    # mirroring how the remaining server-rendered Django views (get_customer_data,
+    # credit_customers_view, the CSV exports) already wrap themselves in
+    # @staff_required(...) today.
+    'DEFAULT_PERMISSION_CLASSES': [],
+}
+
+# Bumped on each frontend build; used as a cache-busting query param on the
+# SPA's built assets (see templates/spa/shell.html).
+SPA_BUILD_VERSION = '2'
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -139,9 +156,9 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-LOGIN_URL = '/admin/login/'
+LOGIN_URL = '/custom-admin/login/'
 LOGIN_REDIRECT_URL = '/'
-LOGOUT_REDIRECT_URL = '/admin/login/'
+LOGOUT_REDIRECT_URL = '/custom-admin/login/'
 
 # Only disable migration checks for unmanaged models, but keep migrations enabled for managed ones
 # MIGRATION_MODULES = {

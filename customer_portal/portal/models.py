@@ -1,4 +1,67 @@
 from django.db import models
+from django.contrib.auth.models import User
+
+
+# Codename/label pairs for the fine-grained access a Staff account can be
+# granted by an Admin. Registered as real Django permissions (see
+# StaffAccess below) so they work with the standard `user.has_perm(...)`
+# / `{% if perms.portal.xxx %}` machinery.
+STAFF_MODULES = [
+    ('view_dashboard', 'View admin dashboard'),
+    ('view_customers', 'View customers'),
+    ('view_customer_summary', 'View customer summary'),
+    ('view_sales', 'View credit sales'),
+    ('view_payments', 'View payments'),
+    ('view_inventory', 'View inventory'),
+    ('view_transactions', 'View transaction history'),
+    ('view_portal_accounts', 'View customer portal accounts'),
+    ('manage_portal_accounts', 'Create/reset/block customer portal accounts'),
+    ('view_old_credit_ledger', 'View old running credit ledger'),
+    ('view_finance_credit_ledger', 'View advance separate finance ledger'),
+    ('view_combined_ledger', 'View combined credit ledger'),
+    ('view_spare_ledger', 'View spare parts ledger'),
+    ('export_data', 'Export sales/payments to CSV'),
+    ('manage_customers', 'Add/edit customer records'),
+    ('manage_product_models', 'Add/edit/delete product models'),
+    ('manage_inventory', 'Add/edit/delete motorcycles'),
+    ('manage_finance_sales', 'Add/edit/delete finance credit sales'),
+    ('manage_finance_installments', 'Add/edit/delete finance installments'),
+    ('manage_finance_ledger', 'Add/edit/delete finance ledger entries'),
+]
+
+
+class StaffAccess(models.Model):
+    """Not a real table - exists only to register the STAFF_MODULES permissions."""
+
+    class Meta:
+        managed = False
+        default_permissions = ()
+        permissions = STAFF_MODULES
+
+    def __str__(self):
+        return 'Staff Access Permissions'
+
+
+class UserProfile(models.Model):
+    """Role for a django.contrib.auth.User in the customer portal's staff/admin area."""
+
+    ADMIN = 'ADMIN'
+    STAFF = 'STAFF'
+    ROLE_CHOICES = [
+        (ADMIN, 'Admin'),
+        (STAFF, 'Staff'),
+    ]
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    role = models.CharField(max_length=10, choices=ROLE_CHOICES, default=STAFF)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'portal_user_profile'
+
+    def __str__(self):
+        return f"{self.user.username} ({self.get_role_display()})"
 
 
 class Customer(models.Model):

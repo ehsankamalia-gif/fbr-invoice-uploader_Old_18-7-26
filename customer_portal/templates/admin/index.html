@@ -3,6 +3,7 @@
 
 {% block content %}
 <div id="content-main">
+    {% if perms.portal.view_customers %}
     <div class="app-portal module">
         <table>
             <caption>
@@ -19,6 +20,7 @@
             </tbody>
         </table>
     </div>
+    {% endif %}
     {{ block.super }}
 </div>
 {% endblock %}

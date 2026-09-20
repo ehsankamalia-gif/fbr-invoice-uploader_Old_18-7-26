@@ -23,6 +23,7 @@ dist/
 browser_profile/
 updates/
 backups/
+customer_portal/mysql_backups/
 *.zip
 *.json
 !version.json

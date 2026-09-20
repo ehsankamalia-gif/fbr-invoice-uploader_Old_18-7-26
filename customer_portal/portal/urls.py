@@ -1,39 +1,16 @@
+from django.contrib.auth.views import LogoutView
 from django.urls import path
 from django.views.generic import RedirectView
 from . import views
 
 urlpatterns = [
     path('credit-customers/', RedirectView.as_view(pattern_name='credit_customers', permanent=False)),
-    path('', views.login_view, name='login'),
-    path('login/', views.login_view, name='login'),
-    path('logout/', views.logout_view, name='logout'),
-    path('dashboard/', views.dashboard_view, name='dashboard'),
-    path('loan/<str:loan_type>/<int:loan_id>/', views.loan_detail_view, name='loan_detail'),
-    path('payments/', views.payments_view, name='payments'),
-    path('profile/', views.profile_view, name='profile'),
-    path('running-ledger/', views.running_ledger_view, name='running_ledger'),
+    # Plain (non-JS) logout for the still-live server-rendered admin pages'
+    # sidebar form (templates/portal/custom_admin/base.html). The Vue admin
+    # area uses the JSON POST /api/v1/auth/staff/logout/ endpoint instead.
+    path('custom-admin/logout/', LogoutView.as_view(next_page='/custom-admin/'), name='staff_logout'),
     path('api/customer/<int:customer_id>/', views.get_customer_data, name='get_customer_data'),
     path('admin/credit-customers/', views.credit_customers_view, name='credit_customers'),
-    path('custom-admin/', views.custom_admin_dashboard_view, name='custom_admin_dashboard'),
-    path('custom-admin/customers/', views.custom_admin_customers_view, name='custom_admin_customers'),
-    path('custom-admin/sales/', views.custom_admin_sales_view, name='custom_admin_sales'),
-    path('custom-admin/payments/', views.custom_admin_payments_view, name='custom_admin_payments'),
-    path('custom-admin/inventory/', views.custom_admin_inventory_view, name='custom_admin_inventory'),
-    path('custom-admin/transactions/', views.custom_admin_transactions_view, name='custom_admin_transactions'),
     path('custom-admin/export-sales-csv/', views.export_sales_csv, name='export_sales_csv'),
     path('custom-admin/export-payments-csv/', views.export_payments_csv, name='export_payments_csv'),
-    path('custom-admin/portal-auths/', views.custom_admin_portal_auths_view, name='custom_admin_portal_auths'),
-    path('custom-admin/portal-auths/create/', views.custom_admin_create_portal_auth_view, name='custom_admin_create_portal_auth'),
-    path('custom-admin/portal-auths/<int:auth_id>/reset-password/', views.custom_admin_reset_portal_password_view, name='custom_admin_reset_portal_password'),
-    path('custom-admin/portal-auths/<int:auth_id>/toggle-active/', views.custom_admin_toggle_portal_active_view, name='custom_admin_toggle_portal_active'),
-    path('custom-admin/customer-summary/', views.custom_admin_customer_summary_view, name='custom_admin_customer_summary'),
-    path('custom-admin/customer/<int:customer_id>/', views.custom_admin_customer_detail_view, name='custom_admin_customer_detail'),
-    path('custom-admin/customer/<int:customer_id>/ledger/', views.custom_admin_customer_ledger_view, name='custom_admin_customer_ledger'),
-    path('custom-admin/old-credit-ledger/', views.custom_admin_old_credit_ledger_view, name='custom_admin_old_credit_ledger'),
-    path('custom-admin/finance-credit-ledger/', views.custom_admin_finance_credit_ledger_view, name='custom_admin_finance_credit_ledger'),
-    path('custom-admin/combined-credit-ledger/', views.custom_admin_combined_credit_ledger_view, name='custom_admin_combined_credit_ledger'),
-    path('custom-admin/spare-ledger-transactions/', views.custom_admin_spare_ledger_transactions_view, name='custom_admin_spare_ledger_transactions'),
-    path('custom-admin/spare-ledger-monthly-report/', views.custom_admin_spare_ledger_monthly_report_view, name='custom_admin_spare_ledger_monthly_report'),
-    path('custom-admin/spare-ledger-monthly-summary/', views.custom_admin_spare_ledger_monthly_summary_view, name='custom_admin_spare_ledger_monthly_summary'),
-
 ]
