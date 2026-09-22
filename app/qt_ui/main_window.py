@@ -7205,7 +7205,8 @@ class MainWindow(QMainWindow):
             pending = queue_status.get("pending", 0)
             processing = queue_status.get("processing", 0)
             current = queue_status.get("current")
-            
+            failed = queue_status.get("failed", 0)
+
             if processing > 0 and current:
                 status_text = f"⏳ Uploading: {current['invoice_number']}"
                 style = """
@@ -7223,12 +7224,25 @@ class MainWindow(QMainWindow):
                 status_text = f"📋 Pending: {pending}"
                 style = """
                     QLabel {
-                        font-size: 11px; 
+                        font-size: 11px;
                         color: #6c757d;
                         padding: 4px 8px;
                         border-radius: 4px;
                         background-color: #f8f9fa;
                         border: 1px solid #e9ecef;
+                        min-width: 120px;
+                    }
+                """
+            elif failed > 0:
+                status_text = f"⚠️ Failed: {failed}"
+                style = """
+                    QLabel {
+                        font-size: 11px;
+                        color: #dc3545;
+                        padding: 4px 8px;
+                        border-radius: 4px;
+                        background-color: #f8d7da;
+                        border: 1px solid #f5c2c7;
                         min-width: 120px;
                     }
                 """
