@@ -6924,6 +6924,11 @@ class MainWindow(QMainWindow):
         self._check_invoice_form_completeness()
 
     def _on_invoice_ntn_changed(self, text: str) -> None:
+        # Same fix as _on_invoice_cnic_changed: reset first, so a stale
+        # "dealer" flag from a previously-selected dealer can't survive an
+        # NTN edit that doesn't resolve to any existing dealer.
+        self._is_dealer_selected = False
+
         ntn = text.strip()
         if not ntn:
             self._last_ntn_lookup = None
@@ -6950,6 +6955,15 @@ class MainWindow(QMainWindow):
             db.close()
 
     def _on_invoice_cnic_changed(self, text: str) -> None:
+        # If user manually edits CNIC, reset dealer selection flag (mirrors
+        # _on_invoice_buyer_name_changed). Without this, a CNIC changed away
+        # from a previously-selected dealer to an unrelated/new customer kept
+        # the stale "dealer" flag whenever the new CNIC matched no existing
+        # customer (the lookup below only sets the flag on a match, so a
+        # miss left it at its last value) - causing that non-dealer customer
+        # to be saved with type=DEALER and wrongly appear in Dealer Network.
+        self._is_dealer_selected = False
+
         raw = text
         digits = "".join(c for c in raw if c.isdigit())
         formatted = digits
