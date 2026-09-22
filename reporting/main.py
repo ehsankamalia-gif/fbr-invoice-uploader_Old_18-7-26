@@ -1356,7 +1356,7 @@ def _render_dashboard_html() -> str:
               if (data.available) {
                 badge.className = 'badge bg-success text-white ms-2';
                 badge.textContent = 'ACTIVE';
-                info.textContent = `Builder: ${(data.builder_exe || 'n/a').split('\\').pop()}`;
+                info.textContent = `Builder: ${(data.builder_exe || 'n/a').split('\\\\').pop()}`;
               } else {
                 badge.className = 'badge bg-warning text-dark ms-2';
                 badge.textContent = 'NOT INSTALLED';
@@ -1677,8 +1677,16 @@ def _render_builder_html() -> str:
           const statusText = document.getElementById('frStatusText');
           const details = document.getElementById('frDetails');
           if (spinner) spinner.classList.remove('d-none');
+          // The detection call can be slow on a real machine (e.g. an
+          // unreachable network/removable drive on PATH), and the backend now
+          // caps that at 5s - but guard here too so a network hiccup or a
+          // browser-level stall can never leave the "Detecting..." spinner
+          // running forever with no way to recover except a hard refresh.
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 10000);
           try {
-            const res = await fetch('/api/fastreports/status', { headers: headers() });
+            const res = await fetch('/api/fastreports/status', { headers: headers(), signal: controller.signal });
+            clearTimeout(timeoutId);
             if (!res.ok) throw new Error('status fetch failed');
             const data = await res.json();
             if (spinner) spinner.classList.add('d-none');
@@ -1686,8 +1694,8 @@ def _render_builder_html() -> str:
               statusText.textContent = '✅ FastReport Desktop ACTIVE';
               statusText.className = 'fw-bold text-success';
               const parts = [];
-              if (data.builder_exe)   parts.push('Builder: <code>' + data.builder_exe.split('\\').pop() + '</code>');
-              if (data.designer_exe)  parts.push('Designer: <code>' + data.designer_exe.split('\\').pop() + '</code>');
+              if (data.builder_exe)   parts.push('Builder: <code>' + data.builder_exe.split('\\\\').pop() + '</code>');
+              if (data.designer_exe)  parts.push('Designer: <code>' + data.designer_exe.split('\\\\').pop() + '</code>');
               if (data.templates_dir) parts.push('Templates: <code>' + data.templates_dir + '</code>');
               details.innerHTML = parts.join('<br>') || '';
             } else {
@@ -1707,9 +1715,16 @@ def _render_builder_html() -> str:
               });
             }
           } catch (e) {
+            clearTimeout(timeoutId);
             if (spinner) spinner.classList.add('d-none');
-            statusText.textContent = '❌ Could not reach /api/fastreports/status';
-            statusText.className = 'fw-bold text-danger';
+            if (statusText) {
+              if (e && e.name === 'AbortError') {
+                statusText.textContent = '⏱️ Detection timed out — click Refresh to try again';
+              } else {
+                statusText.textContent = '❌ Could not reach /api/fastreports/status';
+              }
+              statusText.className = 'fw-bold text-danger';
+            }
           }
         }
         function openInDesigner(templateName) {

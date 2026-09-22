@@ -244,12 +244,15 @@ class FBRClient:
                 "TotalAmount": round(float(item.get("total_amount", 0.0)), 2),
                 "TaxCharged": round(float(item.get("tax_charged", 0.0)), 2),
                 "Discount": round(discount, 2),
-                "FurtherTax": ft,
-                "FurtherTaxCharged": ft,
-                "FurtherTaxAmount": ft,
-                "AdditionalTax": ft,
-                "AdditionalTaxCharged": ft,
-                "OtherTax": ft,
+                # Further Tax / Additional Tax / Other Tax are no longer reported to
+                # FBR as separate line items - always 0 (the amount is still folded
+                # into TotalBillAmount at the header level, see actual_further_tax).
+                "FurtherTax": 0.0,
+                "FurtherTaxCharged": 0.0,
+                "FurtherTaxAmount": 0.0,
+                "AdditionalTax": 0.0,
+                "AdditionalTaxCharged": 0.0,
+                "OtherTax": 0.0,
                 "InvoiceType": item_invoice_type_int,
                 "RefUSIN": item_ref_usin,
             })
@@ -339,16 +342,19 @@ class FBRClient:
         # Optional Header-level RefUSIN (for Debit/Credit Note referencing original invoice USIN)
         ref_usin_header = data.get("ref_usin") or None
 
-        total_further_rounded = round(float(data.get("total_further_tax", 0.0)), 2)
-        # TotalAdditionalTax = TotalFurtherTax (for unregistered buyer "Further Tax" == "Additional Tax" on FBR side)
-        total_additional_rounded = total_further_rounded
-        total_other_rounded = total_further_rounded
+        # Real further-tax amount - kept only for TotalBillAmount below so the
+        # reported invoice total doesn't change. Further Tax / Additional Tax /
+        # Other Tax are no longer reported to FBR as their own breakdown fields.
+        actual_further_tax = round(float(data.get("total_further_tax", 0.0)), 2)
+        total_further_rounded = 0.0
+        total_additional_rounded = 0.0
+        total_other_rounded = 0.0
 
         # TotalBillAmount: SaleValue + TaxCharged + FurtherTax - Discount
         total_sale = round(float(data.get("total_sale_value", 0.0)), 2)
         total_tax = round(float(data.get("total_tax_charged", 0.0)), 2)
         total_discount = round(float(total_header_discount), 2)
-        computed_total = round(total_sale + total_tax + total_further_rounded - total_discount, 2)
+        computed_total = round(total_sale + total_tax + actual_further_tax - total_discount, 2)
         stored_total = round(float(data.get("total_amount", 0.0)), 2)
         if stored_total > 0 and abs(computed_total - stored_total) > 0.01:
             final_total = stored_total

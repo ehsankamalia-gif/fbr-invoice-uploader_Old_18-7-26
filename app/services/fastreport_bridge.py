@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import os
 import shutil
@@ -7,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -96,6 +98,41 @@ def _custom_fr_path_from_env() -> Optional[Path]:
 
 _info_lock = threading.Lock()
 _cached_info: Optional[FastReportInfo] = None
+_cache_checked_at: float = 0.0
+
+# _search_fr_in_paths() falls back to shutil.which(), which scans every
+# directory in PATH - on a real machine that can include an unreachable
+# network share or a disconnected removable drive, and Windows can then
+# take a very long time (or effectively forever) to fail that lookup. Cap
+# detection so a caller (e.g. the /api/fastreports/status endpoint, and in
+# turn the "Detecting FastReport installation..." UI) always gets an answer
+# within a bounded time instead of hanging indefinitely.
+_DETECTION_TIMEOUT_SECONDS = 5.0
+# A "not installed" result used to never be cached at all, so a slow/hanging
+# PATH entry above would be re-scanned - and re-risked - on every single
+# status check or page load. Cache negative results too, just briefly, so
+# installing FastReport later is still picked up without restarting the app.
+_NEGATIVE_CACHE_SECONDS = 30.0
+
+_detect_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="fr-detect")
+
+
+def _detect_builder_path() -> Optional[Path]:
+    """Runs the install-location scan with a hard timeout (see
+    _DETECTION_TIMEOUT_SECONDS) so it can never hang the caller indefinitely."""
+    future = _detect_executor.submit(lambda: _custom_fr_path_from_env() or _search_fr_in_paths())
+    try:
+        return future.result(timeout=_DETECTION_TIMEOUT_SECONDS)
+    except concurrent.futures.TimeoutError:
+        logger.warning(
+            "FastReport detection timed out after %.0fs (a PATH/install-location "
+            "scan likely hit an unreachable directory) - treating as not installed.",
+            _DETECTION_TIMEOUT_SECONDS,
+        )
+        return None
+    except Exception as exc:
+        logger.warning("FastReport detection failed unexpectedly: %s", exc)
+        return None
 
 
 def find_fastreports(force_refresh: bool = False) -> Optional[FastReportInfo]:
@@ -105,13 +142,20 @@ def find_fastreports(force_refresh: bool = False) -> Optional[FastReportInfo]:
     fall back to Python-native reporting (reportlab/openpyxl/HTML print) in
     that case — FBR upload and other non-reporting features are unaffected.
     """
-    global _cached_info
-    if not force_refresh and _cached_info is not None:
-        return _cached_info
-    with _info_lock:
-        if not force_refresh and _cached_info is not None:
+    global _cached_info, _cache_checked_at
+    if not force_refresh:
+        if _cached_info is not None:
             return _cached_info
-        builder = _custom_fr_path_from_env() or _search_fr_in_paths()
+        if time.monotonic() - _cache_checked_at < _NEGATIVE_CACHE_SECONDS:
+            return None
+    with _info_lock:
+        if not force_refresh:
+            if _cached_info is not None:
+                return _cached_info
+            if time.monotonic() - _cache_checked_at < _NEGATIVE_CACHE_SECONDS:
+                return None
+        builder = _detect_builder_path()
+        _cache_checked_at = time.monotonic()
         if builder is None:
             _cached_info = None
             return None

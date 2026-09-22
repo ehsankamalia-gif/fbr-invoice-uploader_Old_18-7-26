@@ -1648,6 +1648,12 @@ class MainWindow(QMainWindow):
         header_layout.addWidget(header)
         header_layout.addStretch(1)
         
+        retry_failed_btn = QPushButton("🔁 Retry All Failed")
+        retry_failed_btn.setObjectName("resetButton")
+        retry_failed_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        retry_failed_btn.clicked.connect(self._retry_all_failed_invoices)
+        header_layout.addWidget(retry_failed_btn)
+
         refresh_btn = QPushButton("Refresh Data")
         refresh_btn.setObjectName("resetButton")
         refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -2694,11 +2700,22 @@ class MainWindow(QMainWindow):
             print_al_btn.setObjectName("primaryButton")
             print_al_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             print_al_btn.clicked.connect(lambda: self._print_authority_letter_standalone(invoice))
-            
+
             action_layout.addWidget(print_inv_btn)
             action_layout.addWidget(print_al_btn)
+
+            # Not yet fiscalized (Pending or Failed) - offer a manual retry so a
+            # FAILED invoice isn't stuck forever (the background upload queue
+            # only ever picks up PENDING invoices).
+            if not invoice.fbr_invoice_number:
+                retry_btn = QPushButton("🔄 Retry FBR Upload")
+                retry_btn.setObjectName("resetButton")
+                retry_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                retry_btn.clicked.connect(lambda: self._retry_invoice_upload(invoice.id, dialog))
+                action_layout.addWidget(retry_btn)
+
             action_layout.addStretch(1)
-            
+
             content_layout.addWidget(action_card)
 
             # --- Product Details Card ---
@@ -2795,6 +2812,66 @@ class MainWindow(QMainWindow):
 
         finally:
             db.close()
+
+    def _retry_invoice_upload(self, invoice_id: int, dialog: QDialog | None = None) -> None:
+        """Manually re-queues a Pending/Failed invoice for FBR upload.
+
+        Wires up SequentialUploadService.queue_invoice_for_upload(), which
+        already existed but was never called from anywhere - a FAILED invoice
+        (e.g. from an FBR echo-glitch) had no way back into the upload queue,
+        since the background service only ever picks up PENDING invoices.
+        """
+        try:
+            from app.services.sync_service import sync_service
+            sync_service.queue_invoice_for_upload(invoice_id)
+            sync_service.trigger_sync_now()
+            self._show_success(
+                "Retry Queued",
+                "This invoice has been re-queued for FBR upload and will be retried "
+                "automatically within a few seconds.",
+            )
+        except Exception as e:
+            logger.error(f"Error queuing invoice {invoice_id} for retry: {e}", exc_info=True)
+            self._show_error("Retry Error", f"Could not queue this invoice for retry: {e}")
+        finally:
+            if dialog is not None:
+                dialog.accept()
+            self._refresh_dashboard()
+            self._update_invoice_upload_status()
+
+    def _retry_all_failed_invoices(self) -> None:
+        """Bulk version of _retry_invoice_upload for the Dashboard's FAILED SYNC card:
+        wires up SequentialUploadService.reset_failed_uploads(), also previously unused."""
+        db = SessionLocal()
+        try:
+            failed_count = db.query(Invoice).filter(Invoice.sync_status == "FAILED").count()
+        finally:
+            db.close()
+
+        if failed_count == 0:
+            self._show_success("No Failed Invoices", "There are no failed invoices to retry.")
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Retry All Failed",
+            f"This will re-queue {failed_count} failed invoice(s) for FBR upload. Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            from app.services.sync_service import sync_service
+            sync_service.reset_failed_uploads()
+            sync_service.trigger_sync_now()
+            self._show_success("Retry Queued", f"{failed_count} invoice(s) re-queued for FBR upload.")
+        except Exception as e:
+            logger.error(f"Error retrying failed invoices: {e}", exc_info=True)
+            self._show_error("Retry Error", f"Could not retry failed invoices: {e}")
+        finally:
+            self._refresh_dashboard()
+            self._update_invoice_upload_status()
 
     def _create_invoice_page(self) -> QWidget:
         page = QWidget(self)
