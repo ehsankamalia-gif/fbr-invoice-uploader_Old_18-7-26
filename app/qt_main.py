@@ -205,7 +205,6 @@ class _StartupDialog(QDialog):
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.Dialog
-            | Qt.WindowType.WindowStaysOnTopHint
         )
 
         layout = QVBoxLayout(self)
