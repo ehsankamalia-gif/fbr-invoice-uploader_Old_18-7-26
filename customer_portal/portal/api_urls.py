@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import api_views, api_crud_views, api_staff_views
+from . import api_views, api_crud_views, api_invoice_views, api_staff_views
 
 urlpatterns = [
     path('auth/session/', api_views.session_view, name='api_session'),
@@ -59,6 +59,12 @@ urlpatterns = [
     path('admin/manage/portal-accounts/<int:pk>/', api_crud_views.PortalAuthDetailView.as_view(), name='api_manage_portal_account_detail'),
     path('admin/manage/portal-accounts/<int:pk>/reset-password/', api_crud_views.portal_auth_reset_password_view, name='api_manage_portal_account_reset_password'),
     path('admin/manage/portal-accounts/<int:pk>/toggle-active/', api_crud_views.portal_auth_toggle_active_view, name='api_manage_portal_account_toggle_active'),
+
+    # --- Invoices (create + upload to FBR) ---
+    path('admin/invoices/', api_invoice_views.InvoiceListView.as_view(), name='api_invoice_list'),
+    path('admin/invoices/create/', api_invoice_views.invoice_create_view, name='api_invoice_create'),
+    path('admin/invoices/options/', api_invoice_views.invoice_form_options_view, name='api_invoice_options'),
+    path('admin/invoices/price-preview/<int:motorcycle_id>/', api_invoice_views.invoice_price_preview_view, name='api_invoice_price_preview'),
 
     # --- Phase 4: Staff Management ---
     path('admin/staff/', api_staff_views.StaffListView.as_view(), name='api_staff_list'),

@@ -16,6 +16,7 @@ from rest_framework.validators import UniqueValidator
 from .models import (
     Customer, ProductModel, Motorcycle, FinanceCreditSale,
     FinanceInstallment, FinanceLedger, CustomerPortalAuth,
+    Invoice, InvoiceItem,
 )
 from .permissions import get_profile
 
@@ -143,6 +144,34 @@ class CustomerPortalAuthSerializer(serializers.ModelSerializer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields['customer'].queryset = Customer.objects.filter(is_deleted=False).order_by('name')
+
+
+class InvoiceItemSerializer(serializers.ModelSerializer):
+    chassis_number = serializers.CharField(source='motorcycle.chassis_number', read_only=True, default=None)
+
+    class Meta:
+        model = InvoiceItem
+        fields = [
+            'id', 'item_code', 'item_name', 'pct_code', 'quantity', 'tax_rate',
+            'sale_value', 'tax_charged', 'further_tax', 'total_amount', 'discount',
+            'chassis_number',
+        ]
+
+
+class InvoiceSerializer(serializers.ModelSerializer):
+    customer_name = serializers.CharField(source='customer.name', read_only=True, default=None)
+    customer_cnic = serializers.CharField(source='customer.cnic', read_only=True, default=None)
+    items = InvoiceItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Invoice
+        fields = [
+            'id', 'invoice_number', 'datetime', 'customer_name', 'customer_cnic',
+            'total_sale_value', 'total_tax_charged', 'total_further_tax', 'total_amount',
+            'discount', 'payment_mode', 'fbr_invoice_number', 'is_fiscalized',
+            'sync_status', 'fbr_response_code', 'fbr_response_message',
+            'status_updated_at', 'items',
+        ]
 
 
 class StaffUserSerializer(serializers.ModelSerializer):

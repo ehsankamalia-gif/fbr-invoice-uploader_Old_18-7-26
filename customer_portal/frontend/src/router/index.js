@@ -44,6 +44,8 @@ import PortalAccountFormView from '../views/admin/PortalAccountFormView.vue';
 import StaffListView from '../views/admin/StaffListView.vue';
 import StaffFormView from '../views/admin/StaffFormView.vue';
 import StaffPermissionsView from '../views/admin/StaffPermissionsView.vue';
+import InvoicesView from '../views/admin/InvoicesView.vue';
+import InvoiceFormView from '../views/admin/InvoiceFormView.vue';
 
 const routes = [
   { path: '/', redirect: '/login' },
@@ -106,6 +108,9 @@ const routes = [
       { path: 'manage/finance-ledger', name: 'admin-manage-finance-ledger', component: ManageFinanceLedgerView, meta: { perm: 'manage_finance_ledger' } },
       { path: 'manage/finance-ledger/create', name: 'admin-manage-finance-ledger-create', component: FinanceLedgerFormView, meta: { perm: 'manage_finance_ledger' } },
       { path: 'manage/finance-ledger/:id/edit', name: 'admin-manage-finance-ledger-edit', component: FinanceLedgerFormView, props: true, meta: { perm: 'manage_finance_ledger' } },
+
+      { path: 'invoices', name: 'admin-invoices', component: InvoicesView, meta: { perm: 'view_invoices' } },
+      { path: 'invoices/create', name: 'admin-invoice-create', component: InvoiceFormView, meta: { perm: 'create_invoices' } },
 
       { path: 'portal-auths', name: 'admin-portal-accounts', component: PortalAccountsView, meta: { perm: 'view_portal_accounts' } },
       { path: 'portal-auths/create', name: 'admin-portal-account-create', component: PortalAccountFormView, meta: { perm: 'manage_portal_accounts' } },

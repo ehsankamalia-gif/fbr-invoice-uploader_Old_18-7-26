@@ -17,6 +17,7 @@ const mainItems = [
   { perm: 'view_sales', label: 'Credit Sales', icon: 'fas fa-shopping-cart', routeName: 'admin-sales' },
   { perm: 'view_payments', label: 'Payments', icon: 'fas fa-credit-card', routeName: 'admin-payments' },
   { perm: 'view_inventory', label: 'Inventory', icon: 'fas fa-motorcycle', routeName: 'admin-inventory' },
+  { perm: 'view_invoices', label: 'Invoices', icon: 'fas fa-file-invoice', routeName: 'admin-invoices' },
   { perm: 'view_transactions', label: 'Transactions', icon: 'fas fa-history', routeName: 'admin-transactions' },
   { perm: 'view_portal_accounts', label: 'Portal Accounts', icon: 'fas fa-user-shield', routeName: 'admin-portal-accounts' },
 ];

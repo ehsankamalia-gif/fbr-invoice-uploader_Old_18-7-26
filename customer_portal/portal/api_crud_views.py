@@ -7,7 +7,6 @@ api_views.py (Inventory / Sales, ported in Phase 2) - only create/edit/delete
 are added here for those two, matching how their list pages already work."""
 
 from django.contrib.auth.hashers import make_password
-from django.db import connection
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework import generics
@@ -15,6 +14,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
 from .api_permissions import HasPortalPermission, IsStaffMember
+from .db_utils import refresh_pk_after_insert as _refresh_pk_after_insert
 from .models import (
     Customer, ProductModel, Motorcycle, FinanceCreditSale,
     FinanceInstallment, FinanceLedger, CustomerPortalAuth,
@@ -29,24 +29,6 @@ FK_DELETE_WARNING = (
     'This record may still be referenced by other ledger/sale records. '
     'Deleting it will not update those related records automatically.'
 )
-
-
-def _refresh_pk_after_insert(instance):
-    """Customer/ProductModel/Motorcycle/FinanceCreditSale/FinanceInstallment/
-    FinanceLedger declare a plain IntegerField primary key rather than a
-    real Django AutoField (these managed=False tables mirror the desktop
-    app's SQLite schema, where the column is just an INTEGER PRIMARY KEY -
-    SQLite's rowid alias). SQLite still auto-assigns a row id on insert,
-    but Django only fetches that back for genuine AutoField columns, so
-    instance.pk stays None after save() otherwise - fine for the old
-    Django views (they redirect to a list page that re-queries from
-    scratch) but wrong for a JSON API response. Pull the real id back
-    directly; safe here since exactly one INSERT happens on this
-    connection between save() and this call."""
-    with connection.cursor() as cursor:
-        cursor.execute('SELECT last_insert_rowid()')
-        instance.pk = cursor.fetchone()[0]
-    return instance
 
 
 # --- Customers ---------------------------------------------------------

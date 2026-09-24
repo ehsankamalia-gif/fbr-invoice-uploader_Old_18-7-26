@@ -27,6 +27,8 @@ STAFF_MODULES = [
     ('manage_finance_sales', 'Add/edit/delete finance credit sales'),
     ('manage_finance_installments', 'Add/edit/delete finance installments'),
     ('manage_finance_ledger', 'Add/edit/delete finance ledger entries'),
+    ('view_invoices', 'View submitted sales invoices'),
+    ('create_invoices', 'Create new sales invoices and upload them to FBR'),
 ]
 
 
@@ -135,6 +137,131 @@ class Motorcycle(models.Model):
 
     def __str__(self):
         return f"{self.chassis_number} - {self.product_model.model_name}"
+
+
+class Price(models.Model):
+    id = models.IntegerField(primary_key=True)
+    product_model = models.ForeignKey(ProductModel, on_delete=models.DO_NOTHING, db_column='product_model_id')
+    base_price = models.FloatField()
+    tax_amount = models.FloatField()
+    levy_amount = models.FloatField()
+    total_price = models.FloatField()
+    optional_features = models.JSONField(null=True, blank=True)
+    effective_date = models.DateTimeField(null=True)
+    expiration_date = models.DateTimeField(null=True)
+    currency = models.CharField(max_length=10, default='Rs')
+
+    class Meta:
+        db_table = 'prices'
+        managed = False
+
+    def __str__(self):
+        return f"{self.product_model.model_name} - {self.base_price}"
+
+
+class Invoice(models.Model):
+    """Mirrors the desktop app's SQLAlchemy Invoice model (app/db/models.py) -
+    same shared `invoices` table. Only the columns the old (non-Digital-
+    Invoicing) upload flow actually uses are declared here; the table also
+    has several unused columns left over from an abandoned Digital
+    Invoicing attempt (invoice_type, scenario_id, seller_province, etc.) -
+    the desktop app never populates them either, so they're intentionally
+    left out here too and simply stay NULL, matching existing rows."""
+
+    PENDING = 'PENDING'
+    SYNCED = 'SYNCED'
+    FAILED = 'FAILED'
+    STATUS_CHOICES = [
+        (PENDING, 'Pending'),
+        (SYNCED, 'Synced'),
+        (FAILED, 'Failed'),
+    ]
+
+    id = models.IntegerField(primary_key=True)
+    invoice_number = models.CharField(max_length=50, unique=True)
+    pos_id = models.CharField(max_length=20)
+    usin = models.CharField(max_length=50)
+    datetime = models.DateTimeField(null=True)
+    customer = models.ForeignKey(Customer, on_delete=models.DO_NOTHING, db_column='customer_id', null=True)
+    total_sale_value = models.FloatField()
+    total_tax_charged = models.FloatField()
+    total_further_tax = models.FloatField(default=0.0)
+    total_quantity = models.FloatField()
+    total_amount = models.FloatField()
+    discount = models.FloatField(default=0.0)
+    payment_mode = models.CharField(max_length=20, default='Cash')
+    fbr_invoice_number = models.CharField(max_length=50, null=True, blank=True)
+    is_fiscalized = models.BooleanField(default=False)
+    sync_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=PENDING)
+    fbr_response_code = models.CharField(max_length=10, null=True, blank=True)
+    fbr_response_message = models.CharField(max_length=255, null=True, blank=True)
+    fbr_full_response = models.JSONField(null=True, blank=True)
+    status_updated_at = models.DateTimeField(null=True)
+    upload_attempts = models.IntegerField(default=0)
+    max_upload_attempts = models.IntegerField(default=5)
+    upload_priority = models.IntegerField(default=0)
+    is_processing = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = 'invoices'
+        managed = False
+
+    def __str__(self):
+        return self.invoice_number
+
+
+class InvoiceItem(models.Model):
+    id = models.IntegerField(primary_key=True)
+    invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, db_column='invoice_id', related_name='items')
+    motorcycle = models.ForeignKey(Motorcycle, on_delete=models.DO_NOTHING, db_column='motorcycle_id', null=True)
+    item_code = models.CharField(max_length=50)
+    item_name = models.CharField(max_length=100)
+    pct_code = models.CharField(max_length=20, null=True, blank=True)
+    quantity = models.FloatField()
+    tax_rate = models.FloatField()
+    sale_value = models.FloatField()
+    tax_charged = models.FloatField()
+    further_tax = models.FloatField(default=0.0)
+    total_amount = models.FloatField()
+    discount = models.FloatField(default=0.0)
+
+    class Meta:
+        db_table = 'invoice_items'
+        managed = False
+
+    def __str__(self):
+        return f"{self.item_name} ({self.invoice.invoice_number})"
+
+
+class FBRConfiguration(models.Model):
+    """Read-only from the customer portal - the active FBR environment
+    (base URL, POS ID, USIN, auth token, tax rules) is configured and
+    switched exclusively from the desktop app's Settings screen. The portal
+    only ever reads whichever row currently has is_active=True."""
+
+    id = models.IntegerField(primary_key=True)
+    environment = models.CharField(max_length=20, unique=True)
+    is_active = models.BooleanField(default=False)
+    api_base_url = models.CharField(max_length=255)
+    pos_id = models.CharField(max_length=50, null=True, blank=True)
+    usin = models.CharField(max_length=50, null=True, blank=True)
+    auth_token = models.CharField(max_length=500, null=True, blank=True)
+    secret_key = models.CharField(max_length=255, null=True, blank=True)
+    tax_rate = models.FloatField(default=18.0)
+    invoice_type = models.CharField(max_length=20, default='Standard')
+    discount = models.FloatField(default=0.0)
+    pos_fee = models.FloatField(default=1.0)
+    pct_code = models.CharField(max_length=20, default='8711.2010')
+    item_code = models.CharField(max_length=50, null=True, blank=True)
+    item_name = models.CharField(max_length=100, null=True, blank=True)
+    business_name = models.CharField(max_length=100, null=True, blank=True, default='Ehsan Trader')
+
+    class Meta:
+        db_table = 'fbr_configurations'
+        managed = False
+
+    def __str__(self):
+        return self.environment
 
 
 class FinanceCreditSale(models.Model):
