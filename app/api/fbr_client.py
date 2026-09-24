@@ -40,12 +40,17 @@ class FBRClient:
             "Content-Type": "application/json"
         }
 
-        # Handle URL construction safely
-        if base_url.endswith("/PostData"):
-             url = base_url
-        else:
-             url = f"{base_url.rstrip('/')}/PostData"
-        
+        # The configured base_url is expected to be the complete endpoint to
+        # POST to. Some FBR integration styles bake the full resource path
+        # into the URL already (e.g. the newer Digital Invoicing API's
+        # ".../postinvoicedata_sb"), while older POS-integration URLs were
+        # stored with "/PostData" already appended (e.g. ".../api/Live/PostData").
+        # Previously this always appended "/PostData" unless the URL already
+        # ended with it, which broke the newer style with a 404 (FBR's
+        # gateway has no ".../postinvoicedata_sb/PostData" route) - so no
+        # suffix is assumed or appended here anymore.
+        url = base_url.rstrip('/')
+
         if not url.startswith("http"):
              logger.error(f"Invalid FBR API URL: {url}")
              raise Exception(f"Invalid FBR API URL: {url}. Ensure it starts with http:// or https://")
@@ -244,15 +249,14 @@ class FBRClient:
                 "TotalAmount": round(float(item.get("total_amount", 0.0)), 2),
                 "TaxCharged": round(float(item.get("tax_charged", 0.0)), 2),
                 "Discount": round(discount, 2),
-                # Further Tax / Additional Tax / Other Tax are no longer reported to
-                # FBR as separate line items - always 0 (the amount is still folded
-                # into TotalBillAmount at the header level, see actual_further_tax).
+                # Per FBR's official Technical Specification for Data Sharing
+                # through Software Fiscal Component (Tier 1 Retailer), the item
+                # model has exactly one further-tax field named "FurtherTax" -
+                # "FurtherTaxCharged"/"FurtherTaxAmount"/"AdditionalTax"/
+                # "AdditionalTaxCharged"/"OtherTax" do not exist in FBR's schema
+                # at all and have been removed. Kept at 0 per standing request
+                # to not report a further/additional tax amount.
                 "FurtherTax": 0.0,
-                "FurtherTaxCharged": 0.0,
-                "FurtherTaxAmount": 0.0,
-                "AdditionalTax": 0.0,
-                "AdditionalTaxCharged": 0.0,
-                "OtherTax": 0.0,
                 "InvoiceType": item_invoice_type_int,
                 "RefUSIN": item_ref_usin,
             })
@@ -343,12 +347,11 @@ class FBRClient:
         ref_usin_header = data.get("ref_usin") or None
 
         # Real further-tax amount - kept only for TotalBillAmount below so the
-        # reported invoice total doesn't change. Further Tax / Additional Tax /
-        # Other Tax are no longer reported to FBR as their own breakdown fields.
+        # reported invoice total doesn't change. The header-level FurtherTax
+        # field itself is kept at 0 per standing request to not report a
+        # further/additional tax amount.
         actual_further_tax = round(float(data.get("total_further_tax", 0.0)), 2)
         total_further_rounded = 0.0
-        total_additional_rounded = 0.0
-        total_other_rounded = 0.0
 
         # TotalBillAmount: SaleValue + TaxCharged + FurtherTax - Discount
         total_sale = round(float(data.get("total_sale_value", 0.0)), 2)
@@ -362,7 +365,15 @@ class FBRClient:
             final_total = computed_total
 
         return {
-            "InvoiceNumber": data.get("invoice_number", ""),
+            # Per FBR's official spec, InvoiceNumber's status is "Blank" - it is
+            # an output-only field FBR fills in with the assigned fiscal invoice
+            # number in its response; the .Net reference example explicitly sets
+            # it to string.Empty when sending. USIN (below) is our own reference
+            # number instead. Sending our own invoice number here was incorrect
+            # and is the most likely cause of the "Bulk data upload functionality
+            # is no more available" rejection (FBR's gateway not treating this as
+            # a real-time single-invoice submission).
+            "InvoiceNumber": "",
             "POSID": pos_id,
             "USIN": usin_value,
             "RefUSIN": ref_usin_header,
@@ -373,20 +384,13 @@ class FBRClient:
             "BuyerPhoneNumber": data.get("buyer_phone") or None,
             "TotalSaleValue": total_sale,
             "TotalTaxCharged": total_tax,
-            "TotalFurtherTax": total_further_rounded,
-            "TotalFurtherTaxCharged": total_further_rounded,
-            "TotalFurtherTaxAmount": total_further_rounded,
-            "TotalAdditionalTax": total_additional_rounded,
-            "TotalAdditionalTaxCharged": total_additional_rounded,
-            "TotalOtherTax": total_other_rounded,
             "TotalQuantity": round(float(data.get("total_quantity", 0.0)), 2),
             "Discount": total_discount,
+            # The only further-tax field in FBR's documented schema is this
+            # single "FurtherTax" - the various Total*/Charged/Amount/
+            # AdditionalTax/OtherTax variants previously sent here do not exist
+            # in FBR's schema at all and have been removed.
             "FurtherTax": total_further_rounded,
-            "FurtherTaxCharged": total_further_rounded,
-            "FurtherTaxAmount": total_further_rounded,
-            "AdditionalTax": total_additional_rounded,
-            "AdditionalTaxCharged": total_additional_rounded,
-            "OtherTax": total_other_rounded,
             "TotalBillAmount": final_total,
             "PaymentMode": mode_int,
             "InvoiceType": default_invoice_type_int,

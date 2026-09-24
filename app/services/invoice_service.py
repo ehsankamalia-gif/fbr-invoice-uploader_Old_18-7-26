@@ -438,6 +438,64 @@ class InvoiceService:
             invoice.fbr_response_message = str(e)
             db.add(invoice)
 
+    def delete_invoice(self, db: Session, invoice_id: int) -> bool:
+        """
+        Deletes a locally-saved invoice that never synced to FBR (sync_status
+        FAILED or PENDING). Refuses to delete an invoice that is already
+        fiscalized (is_fiscalized True / SYNCED), since FBR already has a
+        record of it and the local copy must stay in sync with that record.
+
+        Any Motorcycle this invoice marked SOLD is restored to IN_STOCK, since
+        the invoice never actually fiscalized - the sale is being undone, not
+        just its paperwork.
+        """
+        invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+        if not invoice:
+            return False
+        if invoice.is_fiscalized or invoice.sync_status == "SYNCED":
+            raise ValueError(
+                f"Invoice {invoice.invoice_number} is already fiscalized with FBR and cannot be deleted."
+            )
+
+        restored_chassis = []
+        for item in invoice.items:
+            if item.motorcycle_id:
+                bike = db.query(Motorcycle).filter(Motorcycle.id == item.motorcycle_id).first()
+                if bike and bike.status != "IN_STOCK":
+                    bike.status = "IN_STOCK"
+                    db.add(bike)
+                    restored_chassis.append(bike.chassis_number)
+
+        logger.info(
+            f"AUDIT: Deleting non-synced invoice {invoice.invoice_number} (status={invoice.sync_status}). "
+            f"Restored to resale: {restored_chassis or 'none'}."
+        )
+        db.delete(invoice)
+        db.commit()
+        return True
+
+    def delete_failed_invoices(self, db: Session, limit: Optional[int] = None) -> int:
+        """
+        Deletes FAILED invoices, oldest first, restoring any motorcycle each
+        one sold back to resale stock (see delete_invoice). Pass limit to
+        delete only the oldest N; omit it (or pass None) to delete all of
+        them. Returns the number actually deleted.
+        """
+        query = (
+            db.query(Invoice.id)
+            .filter(Invoice.sync_status == "FAILED")
+            .order_by(Invoice.datetime.asc(), Invoice.id.asc())
+        )
+        if limit is not None:
+            query = query.limit(limit)
+        invoice_ids = [row[0] for row in query.all()]
+
+        deleted = 0
+        for invoice_id in invoice_ids:
+            if self.delete_invoice(db, invoice_id):
+                deleted += 1
+        return deleted
+
     def get_last_invoice_by_cnic(self, db: Session, cnic: str) -> Optional[Invoice]:
         """
         Finds the most recent invoice for a given CNIC to auto-populate customer details.

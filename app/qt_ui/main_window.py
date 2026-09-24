@@ -63,6 +63,7 @@ from PyQt6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QProgressDialog,
+    QSplitter,
 )
 
 from sqlalchemy.orm import joinedload, Session
@@ -1654,6 +1655,19 @@ class MainWindow(QMainWindow):
         retry_failed_btn.clicked.connect(self._retry_all_failed_invoices)
         header_layout.addWidget(retry_failed_btn)
 
+        delete_failed_btn = QPushButton("🗑️ Delete Failed")
+        delete_failed_btn.setObjectName("dangerButton")
+        delete_failed_btn.setStyleSheet(
+            "QPushButton#dangerButton {"
+            "  background-color: #e74c3c; color: white; border: none;"
+            "  border-radius: 8px; font-weight: bold; padding: 8px 16px;"
+            "}"
+            "QPushButton#dangerButton:hover { background-color: #c0392b; }"
+        )
+        delete_failed_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        delete_failed_btn.clicked.connect(self._delete_failed_invoices)
+        header_layout.addWidget(delete_failed_btn)
+
         refresh_btn = QPushButton("Refresh Data")
         refresh_btn.setObjectName("resetButton")
         refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1677,22 +1691,33 @@ class MainWindow(QMainWindow):
         layout.addLayout(stats_layout)
 
         # Real-time Bike Booking Cards
+        booking_section = QWidget()
+        booking_section_layout = QVBoxLayout(booking_section)
+        booking_section_layout.setContentsMargins(0, 0, 0, 0)
+        booking_section_layout.setSpacing(25)
+
         booking_label = QLabel("BIKE BOOKING STATUS (BY MODEL)")
         booking_label.setObjectName("groupTitle")
-        layout.addWidget(booking_label)
-        
+        booking_section_layout.addWidget(booking_label)
+
         self.dash_booking_host = QWidget()
         self.dash_booking_grid = QGridLayout(self.dash_booking_host)
         self.dash_booking_grid.setContentsMargins(0, 0, 0, 0)
         self.dash_booking_grid.setHorizontalSpacing(20)
         self.dash_booking_grid.setVerticalSpacing(20)
         self._dash_booking_card_widgets: Dict[str, BookingCard] = {}
-        layout.addWidget(self.dash_booking_host)
+        booking_section_layout.addWidget(self.dash_booking_host)
+        booking_section_layout.addStretch(1)
 
         # Recent Invoices Section
+        recent_section = QWidget()
+        recent_section_layout = QVBoxLayout(recent_section)
+        recent_section_layout.setContentsMargins(0, 0, 0, 0)
+        recent_section_layout.setSpacing(10)
+
         recent_label = QLabel("RECENT SUBMISSIONS")
         recent_label.setObjectName("groupTitle")
-        layout.addWidget(recent_label)
+        recent_section_layout.addWidget(recent_label)
 
         self.dash_table_model = SalesTableModel()
         self.dash_table_view = QTableView()
@@ -1706,8 +1731,28 @@ class MainWindow(QMainWindow):
         # Install Auto Scroll Manager
         self.dash_table_auto_scroll = AutoScrollManager(self)
         self.dash_table_auto_scroll.install_on_widget(self.dash_table_view)
-        
-        layout.addWidget(self.dash_table_view, 1)
+
+        recent_section_layout.addWidget(self.dash_table_view, 1)
+
+        # Splitter lets the user drag the handle to expand the Recent
+        # Submissions table (shrinking the booking cards area above it)
+        # instead of being stuck with a fixed, cramped table height.
+        dash_splitter = QSplitter(Qt.Orientation.Vertical)
+        dash_splitter.addWidget(booking_section)
+        dash_splitter.addWidget(recent_section)
+        dash_splitter.setStretchFactor(0, 0)
+        dash_splitter.setStretchFactor(1, 1)
+        dash_splitter.setSizes([1, 1])
+        dash_splitter.setHandleWidth(8)
+        dash_splitter.setStyleSheet(
+            "QSplitter::handle {"
+            "  background-color: #dfe4ea;"
+            "  border-radius: 3px;"
+            "}"
+            "QSplitter::handle:hover { background-color: #b2bec3; }"
+        )
+
+        layout.addWidget(dash_splitter, 1)
 
         return page
 
@@ -2714,6 +2759,26 @@ class MainWindow(QMainWindow):
                 retry_btn.clicked.connect(lambda: self._retry_invoice_upload(invoice.id, dialog))
                 action_layout.addWidget(retry_btn)
 
+            # Only a terminally FAILED invoice can be deleted - a PENDING one
+            # is still being retried automatically, and a fiscalized one must
+            # stay in sync with FBR's own record (invoice_service.delete_invoice
+            # refuses that case too, this just keeps the button from appearing).
+            if invoice.sync_status == "FAILED":
+                delete_btn = QPushButton("🗑️ Delete Invoice")
+                delete_btn.setObjectName("dangerButton")
+                delete_btn.setStyleSheet(
+                    "QPushButton#dangerButton {"
+                    "  background-color: #e74c3c; color: white; border: none;"
+                    "  border-radius: 8px; font-weight: bold; padding: 10px 20px;"
+                    "}"
+                    "QPushButton#dangerButton:hover { background-color: #c0392b; }"
+                )
+                delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                delete_btn.clicked.connect(
+                    lambda: self._delete_invoice(invoice.id, invoice.invoice_number, dialog)
+                )
+                action_layout.addWidget(delete_btn)
+
             action_layout.addStretch(1)
 
             content_layout.addWidget(action_card)
@@ -2872,6 +2937,89 @@ class MainWindow(QMainWindow):
         finally:
             self._refresh_dashboard()
             self._update_invoice_upload_status()
+
+    def _delete_invoice(self, invoice_id: int, invoice_number: str, dialog: QDialog | None = None) -> None:
+        """Deletes a single FAILED invoice (see invoice_service.delete_invoice)."""
+        reply = QMessageBox.question(
+            self,
+            "Delete Invoice",
+            f"Permanently delete invoice {invoice_number}? This cannot be undone.\n\n"
+            "Any motorcycle it marked as SOLD will be restored to resale (IN_STOCK).",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        db = SessionLocal()
+        try:
+            invoice_service.delete_invoice(db, invoice_id)
+            self._show_success("Invoice Deleted", f"Invoice {invoice_number} has been deleted.")
+        except ValueError as e:
+            self._show_error("Cannot Delete", str(e))
+        except Exception as e:
+            logger.error(f"Error deleting invoice {invoice_number}: {e}", exc_info=True)
+            self._show_error("Delete Error", f"Could not delete invoice {invoice_number}: {e}")
+        finally:
+            db.close()
+            if dialog is not None:
+                dialog.accept()
+            self._refresh_dashboard()
+            self._update_invoice_upload_status()
+
+    def _delete_failed_invoices(self) -> None:
+        """Bulk-delete FAILED invoices for the Dashboard's FAILED SYNC card.
+        Lets the user choose how many (oldest first) to delete, rather than
+        forcing an all-or-nothing choice."""
+        db = SessionLocal()
+        try:
+            failed_count = db.query(Invoice).filter(Invoice.sync_status == "FAILED").count()
+        finally:
+            db.close()
+
+        if failed_count == 0:
+            self._show_success("No Failed Invoices", "There are no failed invoices to delete.")
+            return
+
+        from PyQt6.QtWidgets import QInputDialog
+
+        count, ok = QInputDialog.getInt(
+            self,
+            "Delete Failed Invoices",
+            f"There are {failed_count} failed invoice(s).\n"
+            "How many of the oldest failed invoices do you want to delete?",
+            failed_count,  # default: all of them
+            0,
+            failed_count,
+        )
+        if not ok or count == 0:
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Confirm Delete",
+            f"Permanently delete the {count} oldest failed invoice(s)? This cannot be undone.\n\n"
+            "Any motorcycles they marked as SOLD will be restored to resale (IN_STOCK).",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        db = SessionLocal()
+        try:
+            deleted = invoice_service.delete_failed_invoices(db, limit=count)
+        except Exception as e:
+            logger.error(f"Error deleting failed invoices: {e}", exc_info=True)
+            self._show_error("Delete Error", f"Could not delete failed invoices: {e}")
+            db.close()
+            self._refresh_dashboard()
+            self._update_invoice_upload_status()
+            return
+        finally:
+            db.close()
+
+        self._show_success("Invoices Deleted", f"Deleted {deleted} failed invoice(s).")
+        self._refresh_dashboard()
+        self._update_invoice_upload_status()
 
     def _create_invoice_page(self) -> QWidget:
         page = QWidget(self)

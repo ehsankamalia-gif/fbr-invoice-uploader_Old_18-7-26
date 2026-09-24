@@ -96,10 +96,9 @@ class SyncService:
 
             endpoints = []
             if base_url:
-                if base_url.endswith("/PostData"):
-                    endpoints.append(base_url)
-                else:
-                    endpoints.append(f"{base_url.rstrip('/')}/PostData")
+                # base_url is the complete configured endpoint (see fbr_client.py's
+                # post_invoice for why "/PostData" is no longer assumed/appended).
+                endpoints.append(base_url.rstrip('/'))
             endpoints.extend([
                 "https://www.google.com",
                 "https://www.cloudflare.com",
