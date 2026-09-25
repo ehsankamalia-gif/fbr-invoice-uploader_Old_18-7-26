@@ -23,6 +23,7 @@ import logging
 import requests
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
+from .company_service import get_active_company_id
 from .models import FBRConfiguration
 
 logger = logging.getLogger(__name__)
@@ -30,18 +31,21 @@ logger = logging.getLogger(__name__)
 
 def get_active_fbr_settings() -> dict:
     """Read the FBR environment currently marked active by the desktop
-    app's Settings screen (or the portal's own FBR Configuration page).
+    app's Settings screen (or the portal's own FBR Configuration page),
+    scoped to the active company - each company has its own POS ID/tokens,
+    so this must never fall back to another company's row.
 
     The desktop app's startup code can race when two instances launch at
     once, creating duplicate SANDBOX/PRODUCTION rows with blank values
     (environment isn't actually enforced unique at the DB level for this
     managed=False table) - order_by('id') keeps this deterministic rather
     than picking an arbitrary duplicate."""
-    config = FBRConfiguration.objects.filter(is_active=True).order_by('id').first()
+    company_id = get_active_company_id()
+    config = FBRConfiguration.objects.filter(is_active=True, company_id=company_id).order_by('id').first()
     if not config:
-        config = FBRConfiguration.objects.filter(environment='SANDBOX').order_by('id').first()
+        config = FBRConfiguration.objects.filter(environment='SANDBOX', company_id=company_id).order_by('id').first()
     if not config:
-        raise RuntimeError('No FBR configuration found. Configure it from the desktop app first.')
+        raise RuntimeError('No FBR configuration found for the active company. Configure it from the desktop app or the FBR Configuration page first.')
 
     return {
         'env': config.environment,
@@ -73,6 +77,21 @@ class FBRClient:
         if not base_url:
             logger.error('FBR API Base URL is not configured!')
             raise Exception('FBR API URL is missing. Please check the FBR Configuration in the desktop app.')
+
+        # Safeguard: each company has its own POS ID/Auth Token. An empty or
+        # newly-added company with no FBR credentials configured yet must
+        # never submit to FBR's live gateway with blank values - that's a
+        # guaranteed-wrong, unidentifiable submission. Fail fast, locally,
+        # before any network call, instead of sending garbage to FBR.
+        pos_id_configured = settings.get('pos_id', '')
+        if not pos_id_configured or not auth_token:
+            missing = [name for name, val in (('POS ID', pos_id_configured), ('Auth Token', auth_token)) if not val]
+            company = get_active_company_id()
+            logger.error(f'FBR configuration incomplete for company_id={company} - missing: {", ".join(missing)}')
+            raise Exception(
+                f"FBR is not configured for the active company (missing {' and '.join(missing)}). "
+                'Configure FBR credentials from the FBR Configuration page before submitting invoices.'
+            )
 
         headers = {
             'Authorization': f'Bearer {auth_token}',

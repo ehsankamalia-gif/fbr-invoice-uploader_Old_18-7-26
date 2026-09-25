@@ -8,6 +8,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
 from .api_permissions import HasPortalPermission
+from .company_service import get_active_company_id
 from .db_utils import refresh_pk_after_insert
 from .models import FBRConfiguration
 from .serializers import FBRConfigurationSerializer
@@ -27,8 +28,10 @@ def _get_config_row(environment):
     unique at the DB level for this managed=False table). Rather than ever
     touching/deleting those duplicates ourselves, always deterministically
     resolve to the one row that matters: the active one if any, else the
-    one that actually has real values, else the oldest row."""
-    qs = FBRConfiguration.objects.filter(environment=environment)
+    one that actually has real values, else the oldest row - scoped to the
+    active company throughout, since each company has its own POS ID/
+    tokens and must never see or edit another company's row."""
+    qs = FBRConfiguration.objects.filter(environment=environment, company_id=get_active_company_id())
     return (
         qs.filter(is_active=True).order_by('id').first()
         or qs.exclude(pos_id='').exclude(pos_id__isnull=True).order_by('id').first()
@@ -68,7 +71,7 @@ def fbr_config_update_view(request, environment):
         # New row - id is a plain IntegerField PK (mirrors the desktop's
         # SQLAlchemy schema, see db_utils.refresh_pk_after_insert), so the
         # auto-incremented id must be pulled back manually after INSERT.
-        config = FBRConfiguration(environment=environment, api_base_url=_DEFAULTS[environment])
+        config = FBRConfiguration(environment=environment, api_base_url=_DEFAULTS[environment], company_id=get_active_company_id())
         config.save()
         refresh_pk_after_insert(config)
     serializer = FBRConfigurationSerializer(config, data=request.data, partial=True)
@@ -88,7 +91,7 @@ def fbr_config_activate_view(request, environment):
     if not config:
         return Response({'detail': f'No {environment} configuration exists yet - save one first.'}, status=400)
 
-    FBRConfiguration.objects.update(is_active=False)
+    FBRConfiguration.objects.filter(company_id=get_active_company_id()).update(is_active=False)
     config.is_active = True
     config.save(update_fields=['is_active'])
     return Response(FBRConfigurationSerializer(config).data)

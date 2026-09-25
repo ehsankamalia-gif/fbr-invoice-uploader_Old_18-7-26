@@ -47,6 +47,7 @@ import StaffPermissionsView from '../views/admin/StaffPermissionsView.vue';
 import InvoicesView from '../views/admin/InvoicesView.vue';
 import InvoiceFormView from '../views/admin/InvoiceFormView.vue';
 import FBRConfigView from '../views/admin/FBRConfigView.vue';
+import CompaniesView from '../views/admin/CompaniesView.vue';
 
 const routes = [
   { path: '/', redirect: '/login' },
@@ -117,6 +118,8 @@ const routes = [
       { path: 'portal-auths', name: 'admin-portal-accounts', component: PortalAccountsView, meta: { perm: 'view_portal_accounts' } },
       { path: 'portal-auths/create', name: 'admin-portal-account-create', component: PortalAccountFormView, meta: { perm: 'manage_portal_accounts' } },
       { path: 'portal-auths/:id/edit', name: 'admin-portal-account-edit', component: PortalAccountFormView, props: true, meta: { perm: 'manage_portal_accounts' } },
+
+      { path: 'companies', name: 'admin-companies', component: CompaniesView, meta: { perm: 'manage_companies' } },
 
       // --- Phase 4: Staff Management (Admin-only, governs access to everything else) ---
       { path: 'staff', name: 'admin-staff-list', component: StaffListView, meta: { adminOnly: true } },

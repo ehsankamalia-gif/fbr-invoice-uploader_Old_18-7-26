@@ -11,6 +11,7 @@ import datetime as dt
 from app.core.logger import logger
 from app.utils.duration_utils import format_duration
 from app.services.customer_portal_service import customer_portal_service
+from app.services.settings_service import settings_service
 
 class CreditLedgerService:
     def _get_db(self) -> Session:
@@ -151,7 +152,7 @@ class CreditLedgerService:
         db = self._get_db()
         try:
             # 1. Create Sale Record
-            sale = CreditSale(**sale_data)
+            sale = CreditSale(**sale_data, company_id=settings_service.get_active_company_id())
             db.add(sale)
             db.flush()
 
@@ -170,7 +171,7 @@ class CreditLedgerService:
                 # Extract description before creating CreditSaleItem model
                 user_desc = item_data.pop('description', None)
                 
-                item = CreditSaleItem(sale_id=sale.id, **item_data)
+                item = CreditSaleItem(sale_id=sale.id, **item_data, company_id=sale.company_id)
                 db.add(item)
                 
                 # Update Motorcycle Status
@@ -205,7 +206,8 @@ class CreditLedgerService:
                     credit=0.0,
                     balance=current_balance,
                     reference_id=sale.id,
-                    reference_type="SALE"
+                    reference_type="SALE",
+                    company_id=sale.company_id,
                 )
                 db.add(ledger_entry)
 
@@ -221,7 +223,8 @@ class CreditLedgerService:
                     credit=sale.advance_payment,
                     balance=current_balance,
                     reference_id=sale.id,
-                    reference_type="PAYMENT"
+                    reference_type="PAYMENT",
+                    company_id=sale.company_id,
                 )
                 db.add(advance_entry)
 
@@ -266,7 +269,7 @@ class CreditLedgerService:
         """Process a payment and update the ledger with progressive balance, penalty, and discount."""
         db = self._get_db()
         try:
-            payment = CreditPayment(**payment_data)
+            payment = CreditPayment(**payment_data, company_id=settings_service.get_active_company_id())
             db.add(payment)
             db.flush()
 
@@ -290,7 +293,8 @@ class CreditLedgerService:
                     credit=0.0,
                     balance=current_balance,
                     reference_id=payment.id,
-                    reference_type="PAYMENT"
+                    reference_type="PAYMENT",
+                    company_id=payment.company_id,
                 )
                 db.add(penalty_entry)
 
@@ -305,7 +309,8 @@ class CreditLedgerService:
                     credit=payment.discount_amount,
                     balance=current_balance,
                     reference_id=payment.id,
-                    reference_type="PAYMENT"
+                    reference_type="PAYMENT",
+                    company_id=payment.company_id,
                 )
                 db.add(discount_entry)
 
@@ -321,7 +326,8 @@ class CreditLedgerService:
                     credit=payment.amount,
                     balance=current_balance,
                     reference_id=payment.id,
-                    reference_type="PAYMENT"
+                    reference_type="PAYMENT",
+                    company_id=payment.company_id,
                 )
                 db.add(payment_entry)
 
@@ -425,7 +431,7 @@ class CreditLedgerService:
                 sale_data['sale_id'] = f"FIN-{dt.datetime.now().strftime('%Y%m%d')}-{count+1:03d}"
             
             # 2. Create Finance Sale Record
-            finance_sale = FinanceCreditSale(**sale_data)
+            finance_sale = FinanceCreditSale(**sale_data, company_id=settings_service.get_active_company_id())
             db.add(finance_sale)
             db.flush()
 
@@ -453,7 +459,8 @@ class CreditLedgerService:
                 debit=finance_sale.credit_price,
                 credit=0.0,
                 balance=finance_sale.credit_price,
-                entry_date=finance_sale.sale_date
+                entry_date=finance_sale.sale_date,
+                company_id=finance_sale.company_id,
             )
             db.add(ledger_entry)
 
@@ -475,7 +482,8 @@ class CreditLedgerService:
                     debit=0.0,
                     credit=finance_sale.down_payment,
                     balance=current_balance,
-                    entry_date=finance_sale.sale_date
+                    entry_date=finance_sale.sale_date,
+                    company_id=finance_sale.company_id,
                 )
                 db.add(down_payment_entry)
                 finance_sale.remaining_balance = current_balance
@@ -523,7 +531,7 @@ class CreditLedgerService:
             count = db.query(FinanceInstallment).count()
             payment_data['payment_id'] = f"PAY-{dt.datetime.now().strftime('%Y%m%d')}-{count+1:03d}"
             
-            installment = FinanceInstallment(**payment_data)
+            installment = FinanceInstallment(**payment_data, company_id=settings_service.get_active_company_id())
             db.add(installment)
             
             # 2. Update Finance Sale Remaining Balance
@@ -555,7 +563,8 @@ class CreditLedgerService:
                 debit=0.0,
                 credit=installment.paid_amount,
                 balance=new_balance,
-                entry_date=installment.payment_date
+                entry_date=installment.payment_date,
+                company_id=installment.company_id,
             )
             db.add(ledger_entry)
 

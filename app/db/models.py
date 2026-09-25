@@ -29,6 +29,34 @@ class CustomerType(str, enum.Enum):
     INDIVIDUAL = "INDIVIDUAL"
     DEALER = "DEALER"
 
+
+class Company(Base):
+    """A registered business entity. Multiple companies can share this
+    database; exactly one has is_active=True at a time (mirrors how
+    FBRConfiguration's SANDBOX/PRODUCTION is_active toggle already works).
+    Every company-scoped model below carries a company_id column, and
+    app/db/company_scope.py globally filters all reads/writes to whichever
+    company is currently active."""
+    __tablename__ = "companies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(150), nullable=False, unique=True)
+    ntn = Column(String(20), nullable=True)
+    cnic = Column(String(20), nullable=True)
+    address = Column(String(255), nullable=True)
+    phone = Column(String(20), nullable=True)
+    email = Column(String(255), nullable=True)
+    is_active = Column(Boolean, default=False)
+    is_deleted = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+
+    # Invoice Print Template: this company's own default logo (base64 data
+    # URL), separate per company since a resold install must show each
+    # business's own branding on its invoices, not a shared global one.
+    logo_data_url = Column(Text, nullable=True)
+    logo_name = Column(String(200), nullable=True)
+
+
 class Customer(Base):
     __tablename__ = "customers"
     __table_args__ = (
@@ -36,7 +64,8 @@ class Customer(Base):
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    cnic = Column(String(20), nullable=False, unique=True, index=True) 
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
+    cnic = Column(String(20), nullable=False, unique=True, index=True)
     name = Column(String(100), nullable=False)
     father_name = Column(String(100), nullable=True)
     business_name = Column(String(100), nullable=True)
@@ -46,22 +75,23 @@ class Customer(Base):
     address = Column(String(255), nullable=True)
     type = Column(String(20), default=CustomerType.INDIVIDUAL)
     is_deleted = Column(Boolean, default=False)
-    
+
     created_at = Column(DateTime, default=dt.datetime.utcnow)
-    
+
     invoices = relationship("Invoice", back_populates="customer")
 
 class ProductModel(Base):
     __tablename__ = "product_models"
-    
+
     id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     model_name = Column(String(50), unique=True, index=True, nullable=False)
     make = Column(String(50), default="Honda")
     engine_capacity = Column(String(20), nullable=True)
-    
+
     pct_code = Column(String(20), nullable=True)
     item_code = Column(String(50), nullable=True)
-    
+
     motorcycles = relationship("Motorcycle", back_populates="product_model")
     prices = relationship("Price", back_populates="product_model")
     purchase_order_items = relationship("PurchaseOrderItem", back_populates="product_model")
@@ -70,11 +100,12 @@ class Invoice(Base):
     __tablename__ = "invoices"
 
     id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     invoice_number = Column(String(50), unique=True, index=True, nullable=False)
     pos_id = Column(String(20), nullable=False)
     usin = Column(String(50), nullable=False) # Updated to be Unique in context, but FBR allows multiple? USIN is unique POS ID basically.
     datetime = Column(DateTime, default=pk_now)
-    
+
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True)
     customer = relationship("Customer", back_populates="invoices")
     
@@ -108,6 +139,7 @@ class InvoiceItem(Base):
     __tablename__ = "invoice_items"
 
     id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=False)
     
     motorcycle_id = Column(Integer, ForeignKey("motorcycles.id"), nullable=True)
@@ -132,6 +164,7 @@ class AdvanceBooking(Base):
     __tablename__ = "advance_bookings"
 
     id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     booking_number = Column(String(50), unique=True, index=True, nullable=False)
     created_at = Column(DateTime, default=pk_now, index=True)
 
@@ -180,6 +213,7 @@ class CapturedData(Base):
     __tablename__ = "captured_data"
 
     id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     name = Column(String(100), nullable=True)
     father = Column(String(100), nullable=True)
     cnic = Column(String(20), nullable=True)
@@ -198,7 +232,8 @@ class Motorcycle(Base):
     __tablename__ = "motorcycles"
 
     id = Column(Integer, primary_key=True, index=True)
-    
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
+
     product_model_id = Column(Integer, ForeignKey("product_models.id"), nullable=False)
     product_model = relationship("ProductModel", back_populates="motorcycles")
     
@@ -230,7 +265,8 @@ class Price(Base):
     __tablename__ = "prices"
 
     id = Column(Integer, primary_key=True, index=True)
-    
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
+
     product_model_id = Column(Integer, ForeignKey("product_models.id"), nullable=False)
     product_model = relationship("ProductModel", back_populates="prices")
     
@@ -304,9 +340,19 @@ class User(Base):
 
 class FBRConfiguration(Base):
     __tablename__ = "fbr_configurations"
+    __table_args__ = (
+        # The live DB enforces uniqueness per (company, environment), not
+        # environment alone - multiple companies each get their own
+        # SANDBOX/PRODUCTION row. Matches the DB's real uq_company_environment
+        # index; declaring plain unique=True on environment here would be
+        # wrong now that company_id exists and could cause the schema
+        # self-healer to attempt an incompatible constraint.
+        Index('uq_company_environment', 'company_id', 'environment', unique=True),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    environment = Column(String(20), unique=True, nullable=False)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
+    environment = Column(String(20), nullable=False)
     is_active = Column(Boolean, default=False)
     
     api_base_url = Column(String(255), nullable=False)
@@ -344,6 +390,7 @@ class SpareLedgerTransaction(Base):
     __tablename__ = "spare_ledger_transactions"
 
     id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     timestamp = Column(DateTime, default=dt.datetime.utcnow, index=True)
     trans_type = Column(String(10), nullable=False)
     amount = Column(Float, nullable=False)
@@ -357,6 +404,7 @@ class SpareLedgerMonthlyClose(Base):
     __tablename__ = "spare_ledger_monthly_close"
 
     id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     month_key = Column(String(7), unique=True, nullable=False)  # YYYY-MM representing cycle ending on 5th
     closed_at = Column(DateTime, nullable=False)
     opening_balance = Column(Float, default=0.0)
@@ -626,6 +674,7 @@ class CreditSale(Base):
     __tablename__ = "credit_sales"
 
     id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     sale_date = Column(DateTime, default=dt.datetime.utcnow, index=True)
     buyer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
     buyer_type = Column(String(20), nullable=False) # Customer or Dealer
@@ -648,6 +697,7 @@ class CreditSaleItem(Base):
     __tablename__ = "credit_sale_items"
 
     id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     sale_id = Column(Integer, ForeignKey("credit_sales.id"), nullable=False)
     
     chassis_number = Column(String(50), unique=True, nullable=False, index=True)
@@ -662,6 +712,7 @@ class CreditPayment(Base):
     __tablename__ = "credit_payments"
 
     id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     payment_date = Column(DateTime, default=dt.datetime.utcnow, index=True)
     buyer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
     amount = Column(Float, nullable=False) # Base payment amount
@@ -678,6 +729,7 @@ class BuyerLedger(Base):
     __tablename__ = "buyer_ledger"
 
     id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     date = Column(DateTime, default=dt.datetime.utcnow, index=True)
     buyer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
     chassis_number = Column(String(50), nullable=True, index=True)
@@ -753,6 +805,7 @@ class FinanceCreditSale(Base):
     __tablename__ = "finance_credit_sales"
 
     id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     sale_id = Column(String(50), unique=True, index=True, nullable=False)
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
     customer_name = Column(String(100), nullable=False)
@@ -780,6 +833,7 @@ class FinanceInstallment(Base):
     __tablename__ = "finance_installments"
 
     id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     payment_id = Column(String(50), unique=True, index=True, nullable=False)
     sale_id = Column(Integer, ForeignKey("finance_credit_sales.id"), nullable=False, index=True)
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
@@ -812,6 +866,7 @@ class FinanceLedger(Base):
     __tablename__ = "finance_ledger"
 
     id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     ledger_id = Column(String(50), unique=True, index=True, nullable=False)
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
     sale_id = Column(Integer, ForeignKey("finance_credit_sales.id"), nullable=True, index=True)

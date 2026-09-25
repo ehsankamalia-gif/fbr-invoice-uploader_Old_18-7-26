@@ -23,6 +23,7 @@ import requests
 from django.db import transaction
 from tenacity import RetryError
 
+from .company_service import get_active_company_id
 from .db_utils import refresh_pk_after_insert
 from .fbr_client import fbr_client, get_active_fbr_settings
 from .models import Customer, Invoice, InvoiceItem, Motorcycle, Price, ProductModel
@@ -134,6 +135,7 @@ def create_invoice(data: dict) -> Invoice:
     prevented (bad chassis, missing buyer info, etc). FBR-side failures do
     NOT raise - the Invoice is still saved locally with sync_status FAILED
     or PENDING, same as the desktop app, so it shows up for follow-up."""
+    active_company_id = get_active_company_id()
     chassis_number = (data.get('chassis_number') or '').strip().upper()
     if not chassis_number:
         raise InvoiceValidationError('Chassis number is required.', field='chassis_number')
@@ -218,6 +220,7 @@ def create_invoice(data: dict) -> Invoice:
                 sale_price=0.0,
                 status=Motorcycle.SOLD,
                 purchase_date=_pk_now_literal(),
+                company_id=active_company_id,
             )
             motorcycle.save()
             refresh_pk_after_insert(motorcycle)
@@ -276,6 +279,7 @@ def create_invoice(data: dict) -> Invoice:
                 type=buyer_type,
                 is_deleted=False,
                 created_at=_pk_now_literal(),
+                company_id=active_company_id,
             )
             customer.save()
             refresh_pk_after_insert(customer)
@@ -308,6 +312,7 @@ def create_invoice(data: dict) -> Invoice:
             sync_status=Invoice.PENDING,
             fbr_response_message='Created via customer portal. Waiting for upload.',
             status_updated_at=_utc_now_literal(),
+            company_id=active_company_id,
         )
         invoice.save()
         refresh_pk_after_insert(invoice)
@@ -328,6 +333,7 @@ def create_invoice(data: dict) -> Invoice:
             further_tax=further_tax,
             total_amount=total_amount,
             discount=discount,
+            company_id=active_company_id,
         )
         item.save()
         refresh_pk_after_insert(item)

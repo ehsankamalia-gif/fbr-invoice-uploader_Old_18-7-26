@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.logger import logger
 from app.db.models import AdvanceBooking, AdvanceBookingAudit, AdvanceBookingModelCounter, pk_now
+from app.services.settings_service import settings_service
 
 
 class AdvanceBookingService:
@@ -115,6 +116,7 @@ class AdvanceBookingService:
             advance_remaining=float(advance_paid),
             advance_applied=0.0,
             delivery_paid=0.0,
+            company_id=settings_service.get_active_company_id(),
         )
 
         db.add(booking)

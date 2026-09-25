@@ -107,7 +107,8 @@ from app.qt_ui.settings_modals import (
     AddressShortcodeDialog,
     UrduFontDialog,
     FontCustomizationDialog,
-    DMSSettingsDialog
+    DMSSettingsDialog,
+    CompanyManagementDialog
 )
 from app.qt_ui.auto_scroll_manager import AutoScrollManager
 from app.core.signals import booking_signals
@@ -902,7 +903,7 @@ class MainWindow(QMainWindow):
         # is a blocking socket connect (0.75s when the port is closed) on the GUI
         # thread, which stalled typing everywhere else in the app.
 
-        self._update_app_branding(self._active_fbr_settings_snapshot.get("business_name", "Ehsan Trader"))
+        self._update_app_branding(self._get_active_branding_name())
         try:
             from app.services.sync_service import sync_service
             self._sync_service = sync_service
@@ -916,16 +917,21 @@ class MainWindow(QMainWindow):
     def _apply_settings_event(self, event: dict) -> None:
         try:
             event_type = event.get("type")
-            if event_type not in ("fbr_settings_saved", "fbr_active_environment_changed"):
+            if event_type not in ("fbr_settings_saved", "fbr_active_environment_changed", "active_company_changed"):
                 return
 
             revision = int(event.get("revision") or 0)
             last_rev = int(getattr(self, "_last_settings_revision", 0) or 0)
             if revision and revision <= last_rev:
-                logger.info(f"Ignoring stale FBR settings event: type={event_type} revision={revision} last={last_rev}")
+                logger.info(f"Ignoring stale settings event: type={event_type} revision={revision} last={last_rev}")
                 return
             if revision:
                 self._last_settings_revision = revision
+
+            if event_type == "active_company_changed":
+                self._update_app_branding(self._get_active_branding_name())
+                logger.info(f"Settings event applied: type={event_type} revision={revision}")
+                return
 
             new_active_settings = settings_service.get_active_settings()
             old_active_settings = getattr(self, "_active_fbr_settings_snapshot", {}) or {}
@@ -934,9 +940,6 @@ class MainWindow(QMainWindow):
                 if old_active_settings.get(k) != new_active_settings.get(k)
             ]
             self._active_fbr_settings_snapshot = dict(new_active_settings)
-
-            if "business_name" in changed_keys:
-                self._update_app_branding(new_active_settings.get("business_name", "Ehsan Trader"))
 
             self._sync_invoice_page_with_fbr_settings(old_active_settings, new_active_settings, changed_keys)
             logger.info(f"FBR settings event applied: type={event_type} revision={revision} changed={changed_keys}")
@@ -3777,6 +3780,7 @@ class MainWindow(QMainWindow):
             ("Urdu Font", "ا", "Enable Urdu Noori Nastaleeq font for Urdu text entry.", self._open_urdu_font_settings),
             ("Font Customization", "🔤", "Customize fonts and sizes for UI and sidebar (accessibility).", self._open_font_customization),
             ("DMS Portal Automation", "🤖", "Configure DMS portal credentials and site URL for automation.", self._open_dms_settings),
+            ("Companies", "🏬", "Manage company profiles and switch which company's records are active.", self._open_company_management),
         ]
 
         for i, (title, icon, desc, callback) in enumerate(categories):
@@ -4161,9 +4165,8 @@ class MainWindow(QMainWindow):
     def _open_business_prefs(self):
         dialog = BusinessPreferencesDialog(self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            # Refresh branding if business name changed
-            active_settings = settings_service.get_active_settings()
-            self._update_app_branding(active_settings.get("business_name", "Ehsan Trader"))
+            self._active_fbr_settings_snapshot = settings_service.get_active_settings()
+            self._update_app_branding(self._get_active_branding_name())
 
     def _open_db_settings(self):
         dialog = DatabaseSettingsDialog(self)
@@ -4197,11 +4200,34 @@ class MainWindow(QMainWindow):
         dialog = DMSSettingsDialog(self)
         dialog.exec()
 
+    def _open_company_management(self):
+        dialog = CompanyManagementDialog(self)
+        dialog.exec()
+        self._update_app_branding(self._get_active_branding_name())
+
+    def _get_active_branding_name(self) -> str:
+        """The active Company's name drives the window title/sidebar
+        branding. Falls back to the FBR "Business Name" setting (Business
+        Preferences) only if no company is configured/active yet, e.g. a
+        fresh install."""
+        try:
+            company = settings_service.get_active_company()
+        except Exception as e:
+            logger.warning(f"Failed to resolve active company for branding: {e}")
+            company = None
+        if company and company.get("name"):
+            return company["name"]
+        snapshot = getattr(self, "_active_fbr_settings_snapshot", {}) or {}
+        return snapshot.get("business_name", "Ehsan Trader")
+
     def _update_app_branding(self, business_name: str) -> None:
-        """Dynamically update window title and sidebar branding."""
+        """Dynamically update window title, sidebar, and dashboard welcome
+        banner branding."""
         self.setWindowTitle(f"{business_name} FBR System")
         if hasattr(self, "nav_header_label"):
             self.nav_header_label.setText(business_name.upper())
+        if hasattr(self, "welcome_title_label"):
+            self.welcome_title_label.setText(f"Welcome back to {business_name} FBR System!")
 
     def _create_welcome_page(self) -> QWidget:
         page = QWidget(self)
@@ -4238,13 +4264,17 @@ class MainWindow(QMainWindow):
 
         title = QLabel(f"Welcome back to {self.windowTitle()}!")
         title.setStyleSheet("""
-            color: white; 
-            font-size: 32px; 
-            font-weight: bold; 
+            color: white;
+            font-size: 32px;
+            font-weight: bold;
             background: transparent;
             margin-bottom: 10px;
         """)
         title.setWordWrap(True)
+        # Built once at startup and never recreated - kept referenced so
+        # _update_app_branding() can refresh it when the active company
+        # changes, matching nav_header_label/setWindowTitle.
+        self.welcome_title_label = title
         
         subtitle = QLabel("Your complete solution for FBR Invoice Management and Sales Tracking.")
         subtitle.setStyleSheet("""
@@ -6589,7 +6619,8 @@ class MainWindow(QMainWindow):
                     levy_amount=l,
                     total_price=b + t + l,
                     optional_features={"color": colors_str, "colors": colors_str},
-                    effective_date=now
+                    effective_date=now,
+                    company_id=settings_service.get_active_company_id(),
                 )
                 db.add(new_price)
                 db.commit()
@@ -9786,7 +9817,8 @@ class MainWindow(QMainWindow):
                     reference_number=ref_input.text().strip(),
                     description=desc_input.text().strip(),
                     month_key=month_key,
-                    timestamp=selected_dt
+                    timestamp=selected_dt,
+                    company_id=settings_service.get_active_company_id(),
                 )
                 db.add(new_txn)
                 db.flush()  # Flush to get the ID

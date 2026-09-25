@@ -64,6 +64,9 @@ class InvoiceService:
         return exists is not None
 
     def create_invoice(self, db: Session, invoice_in: InvoiceCreate):
+        from app.services.settings_service import settings_service
+        active_company_id = settings_service.get_active_company_id()
+
         # 1. Calculate totals
         total_sale_value = 0.0
         total_tax_charged = 0.0
@@ -131,10 +134,11 @@ class InvoiceService:
                                 product_model_id=product_model.id,
                                 year=datetime.now().year,
                                 color=item.color.upper(),
-                                cost_price=0.0, 
+                                cost_price=0.0,
                                 sale_price=0.0,
                                 status="SOLD",
-                                purchase_date=datetime.now()
+                                purchase_date=datetime.now(),
+                                company_id=active_company_id,
                             )
                             db.add(new_bike)
                             db.flush() # To get ID
@@ -156,7 +160,8 @@ class InvoiceService:
                 tax_charged=tax_charged,
                 total_amount=line_total,
                 discount=item.discount,
-                motorcycle_id=motorcycle_id
+                motorcycle_id=motorcycle_id,
+                company_id=active_company_id,
                 # Removed chassis_number, engine_number from InvoiceItem
             )
             db_items.append(db_item)
@@ -200,7 +205,8 @@ class InvoiceService:
                     ntn=(invoice_in.buyer_ntn or "").upper(),
                     phone=invoice_in.buyer_phone,
                     address=(invoice_in.buyer_address or "").upper(),
-                    type=invoice_in.buyer_type or CustomerType.INDIVIDUAL
+                    type=invoice_in.buyer_type or CustomerType.INDIVIDUAL,
+                    company_id=active_company_id,
                 )
                 db.add(customer)
         
@@ -215,10 +221,11 @@ class InvoiceService:
 
         db_invoice = Invoice(
             invoice_number=invoice_in.invoice_number,
+            company_id=active_company_id,
             pos_id=settings.get("pos_id", ""),
-            usin=invoice_in.invoice_number, 
+            usin=invoice_in.invoice_number,
             datetime=invoice_in.datetime,
-            
+
             customer_id=customer.id,
             
             total_sale_value=total_sale_value,

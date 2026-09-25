@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from sqlalchemy.orm import Session
 from sqlalchemy import inspect, text
 from app.db.session import SessionLocal, engine
-from app.db.models import FBRConfiguration, AppConfiguration
+from app.db.models import FBRConfiguration, AppConfiguration, Company
 import logging
 import time
 import threading
@@ -165,6 +165,8 @@ class SettingsService:
         self._active_settings_cache_loaded_at: float = 0.0
         self._active_environment_cache: Optional[str] = None
         self._active_environment_cache_loaded_at: float = 0.0
+        self._active_company_id_cache: Optional[int] = None
+        self._active_company_id_cache_loaded_at: float = 0.0
         self._observers: Dict[str, Callable[[Dict[str, Any]], None]] = {}
         self._revision: int = 0
 
@@ -201,6 +203,8 @@ class SettingsService:
             self._active_settings_cache_loaded_at = 0.0
             self._active_environment_cache = None
             self._active_environment_cache_loaded_at = 0.0
+            self._active_company_id_cache = None
+            self._active_company_id_cache_loaded_at = 0.0
 
     def _bump_revision(self) -> int:
         with self._lock:
@@ -280,11 +284,11 @@ class SettingsService:
         }
         self._write_env(payload)
 
-    def _get_environment_from_db(self, env: str) -> Optional[Dict[str, Any]]:
+    def _get_environment_from_db(self, env: str, company_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
         env = env.upper()
         db = SessionLocal()
         try:
-            config = db.query(FBRConfiguration).filter_by(environment=env).first()
+            config = db.query(FBRConfiguration).filter_by(environment=env, company_id=company_id).first()
             if not config:
                 return None
             return {
@@ -433,13 +437,14 @@ class SettingsService:
         except (ValueError, TypeError):
             pos_fee = "1.0"
 
-        before_db = self._get_environment_from_db(env) or {}
+        active_company_id = self.get_active_company_id()
+        before_db = self._get_environment_from_db(env, company_id=active_company_id) or {}
         db = SessionLocal()
         saved_to_db = False
         try:
-            config = db.query(FBRConfiguration).filter_by(environment=env).first()
+            config = db.query(FBRConfiguration).filter_by(environment=env, company_id=active_company_id).first()
             if not config:
-                config = FBRConfiguration(environment=env, api_base_url=base_url)
+                config = FBRConfiguration(environment=env, api_base_url=base_url, company_id=active_company_id)
                 db.add(config)
 
             config.api_base_url = base_url
@@ -484,7 +489,7 @@ class SettingsService:
             business_name=business_name,
         )
 
-        after_db = self._get_environment_from_db(env) if saved_to_db else None
+        after_db = self._get_environment_from_db(env, company_id=active_company_id) if saved_to_db else None
         after_effective = after_db or self._read_fbr_settings_from_env(env)
         changed_keys = [k for k in after_effective.keys() if before_db.get(k) != after_effective.get(k)]
 
@@ -556,17 +561,18 @@ class SettingsService:
         env = env.upper()
         if env not in ("SANDBOX", "PRODUCTION"):
             raise ValueError("Environment must be SANDBOX or PRODUCTION")
-        
+
+        active_company_id = self.get_active_company_id()
         before_env = self.get_active_environment()
         db = SessionLocal()
         try:
-            db.query(FBRConfiguration).update({"is_active": False})
-            config = db.query(FBRConfiguration).filter_by(environment=env).first()
+            db.query(FBRConfiguration).filter_by(company_id=active_company_id).update({"is_active": False})
+            config = db.query(FBRConfiguration).filter_by(environment=env, company_id=active_company_id).first()
             if config:
                 config.is_active = True
                 db.commit()
             else:
-                logger.warning(f"Configuration for {env} not found.")
+                logger.warning(f"Configuration for {env} (company_id={active_company_id}) not found.")
         except SQLAlchemyError as e:
             db.rollback()
             logger.error(f"DB persistence failed while setting active environment to {env}: {e}")
@@ -592,9 +598,10 @@ class SettingsService:
             if self._active_environment_cache and (time.time() - self._active_environment_cache_loaded_at) < 5:
                 return self._active_environment_cache
 
+        company_id = self.get_active_company_id()
         db = SessionLocal()
         try:
-            config = db.query(FBRConfiguration).filter_by(is_active=True).first()
+            config = db.query(FBRConfiguration).filter_by(is_active=True, company_id=company_id).first()
             env = config.environment if config else "SANDBOX"
             with self._lock:
                 self._active_environment_cache = env
@@ -610,11 +617,147 @@ class SettingsService:
         finally:
             db.close()
 
-    def get_environment(self, env: str) -> dict:
-        env = env.upper()
+    # --- Multi-company support -------------------------------------------
+    # Mirrors get_active_environment/set_active_environment exactly: a
+    # single global "active" row (companies.is_active), not a per-user/
+    # per-session concept. app/db/company_scope.py reads get_active_company_id()
+    # to transparently filter every query for company-scoped models.
+
+    def get_active_company_id(self) -> Optional[int]:
+        with self._lock:
+            if self._active_company_id_cache is not None and (time.time() - self._active_company_id_cache_loaded_at) < 5:
+                return self._active_company_id_cache
+
         db = SessionLocal()
         try:
-            config = db.query(FBRConfiguration).filter_by(environment=env).first()
+            # skip_company_filter: resolving the active company is exactly
+            # the query app/db/company_scope.py's do_orm_execute listener
+            # calls this same method to answer - without this escape hatch
+            # it would recurse into itself infinitely.
+            company = (
+                db.query(Company)
+                .execution_options(skip_company_filter=True)
+                .filter_by(is_active=True, is_deleted=False)
+                .first()
+            )
+            company_id = company.id if company else None
+            with self._lock:
+                self._active_company_id_cache = company_id
+                self._active_company_id_cache_loaded_at = time.time()
+            return company_id
+        except Exception as e:
+            logger.warning(f"Failed to resolve active company: {e}")
+            return None
+        finally:
+            db.close()
+
+    def get_active_company(self) -> Optional[Dict[str, Any]]:
+        db = SessionLocal()
+        try:
+            company = db.query(Company).filter_by(is_active=True, is_deleted=False).first()
+            if not company:
+                return None
+            return {
+                "id": company.id, "name": company.name, "ntn": company.ntn,
+                "cnic": company.cnic, "address": company.address,
+                "phone": company.phone, "email": company.email,
+            }
+        finally:
+            db.close()
+
+    def list_companies(self) -> list:
+        db = SessionLocal()
+        try:
+            companies = db.query(Company).filter_by(is_deleted=False).order_by(Company.name).all()
+            return [
+                {
+                    "id": c.id, "name": c.name, "ntn": c.ntn, "cnic": c.cnic,
+                    "address": c.address, "phone": c.phone, "email": c.email,
+                    "is_active": c.is_active,
+                }
+                for c in companies
+            ]
+        finally:
+            db.close()
+
+    def create_company(self, name: str, address: str = "", phone: str = "",
+                        email: str = "", ntn: str = "", cnic: str = "") -> Dict[str, Any]:
+        if not name or not name.strip():
+            raise ValueError("Company name is required.")
+        db = SessionLocal()
+        try:
+            company = Company(
+                name=name.strip(), address=address or None, phone=phone or None,
+                email=email or None, ntn=ntn or None, cnic=cnic or None,
+                is_active=False, is_deleted=False,
+            )
+            db.add(company)
+            db.commit()
+            db.refresh(company)
+            logger.info(f"Created company '{company.name}' (id={company.id}).")
+            return {"id": company.id, "name": company.name}
+        except SQLAlchemyError as e:
+            db.rollback()
+            logger.error(f"Failed to create company: {e}")
+            raise
+        finally:
+            db.close()
+
+    def update_company(self, company_id: int, **fields) -> None:
+        allowed = {"name", "address", "phone", "email", "ntn", "cnic"}
+        db = SessionLocal()
+        try:
+            company = db.query(Company).filter_by(id=company_id).first()
+            if not company:
+                raise ValueError(f"Company {company_id} not found.")
+            for key, value in fields.items():
+                if key in allowed:
+                    setattr(company, key, value)
+            db.commit()
+            logger.info(f"Updated company id={company_id}.")
+        except SQLAlchemyError as e:
+            db.rollback()
+            logger.error(f"Failed to update company {company_id}: {e}")
+            raise
+        finally:
+            db.close()
+
+    def set_active_company(self, company_id: int) -> None:
+        before_id = self.get_active_company_id()
+        db = SessionLocal()
+        try:
+            company = db.query(Company).filter_by(id=company_id, is_deleted=False).first()
+            if not company:
+                raise ValueError(f"Company {company_id} not found.")
+            db.query(Company).update({"is_active": False})
+            company.is_active = True
+            db.commit()
+        except SQLAlchemyError as e:
+            db.rollback()
+            logger.error(f"DB persistence failed while setting active company to {company_id}: {e}")
+            raise
+        finally:
+            db.close()
+
+        self._invalidate_cache()
+        active_company = self.get_active_company()
+        logger.info(f"Active company changed: {before_id} -> {company_id}")
+        revision = self._bump_revision()
+        self._notify({
+            "type": "active_company_changed",
+            "before_company_id": before_id,
+            "company_id": company_id,
+            "company": active_company,
+            "revision": revision,
+            "ts": time.time(),
+        })
+
+    def get_environment(self, env: str) -> dict:
+        env = env.upper()
+        company_id = self.get_active_company_id()
+        db = SessionLocal()
+        try:
+            config = db.query(FBRConfiguration).filter_by(environment=env, company_id=company_id).first()
             if not config:
                 return self._read_fbr_settings_from_env(env)
             
@@ -646,12 +789,13 @@ class SettingsService:
             if self._active_settings_cache and (time.time() - self._active_settings_cache_loaded_at) < 5:
                 return dict(self._active_settings_cache)
 
+        company_id = self.get_active_company_id()
         try:
             db = SessionLocal()
             try:
-                config = db.query(FBRConfiguration).filter_by(is_active=True).first()
+                config = db.query(FBRConfiguration).filter_by(is_active=True, company_id=company_id).first()
                 if not config:
-                    config = db.query(FBRConfiguration).filter_by(environment="SANDBOX").first()
+                    config = db.query(FBRConfiguration).filter_by(environment="SANDBOX", company_id=company_id).first()
 
                 if not config:
                     fallback = self._read_fbr_settings_from_env(self.get_active_environment())
@@ -890,28 +1034,30 @@ class SettingsService:
             db.close()
 
     def get_invoice_logo(self) -> Dict[str, Any]:
-        """Return the default invoice logo stored in AppConfiguration.
+        """Return the active company's default invoice logo (each company
+        has its own - see Company.logo_data_url/logo_name).
 
         Returns dict with keys:
             data_url: str (base64 data URL or "")
             name: str (original filename or "")
         """
+        company_id = self.get_active_company_id()
         db = SessionLocal()
         try:
-            config = db.query(AppConfiguration).first()
-            if not config:
+            company = db.query(Company).filter_by(id=company_id).first()
+            if not company:
                 return {"data_url": "", "name": ""}
-            data_url = str(getattr(config, "invoice_logo_data_url", None) or "")
-            name = str(getattr(config, "invoice_logo_name", None) or "")
+            data_url = str(getattr(company, "logo_data_url", None) or "")
+            name = str(getattr(company, "logo_name", None) or "")
             return {"data_url": data_url, "name": name}
         except Exception as e:
-            logger.error(f"Error getting invoice logo from AppConfiguration: {e}")
+            logger.error(f"Error getting invoice logo for company {company_id}: {e}")
             return {"data_url": "", "name": ""}
         finally:
             db.close()
 
     def set_invoice_logo(self, data_url: str, name: str = "") -> None:
-        """Save (or clear) the default invoice logo.
+        """Save (or clear) the active company's default invoice logo.
 
         Pass empty strings to clear/remove the saved logo.
         Raises on failure so callers can alert the user.
@@ -923,23 +1069,24 @@ class SettingsService:
         from app.db.models import PrintTemplateLayout
         data_url = str(data_url or "").strip()
         name = str(name or "").strip()
+        company_id = self.get_active_company_id()
+        if not company_id:
+            raise RuntimeError("No active company - cannot save invoice logo.")
         db = SessionLocal()
         try:
-            config = db.query(AppConfiguration).first()
-            if not config:
-                config = AppConfiguration(auto_push_enabled=False, auto_push_interval=5)
-                db.add(config)
-                db.flush()
+            company = db.query(Company).filter_by(id=company_id).first()
+            if not company:
+                raise RuntimeError(f"Active company {company_id} not found.")
             # NOTE: No more per-attribute try/except swallow!
             # Failures here MUST surface so the user knows their logo was NOT saved.
-            has_logo_col = any(c["name"] == "invoice_logo_data_url" for c in inspect(engine).get_columns("app_configurations"))
+            has_logo_col = any(c["name"] == "logo_data_url" for c in inspect(engine).get_columns("companies"))
             if has_logo_col:
-                config.invoice_logo_data_url = data_url if data_url else None
-                config.invoice_logo_name = name if name else None
+                company.logo_data_url = data_url if data_url else None
+                company.logo_name = name if name else None
             else:
                 raise RuntimeError(
-                    "Columns invoice_logo_data_url / invoice_logo_name missing from app_configurations table. "
-                    "Run the migration script first: python scripts/add_invoice_formatting_columns.py"
+                    "Columns logo_data_url / logo_name missing from companies table. "
+                    "Restart the app so the schema self-heal can add them."
                 )
 
             # --- Self-heal: if saving a NON-EMPTY logo, clear any stale deleted:true marker ---
@@ -969,7 +1116,7 @@ class SettingsService:
             logger.info(f"Updated invoice logo (name={name!r}, size={len(data_url)} chars)")
         except Exception as e:
             db.rollback()
-            logger.error(f"Error saving invoice logo to AppConfiguration: {e}")
+            logger.error(f"Error saving invoice logo for company {company_id}: {e}")
             raise
         finally:
             db.close()

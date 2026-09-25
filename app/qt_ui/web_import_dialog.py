@@ -14,6 +14,7 @@ from app.db.session import SessionLocal
 from app.db.models import Motorcycle, ProductModel
 from sqlalchemy import or_
 from app.core.logger import logger
+from app.services.settings_service import settings_service
 import app.core.config
 
 class WebImportDialog(QDialog):
@@ -317,11 +318,12 @@ class WebImportDialog(QDialog):
                     product_model = ProductModel(
                         model_name=model_name,
                         make="Honda",
-                        engine_capacity="70cc" if "70" in model_name else "125cc"
+                        engine_capacity="70cc" if "70" in model_name else "125cc",
+                        company_id=settings_service.get_active_company_id(),
                     )
                     db.add(product_model)
                     db.flush()
-                
+
                 new_bike = Motorcycle(
                     product_model_id=product_model.id,
                     year=year,
@@ -330,7 +332,8 @@ class WebImportDialog(QDialog):
                     color=item["color_code"].upper(),
                     cost_price=cost,
                     sale_price=sale,
-                    status="IN_STOCK"
+                    status="IN_STOCK",
+                    company_id=settings_service.get_active_company_id(),
                 )
                 db.add(new_bike)
                 imported += 1

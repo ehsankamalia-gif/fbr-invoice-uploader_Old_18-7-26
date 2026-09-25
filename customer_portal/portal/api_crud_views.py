@@ -14,6 +14,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
 from .api_permissions import HasPortalPermission, IsStaffMember
+from .company_service import get_active_company_id
 from .db_utils import refresh_pk_after_insert as _refresh_pk_after_insert
 from .models import (
     Customer, ProductModel, Motorcycle, FinanceCreditSale,
@@ -45,7 +46,7 @@ class CustomerListCreateView(generics.ListCreateAPIView):
         return qs
 
     def perform_create(self, serializer):
-        _refresh_pk_after_insert(serializer.save(is_deleted=False))
+        _refresh_pk_after_insert(serializer.save(is_deleted=False, company_id=get_active_company_id()))
 
 
 class CustomerDetailView(generics.RetrieveUpdateAPIView):
@@ -71,7 +72,7 @@ class ProductModelListCreateView(generics.ListCreateAPIView):
     permission_classes = [HasPortalPermission('manage_product_models')]
 
     def perform_create(self, serializer):
-        _refresh_pk_after_insert(serializer.save())
+        _refresh_pk_after_insert(serializer.save(company_id=get_active_company_id()))
 
 
 class ProductModelDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -87,7 +88,7 @@ class MotorcycleCreateView(generics.CreateAPIView):
     permission_classes = [HasPortalPermission('manage_inventory')]
 
     def perform_create(self, serializer):
-        _refresh_pk_after_insert(serializer.save())
+        _refresh_pk_after_insert(serializer.save(company_id=get_active_company_id()))
 
 
 class MotorcycleDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -103,7 +104,7 @@ class FinanceCreditSaleCreateView(generics.CreateAPIView):
     permission_classes = [HasPortalPermission('manage_finance_sales')]
 
     def perform_create(self, serializer):
-        _refresh_pk_after_insert(serializer.save())
+        _refresh_pk_after_insert(serializer.save(company_id=get_active_company_id()))
 
 
 class FinanceCreditSaleDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -120,7 +121,7 @@ class FinanceInstallmentListCreateView(generics.ListCreateAPIView):
     permission_classes = [HasPortalPermission('manage_finance_installments')]
 
     def perform_create(self, serializer):
-        _refresh_pk_after_insert(serializer.save())
+        _refresh_pk_after_insert(serializer.save(company_id=get_active_company_id()))
 
 
 class FinanceInstallmentDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -137,7 +138,7 @@ class FinanceLedgerListCreateView(generics.ListCreateAPIView):
     permission_classes = [HasPortalPermission('manage_finance_ledger')]
 
     def perform_create(self, serializer):
-        _refresh_pk_after_insert(serializer.save())
+        _refresh_pk_after_insert(serializer.save(company_id=get_active_company_id()))
 
 
 class FinanceLedgerDetailView(generics.RetrieveUpdateDestroyAPIView):

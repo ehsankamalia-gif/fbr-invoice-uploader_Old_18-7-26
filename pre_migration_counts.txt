@@ -1,0 +1,22 @@
+26 objects imported automatically (use -v 2 for details).
+
+companies 3
+customers 289
+product_models 18
+prices 14
+invoices 643
+invoice_items 643
+finance_credit_sales 2
+finance_installments 3
+finance_ledger 7
+credit_sales 6
+credit_sale_items 7
+credit_payments 1
+buyer_ledger 12
+spare_ledger_transactions 23
+spare_ledger_monthly_close 0
+captured_data 0
+advance_bookings 22
+motorcycles 1933
+fbr_configurations 8
+customer_portal_auth 8

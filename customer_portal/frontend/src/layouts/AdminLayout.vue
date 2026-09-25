@@ -218,6 +218,16 @@ async function logout() {
           <div class="border-t border-white/10 my-4"></div>
           <div v-if="!collapsed" class="text-xs uppercase text-white/50 font-semibold mb-2 px-2">Administration</div>
           <router-link
+            v-if="auth.can('manage_companies')"
+            :to="{ name: 'admin-companies' }"
+            class="sidebar-link flex items-center rounded-lg mb-2"
+            :class="[collapsed ? 'justify-center px-2 py-3' : 'px-4 py-3', { 'active bg-white/15': route.name === 'admin-companies' }]"
+            :title="collapsed ? 'Companies' : ''"
+          >
+            <i class="fas fa-building" :class="{ 'w-6 mr-3': !collapsed }"></i>
+            <span v-if="!collapsed">Companies</span>
+          </router-link>
+          <router-link
             :to="{ name: 'admin-staff-list' }"
             class="sidebar-link flex items-center rounded-lg mb-2"
             :class="[collapsed ? 'justify-center px-2 py-3' : 'px-4 py-3', { 'active bg-white/15': route.name && route.name.startsWith('admin-staff') }]"

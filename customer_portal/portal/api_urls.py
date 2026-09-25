@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import api_views, api_crud_views, api_fbr_config_views, api_invoice_views, api_staff_views
+from . import api_views, api_crud_views, api_company_views, api_fbr_config_views, api_invoice_views, api_staff_views
 
 urlpatterns = [
     path('auth/session/', api_views.session_view, name='api_session'),
@@ -72,6 +72,11 @@ urlpatterns = [
     path('admin/fbr-config/', api_fbr_config_views.fbr_config_list_view, name='api_fbr_config_list'),
     path('admin/fbr-config/<str:environment>/', api_fbr_config_views.fbr_config_update_view, name='api_fbr_config_update'),
     path('admin/fbr-config/<str:environment>/activate/', api_fbr_config_views.fbr_config_activate_view, name='api_fbr_config_activate'),
+
+    # --- Company profiles (multi-company support) ---
+    path('admin/companies/', api_company_views.company_list_view, name='api_company_list'),
+    path('admin/companies/<int:pk>/', api_company_views.company_update_view, name='api_company_update'),
+    path('admin/companies/<int:pk>/activate/', api_company_views.company_activate_view, name='api_company_activate'),
 
     # --- Phase 4: Staff Management ---
     path('admin/staff/', api_staff_views.StaffListView.as_view(), name='api_staff_list'),

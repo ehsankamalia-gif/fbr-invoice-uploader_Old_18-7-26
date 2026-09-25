@@ -197,6 +197,8 @@ def init_db(strict: bool = False):
             except Exception as e:
                 logger.error(f"Non-critical migration error: {e}")
             _assert_required_tables(engine, ["customers", "product_models", "motorcycles"])
+            from app.db import company_scope
+            company_scope.register()
             logger.info("Database initialized successfully.")
             
         except Exception as e:

@@ -2002,3 +2002,180 @@ class DMSSettingsDialog(BaseSettingsDialog):
             self.accept()
         except Exception as e:
             self._show_error("Error", f"Failed to save DMS settings: {str(e)}")
+
+
+class CompanyManagementDialog(BaseSettingsDialog):
+    """Modal for managing company profiles. Lets the same install be used
+    by multiple companies sharing one database - only the active company's
+    records show up everywhere else in the app (see app/db/company_scope.py).
+    Exactly one company is active at a time, same interaction shape as
+    FBRSecurityDialog's SANDBOX/PRODUCTION switch."""
+    def __init__(self, parent=None):
+        super().__init__("Company Management", parent)
+        self.setMinimumWidth(760)
+        self.setMinimumHeight(620)
+        self._editing_id = None
+        self._init_ui()
+        self._load_data()
+
+    def _init_ui(self):
+        form_group = QFrame()
+        form_group.setStyleSheet("background-color: #fcfcfc; border: 1px solid #dee2e6; border-radius: 4px; padding: 10px;")
+        form_layout = QGridLayout(form_group)
+
+        form_layout.addWidget(QLabel("Company Name:"), 0, 0)
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("e.g. EHSAN TRADERS")
+        form_layout.addWidget(self.name_input, 0, 1)
+
+        form_layout.addWidget(QLabel("Address:"), 1, 0)
+        self.address_input = QLineEdit()
+        form_layout.addWidget(self.address_input, 1, 1)
+
+        form_layout.addWidget(QLabel("Mobile Number:"), 2, 0)
+        self.phone_input = QLineEdit()
+        form_layout.addWidget(self.phone_input, 2, 1)
+
+        form_layout.addWidget(QLabel("Email:"), 3, 0)
+        self.email_input = QLineEdit()
+        form_layout.addWidget(self.email_input, 3, 1)
+
+        form_layout.addWidget(QLabel("NTN:"), 4, 0)
+        self.ntn_input = QLineEdit()
+        form_layout.addWidget(self.ntn_input, 4, 1)
+
+        form_layout.addWidget(QLabel("CNIC:"), 5, 0)
+        self.cnic_input = QLineEdit()
+        form_layout.addWidget(self.cnic_input, 5, 1)
+
+        button_row = QHBoxLayout()
+        self.add_btn = QPushButton("Add Company")
+        self.add_btn.setStyleSheet("""
+            QPushButton { background-color: #3498db; color: white; border: none;
+                          padding: 10px 20px; font-weight: bold; border-radius: 4px; }
+            QPushButton:hover { background-color: #2980b9; }
+        """)
+        self.add_btn.clicked.connect(self._on_save_company)
+        button_row.addWidget(self.add_btn)
+
+        self.clear_btn = QPushButton("Clear Form")
+        self.clear_btn.clicked.connect(self._clear_form)
+        button_row.addWidget(self.clear_btn)
+        form_layout.addLayout(button_row, 6, 0, 1, 2)
+
+        self.content_layout.addWidget(form_group)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(5)
+        self.table.setHorizontalHeaderLabels(["Name", "Address", "Phone", "Email", "Active"])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.itemSelectionChanged.connect(self._on_selection_changed)
+        self.content_layout.addWidget(self.table)
+
+        self.activate_btn = QPushButton("Set Active")
+        self.activate_btn.setStyleSheet("background-color: #27ae60; color: white; padding: 8px; font-weight: bold; border-radius: 4px;")
+        self.activate_btn.setEnabled(False)
+        self.activate_btn.clicked.connect(self._on_activate_company)
+        self.content_layout.addWidget(self.activate_btn)
+
+        # This dialog saves each change immediately (Add/Update/Set Active),
+        # so the bottom bar is just a Close button, matching AddressShortcodeDialog.
+        self.save_btn.setText("Close")
+        self.save_btn.clicked.disconnect()
+        self.save_btn.clicked.connect(self.accept)
+
+    def _load_data(self):
+        companies = settings_service.list_companies()
+        self._companies_by_row = companies
+        self.table.setRowCount(0)
+        for company in companies:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            self.table.setItem(row, 0, QTableWidgetItem(company["name"]))
+            self.table.setItem(row, 1, QTableWidgetItem(company.get("address") or ""))
+            self.table.setItem(row, 2, QTableWidgetItem(company.get("phone") or ""))
+            self.table.setItem(row, 3, QTableWidgetItem(company.get("email") or ""))
+            self.table.setItem(row, 4, QTableWidgetItem("Yes" if company["is_active"] else ""))
+
+    def _on_selection_changed(self):
+        selected_items = self.table.selectedItems()
+        if not selected_items:
+            self.activate_btn.setEnabled(False)
+            return
+        row = selected_items[0].row()
+        company = self._companies_by_row[row]
+        self._editing_id = company["id"]
+        self.name_input.setText(company["name"])
+        self.address_input.setText(company.get("address") or "")
+        self.phone_input.setText(company.get("phone") or "")
+        self.email_input.setText(company.get("email") or "")
+        self.ntn_input.setText(company.get("ntn") or "")
+        self.cnic_input.setText(company.get("cnic") or "")
+        self.add_btn.setText("Update Company")
+        self.activate_btn.setEnabled(not company["is_active"])
+
+    def _clear_form(self):
+        self._editing_id = None
+        self.name_input.clear()
+        self.address_input.clear()
+        self.phone_input.clear()
+        self.email_input.clear()
+        self.ntn_input.clear()
+        self.cnic_input.clear()
+        self.add_btn.setText("Add Company")
+        self.table.clearSelection()
+
+    def _on_save_company(self):
+        name = self.name_input.text().strip()
+        if not name:
+            self._show_error("Validation Error", "Company name is required.")
+            return
+        try:
+            if self._editing_id is not None:
+                settings_service.update_company(
+                    self._editing_id,
+                    name=name,
+                    address=self.address_input.text().strip(),
+                    phone=self.phone_input.text().strip(),
+                    email=self.email_input.text().strip(),
+                    ntn=self.ntn_input.text().strip(),
+                    cnic=self.cnic_input.text().strip(),
+                )
+                self._show_success("Success", f"Company '{name}' updated.")
+            else:
+                settings_service.create_company(
+                    name=name,
+                    address=self.address_input.text().strip(),
+                    phone=self.phone_input.text().strip(),
+                    email=self.email_input.text().strip(),
+                    ntn=self.ntn_input.text().strip(),
+                    cnic=self.cnic_input.text().strip(),
+                )
+                self._show_success("Success", f"Company '{name}' added.")
+            self._clear_form()
+            self._load_data()
+        except Exception as e:
+            self._show_error("Error", f"Failed to save company: {e}")
+
+    def _on_activate_company(self):
+        if self._editing_id is None:
+            return
+        company_name = self.name_input.text().strip()
+        if QMessageBox.question(
+            self, "Confirm Switch",
+            f"Set \"{company_name}\" as the ACTIVE company? Only this company's "
+            "records will be shown everywhere in the app (and the customer portal) "
+            "until you switch again."
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            settings_service.set_active_company(self._editing_id)
+            self._show_success("Success", f"\"{company_name}\" is now the active company.")
+            self._clear_form()
+            self._load_data()
+        except Exception as e:
+            self._show_error("Error", f"Failed to set active company: {e}")

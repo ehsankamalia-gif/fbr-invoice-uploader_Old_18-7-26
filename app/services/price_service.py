@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, desc
 from app.db.models import Price, ProductModel
 from app.db.session import SessionLocal
+from app.services.settings_service import settings_service
 from datetime import datetime
 import json
 import logging
@@ -171,7 +172,7 @@ class PriceService:
             # 1. Find or Create ProductModel
             product_model = db.query(ProductModel).filter(ProductModel.model_name == model).first()
             if not product_model:
-                product_model = ProductModel(model_name=model, make="Honda")
+                product_model = ProductModel(model_name=model, make="Honda", company_id=settings_service.get_active_company_id())
                 db.add(product_model)
                 db.flush()
 
@@ -218,7 +219,8 @@ class PriceService:
                 total_price=total,
                 optional_features=optional_features or {},
                 effective_date=now,
-                currency='Rs'
+                currency='Rs',
+                company_id=settings_service.get_active_company_id(),
             )
             
             db.add(new_price)
@@ -258,7 +260,7 @@ class PriceService:
             if price.product_model.model_name != model:
                 product_model = db.query(ProductModel).filter(ProductModel.model_name == model).first()
                 if not product_model:
-                    product_model = ProductModel(model_name=model, make="Honda")
+                    product_model = ProductModel(model_name=model, make="Honda", company_id=settings_service.get_active_company_id())
                     db.add(product_model)
                     db.flush()
                 price.product_model_id = product_model.id
