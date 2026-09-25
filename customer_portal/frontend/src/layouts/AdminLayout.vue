@@ -8,6 +8,25 @@ const router = useRouter();
 const auth = useAuthStore();
 const sidebarOpen = ref(false);
 
+// Desktop-only "docked but narrow" mode, independent of the mobile
+// slide-in/out overlay above (sidebarOpen). Persisted so it survives
+// reloads/navigation.
+let storedCollapsed = false;
+try {
+  storedCollapsed = localStorage.getItem('admin_sidebar_collapsed') === 'true';
+} catch (e) {
+  storedCollapsed = false;
+}
+const collapsed = ref(storedCollapsed);
+function toggleCollapsed() {
+  collapsed.value = !collapsed.value;
+  try {
+    localStorage.setItem('admin_sidebar_collapsed', String(collapsed.value));
+  } catch (e) {
+    // ignore (private browsing / storage blocked) - the toggle still works for this page view
+  }
+}
+
 const FBR_PORTAL_ROUTES = ['admin-invoices', 'admin-invoice-create', 'admin-fbr-config'];
 const fbrPortalOpen = ref(FBR_PORTAL_ROUTES.includes(route.name));
 watch(
@@ -68,109 +87,150 @@ async function logout() {
     ></div>
 
     <aside
-      class="sidebar-gradient w-64 text-white flex flex-col fixed md:relative z-50 h-screen transition-transform duration-300"
-      :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'"
+      class="sidebar-gradient text-white flex flex-col fixed md:relative z-50 h-screen transition-all duration-300"
+      :class="[collapsed ? 'md:w-20' : 'md:w-64', 'w-64', sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0']"
     >
-      <div class="p-6 border-b border-white/10">
-        <h1 class="text-2xl font-bold flex items-center">
-          <i class="fas fa-motorcycle mr-3"></i>
-          BikeZone
-        </h1>
-        <p class="text-sm text-white/60 mt-1">Admin Portal</p>
+      <div class="p-6 border-b border-white/10 relative">
+        <template v-if="!collapsed">
+          <h1 class="text-2xl font-bold flex items-center">
+            <i class="fas fa-motorcycle mr-3"></i>
+            BikeZone
+          </h1>
+          <p class="text-sm text-white/60 mt-1">Admin Portal</p>
+        </template>
+        <div v-else class="flex justify-center">
+          <i class="fas fa-motorcycle text-2xl"></i>
+        </div>
+        <button
+          type="button"
+          @click="toggleCollapsed"
+          class="hidden md:flex items-center justify-center absolute -right-3 top-7 w-6 h-6 bg-white text-gray-700 rounded-full shadow hover:bg-gray-100 transition z-10"
+          :title="collapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+        >
+          <i class="fas text-xs" :class="collapsed ? 'fa-chevron-right' : 'fa-chevron-left'"></i>
+        </button>
       </div>
 
       <nav class="flex-1 p-4 overflow-y-auto">
         <template v-for="item in mainItems" :key="item.label">
           <template v-if="item.type === 'group'">
-            <button
-              v-if="item.children.some((c) => auth.can(c.perm))"
-              type="button"
-              @click="fbrPortalOpen = !fbrPortalOpen"
-              class="sidebar-link w-full flex items-center justify-between px-4 py-3 rounded-lg mb-2"
-            >
-              <span class="flex items-center"><i :class="item.icon" class="w-6 mr-3"></i>{{ item.label }}</span>
-              <i class="fas fa-chevron-down text-xs transition-transform" :class="{ 'rotate-180': fbrPortalOpen }"></i>
-            </button>
-            <template v-if="fbrPortalOpen">
+            <template v-if="collapsed">
               <router-link
                 v-for="child in item.children.filter((c) => auth.can(c.perm))"
                 :key="child.label"
                 :to="{ name: child.routeName }"
-                class="sidebar-link flex items-center pl-10 pr-4 py-2 rounded-lg mb-2 text-sm text-white/80"
+                class="sidebar-link flex items-center justify-center px-2 py-3 rounded-lg mb-2"
                 :class="{ 'active bg-white/15': route.name === child.routeName }"
+                :title="child.label"
               >
-                <i :class="child.icon" class="w-5 mr-2"></i>{{ child.label }}
+                <i :class="child.icon"></i>
               </router-link>
+            </template>
+            <template v-else>
+              <button
+                v-if="item.children.some((c) => auth.can(c.perm))"
+                type="button"
+                @click="fbrPortalOpen = !fbrPortalOpen"
+                class="sidebar-link w-full flex items-center justify-between px-4 py-3 rounded-lg mb-2"
+              >
+                <span class="flex items-center"><i :class="item.icon" class="w-6 mr-3"></i>{{ item.label }}</span>
+                <i class="fas fa-chevron-down text-xs transition-transform" :class="{ 'rotate-180': fbrPortalOpen }"></i>
+              </button>
+              <template v-if="fbrPortalOpen">
+                <router-link
+                  v-for="child in item.children.filter((c) => auth.can(c.perm))"
+                  :key="child.label"
+                  :to="{ name: child.routeName }"
+                  class="sidebar-link flex items-center pl-10 pr-4 py-2 rounded-lg mb-2 text-sm text-white/80"
+                  :class="{ 'active bg-white/15': route.name === child.routeName }"
+                >
+                  <i :class="child.icon" class="w-5 mr-2"></i>{{ child.label }}
+                </router-link>
+              </template>
             </template>
           </template>
           <router-link
             v-else-if="item.routeName && auth.can(item.perm)"
             :to="{ name: item.routeName }"
-            class="sidebar-link flex items-center px-4 py-3 rounded-lg mb-2"
-            :class="{ 'active bg-white/15': route.name === item.routeName }"
+            class="sidebar-link flex items-center rounded-lg mb-2"
+            :class="[collapsed ? 'justify-center px-2 py-3' : 'px-4 py-3', { 'active bg-white/15': route.name === item.routeName }]"
+            :title="collapsed ? item.label : ''"
           >
-            <i :class="item.icon" class="w-6 mr-3"></i>{{ item.label }}
+            <i :class="[item.icon, { 'w-6 mr-3': !collapsed }]"></i>
+            <span v-if="!collapsed">{{ item.label }}</span>
           </router-link>
           <a
             v-else-if="auth.can(item.perm)"
             :href="item.href"
-            class="sidebar-link flex items-center px-4 py-3 rounded-lg mb-2"
+            class="sidebar-link flex items-center rounded-lg mb-2"
+            :class="collapsed ? 'justify-center px-2 py-3' : 'px-4 py-3'"
+            :title="collapsed ? item.label : ''"
           >
-            <i :class="item.icon" class="w-6 mr-3"></i>{{ item.label }}
+            <i :class="[item.icon, { 'w-6 mr-3': !collapsed }]"></i>
+            <span v-if="!collapsed">{{ item.label }}</span>
           </a>
         </template>
 
         <template v-if="ledgerItems.some((i) => auth.can(i.perm))">
           <div class="border-t border-white/10 my-4"></div>
-          <div class="text-xs uppercase text-white/50 font-semibold mb-2 px-2">Ledgers</div>
+          <div v-if="!collapsed" class="text-xs uppercase text-white/50 font-semibold mb-2 px-2">Ledgers</div>
         </template>
         <template v-for="item in ledgerItems" :key="item.label">
           <router-link
             v-if="item.routeName && auth.can(item.perm)"
             :to="{ name: item.routeName }"
-            class="sidebar-link flex items-center px-4 py-3 rounded-lg mb-2"
-            :class="{ 'active bg-white/15': route.name === item.routeName }"
+            class="sidebar-link flex items-center rounded-lg mb-2"
+            :class="[collapsed ? 'justify-center px-2 py-3' : 'px-4 py-3', { 'active bg-white/15': route.name === item.routeName }]"
+            :title="collapsed ? item.label : ''"
           >
-            <i :class="item.icon" class="w-6 mr-3"></i>{{ item.label }}
+            <i :class="[item.icon, { 'w-6 mr-3': !collapsed }]"></i>
+            <span v-if="!collapsed">{{ item.label }}</span>
           </router-link>
           <a
             v-else-if="auth.can(item.perm)"
             :href="item.href"
-            class="sidebar-link flex items-center px-4 py-3 rounded-lg mb-2"
+            class="sidebar-link flex items-center rounded-lg mb-2"
+            :class="collapsed ? 'justify-center px-2 py-3' : 'px-4 py-3'"
+            :title="collapsed ? item.label : ''"
           >
-            <i :class="item.icon" class="w-6 mr-3"></i>{{ item.label }}
+            <i :class="[item.icon, { 'w-6 mr-3': !collapsed }]"></i>
+            <span v-if="!collapsed">{{ item.label }}</span>
           </a>
         </template>
 
         <template v-if="manageItems.some((i) => auth.can(i.perm))">
           <div class="border-t border-white/10 my-4"></div>
-          <div class="text-xs uppercase text-white/50 font-semibold mb-2 px-2">Manage Data</div>
+          <div v-if="!collapsed" class="text-xs uppercase text-white/50 font-semibold mb-2 px-2">Manage Data</div>
         </template>
         <router-link
           v-for="item in manageItems.filter((i) => auth.can(i.perm))"
           :key="item.label"
           :to="{ name: item.routeName }"
-          class="sidebar-link flex items-center px-4 py-3 rounded-lg mb-2"
-          :class="{ 'active bg-white/15': route.name === item.routeName }"
+          class="sidebar-link flex items-center rounded-lg mb-2"
+          :class="[collapsed ? 'justify-center px-2 py-3' : 'px-4 py-3', { 'active bg-white/15': route.name === item.routeName }]"
+          :title="collapsed ? item.label : ''"
         >
-          <i :class="item.icon" class="w-6 mr-3"></i>{{ item.label }}
+          <i :class="[item.icon, { 'w-6 mr-3': !collapsed }]"></i>
+          <span v-if="!collapsed">{{ item.label }}</span>
         </router-link>
 
         <template v-if="auth.role === 'admin'">
           <div class="border-t border-white/10 my-4"></div>
-          <div class="text-xs uppercase text-white/50 font-semibold mb-2 px-2">Administration</div>
+          <div v-if="!collapsed" class="text-xs uppercase text-white/50 font-semibold mb-2 px-2">Administration</div>
           <router-link
             :to="{ name: 'admin-staff-list' }"
-            class="sidebar-link flex items-center px-4 py-3 rounded-lg mb-2"
-            :class="{ 'active bg-white/15': route.name && route.name.startsWith('admin-staff') }"
+            class="sidebar-link flex items-center rounded-lg mb-2"
+            :class="[collapsed ? 'justify-center px-2 py-3' : 'px-4 py-3', { 'active bg-white/15': route.name && route.name.startsWith('admin-staff') }]"
+            :title="collapsed ? 'Staff Management' : ''"
           >
-            <i class="fas fa-user-cog w-6 mr-3"></i>Staff Management
+            <i class="fas fa-user-cog" :class="{ 'w-6 mr-3': !collapsed }"></i>
+            <span v-if="!collapsed">Staff Management</span>
           </router-link>
         </template>
       </nav>
 
       <div class="p-4 border-t border-white/10">
-        <div class="flex items-center justify-between text-sm">
+        <div v-if="!collapsed" class="flex items-center justify-between text-sm">
           <div class="min-w-0">
             <p class="font-semibold truncate">{{ auth.user?.username }}</p>
             <p class="text-white/50 text-xs">{{ auth.role === 'admin' ? 'Admin' : 'Staff' }}</p>
@@ -179,6 +239,9 @@ async function logout() {
             <i class="fas fa-sign-out-alt"></i>
           </button>
         </div>
+        <button v-else @click="logout" class="w-full flex items-center justify-center text-white/70 hover:text-white" title="Logout">
+          <i class="fas fa-sign-out-alt"></i>
+        </button>
       </div>
     </aside>
 

@@ -8,6 +8,22 @@ const router = useRouter();
 const auth = useAuthStore();
 const sidebarOpen = ref(false);
 
+let storedCollapsed = false;
+try {
+  storedCollapsed = localStorage.getItem('customer_sidebar_collapsed') === 'true';
+} catch (e) {
+  storedCollapsed = false;
+}
+const collapsed = ref(storedCollapsed);
+function toggleCollapsed() {
+  collapsed.value = !collapsed.value;
+  try {
+    localStorage.setItem('customer_sidebar_collapsed', String(collapsed.value));
+  } catch (e) {
+    // ignore (private browsing / storage blocked) - the toggle still works for this page view
+  }
+}
+
 const navItems = [
   { name: 'customer-dashboard', label: 'Dashboard', icon: 'fas fa-home' },
   { name: 'customer-payments', label: 'Payment History', icon: 'fas fa-credit-card' },
@@ -30,15 +46,28 @@ async function logout() {
     ></div>
 
     <aside
-      class="w-64 bg-gradient-to-b from-primary-800 to-primary-900 text-white flex flex-col fixed md:relative z-50 h-screen transition-transform duration-300"
-      :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'"
+      class="bg-gradient-to-b from-primary-800 to-primary-900 text-white flex flex-col fixed md:relative z-50 h-screen transition-all duration-300"
+      :class="[collapsed ? 'md:w-20' : 'md:w-64', 'w-64', sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0']"
     >
-      <div class="p-6 border-b border-white/10">
-        <h1 class="text-2xl font-bold flex items-center">
-          <i class="fas fa-motorcycle mr-3"></i>
-          BikeZone
-        </h1>
-        <p class="text-sm text-white/60 mt-1">Customer Portal</p>
+      <div class="p-6 border-b border-white/10 relative">
+        <template v-if="!collapsed">
+          <h1 class="text-2xl font-bold flex items-center">
+            <i class="fas fa-motorcycle mr-3"></i>
+            BikeZone
+          </h1>
+          <p class="text-sm text-white/60 mt-1">Customer Portal</p>
+        </template>
+        <div v-else class="flex justify-center">
+          <i class="fas fa-motorcycle text-2xl"></i>
+        </div>
+        <button
+          type="button"
+          @click="toggleCollapsed"
+          class="hidden md:flex items-center justify-center absolute -right-3 top-7 w-6 h-6 bg-white text-gray-700 rounded-full shadow hover:bg-gray-100 transition z-10"
+          :title="collapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+        >
+          <i class="fas text-xs" :class="collapsed ? 'fa-chevron-right' : 'fa-chevron-left'"></i>
+        </button>
       </div>
 
       <nav class="flex-1 p-4 overflow-y-auto">
@@ -46,21 +75,31 @@ async function logout() {
           v-for="item in navItems"
           :key="item.name"
           :to="{ name: item.name }"
-          class="sidebar-link flex items-center px-4 py-3 rounded-lg mb-2"
-          :class="{ 'active bg-white/15': route.name === item.name }"
+          class="sidebar-link flex items-center rounded-lg mb-2"
+          :class="[collapsed ? 'justify-center px-2 py-3' : 'px-4 py-3', { 'active bg-white/15': route.name === item.name }]"
+          :title="collapsed ? item.label : ''"
         >
-          <i :class="item.icon" class="w-6 mr-3"></i>
-          {{ item.label }}
+          <i :class="[item.icon, { 'w-6 mr-3': !collapsed }]"></i>
+          <span v-if="!collapsed">{{ item.label }}</span>
         </router-link>
       </nav>
 
       <div class="p-4 border-t border-white/10">
         <button
+          v-if="!collapsed"
           @click="logout"
           class="w-full flex items-center px-4 py-3 rounded-lg bg-red-500/20 hover:bg-red-500/30 transition"
         >
           <i class="fas fa-sign-out-alt w-6 mr-3"></i>
           Logout
+        </button>
+        <button
+          v-else
+          @click="logout"
+          class="w-full flex items-center justify-center px-2 py-3 rounded-lg bg-red-500/20 hover:bg-red-500/30 transition"
+          title="Logout"
+        >
+          <i class="fas fa-sign-out-alt"></i>
         </button>
       </div>
     </aside>
