@@ -29,6 +29,7 @@ STAFF_MODULES = [
     ('manage_finance_ledger', 'Add/edit/delete finance ledger entries'),
     ('view_invoices', 'View submitted sales invoices'),
     ('create_invoices', 'Create new sales invoices and upload them to FBR'),
+    ('manage_fbr_config', 'View & edit FBR configuration (POS ID, tokens, active environment)'),
 ]
 
 

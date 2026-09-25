@@ -15,19 +15,43 @@ try:
 except Exception:
     _PKT = dt_timezone(timedelta(hours=5))
 
+import base64
+import io
+
+import qrcode
 import requests
 from django.db import transaction
 from tenacity import RetryError
 
 from .db_utils import refresh_pk_after_insert
 from .fbr_client import fbr_client, get_active_fbr_settings
-from .models import Customer, Invoice, InvoiceItem, Motorcycle, Price
+from .models import Customer, Invoice, InvoiceItem, Motorcycle, Price, ProductModel
 
 logger = logging.getLogger(__name__)
 
 
+def generate_qr_code_base64(data: str) -> str:
+    """Encodes `data` (the FBR-issued fiscal invoice number) into a QR PNG,
+    returned as base64 - same approach the desktop app uses for the printed
+    invoice's QR code (app/qt_ui/main_window.py generates it locally with
+    the qrcode package rather than expecting FBR to return an image)."""
+    qr = qrcode.QRCode(version=1, box_size=10, border=2)
+    qr.add_data(data)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color='black', back_color='white')
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    return base64.b64encode(buf.getvalue()).decode()
+
+
 class InvoiceValidationError(ValueError):
-    pass
+    """`field`, when set, is the form field name the error is about, so the
+    API can return it in DRF's standard {field: [message]} shape and the
+    frontend can show it under that specific input."""
+
+    def __init__(self, message, field=None):
+        super().__init__(message)
+        self.field = field
 
 
 def _pk_now_literal():
@@ -50,6 +74,20 @@ def _utc_now_literal():
     return datetime.utcnow().replace(tzinfo=dt_timezone.utc)
 
 
+def _safe_message(text, max_len=255):
+    """invoices.fbr_response_message is a varchar(255). FBR's own error
+    responses (especially from the Digital Invoicing gateway) can be much
+    longer multi-line JSON blobs, and saving one untruncated raises a MySQL
+    "Data too long for column" DataError that aborts the whole request
+    with a raw 500 - the invoice never gets saved at all, and the portal
+    just shows a generic "Failed to create invoice." Truncating here keeps
+    the save working; the full response is still preserved separately in
+    fbr_full_response for anyone who needs the details."""
+    text = str(text) if text is not None else ''
+    text = ' '.join(text.split())  # collapse newlines/indentation from raw JSON error bodies
+    return text[:max_len]
+
+
 def generate_next_invoice_number(usin: str) -> str:
     """Format: {USIN}-{0001}, matching the desktop app's
     generate_next_invoice_number exactly (same prefix, same table)."""
@@ -64,15 +102,15 @@ def generate_next_invoice_number(usin: str) -> str:
     return f'{usin}-{next_seq:04d}'
 
 
-def get_price_for_motorcycle(motorcycle: Motorcycle):
+def get_price_for_model_color(product_model_id: int, color: str):
     """Mirrors app/services/price_service.py's get_price_by_model_and_color:
-    the active (expiration_date NULL) price row for the bike's model,
-    preferring whichever variant's optional_features colour list contains
-    the bike's own color, falling back to the first active price."""
-    prices = list(Price.objects.filter(product_model_id=motorcycle.product_model_id, expiration_date__isnull=True))
+    the active (expiration_date NULL) price row for the model, preferring
+    whichever variant's optional_features colour list contains the given
+    color, falling back to the first active price."""
+    prices = list(Price.objects.filter(product_model_id=product_model_id, expiration_date__isnull=True))
     if not prices:
         return None
-    target = ''.join(ch for ch in (motorcycle.color or '') if ch.isalpha()).lower()
+    target = ''.join(ch for ch in (color or '') if ch.isalpha()).lower()
     if target:
         for p in prices:
             colors_raw = ''
@@ -82,6 +120,10 @@ def get_price_for_motorcycle(motorcycle: Motorcycle):
             if target in [c for c in candidates if c]:
                 return p
     return prices[0]
+
+
+def get_price_for_motorcycle(motorcycle: Motorcycle):
+    return get_price_for_model_color(motorcycle.product_model_id, motorcycle.color)
 
 
 def create_invoice(data: dict) -> Invoice:
@@ -94,42 +136,118 @@ def create_invoice(data: dict) -> Invoice:
     or PENDING, same as the desktop app, so it shows up for follow-up."""
     chassis_number = (data.get('chassis_number') or '').strip().upper()
     if not chassis_number:
-        raise InvoiceValidationError('Chassis number is required.')
+        raise InvoiceValidationError('Chassis number is required.', field='chassis_number')
 
     buyer_cnic = (data.get('buyer_cnic') or '').strip()
     if not buyer_cnic:
-        raise InvoiceValidationError('Buyer CNIC is required.')
+        raise InvoiceValidationError('Buyer CNIC is required.', field='buyer_cnic')
+    cnic_digits = ''.join(ch for ch in buyer_cnic if ch.isdigit())
+    if len(cnic_digits) != 13:
+        raise InvoiceValidationError('Buyer CNIC must be exactly 13 digits.', field='buyer_cnic')
+
+    # Matches the desktop app's own required-field list for this form
+    # (_check_invoice_form_completeness): CNIC, name, father name, phone,
+    # address are all mandatory - only NTN is optional.
+    buyer_name = (data.get('buyer_name') or '').strip()
+    if not buyer_name:
+        raise InvoiceValidationError('Buyer name is required.', field='buyer_name')
+    if not all(ch.isalpha() or ch.isspace() for ch in buyer_name):
+        raise InvoiceValidationError('Buyer name must contain letters only.', field='buyer_name')
+
+    buyer_father_name = (data.get('buyer_father_name') or '').strip()
+    if not buyer_father_name:
+        raise InvoiceValidationError('Father name is required.', field='buyer_father_name')
+    if not all(ch.isalpha() or ch.isspace() for ch in buyer_father_name):
+        raise InvoiceValidationError('Father name must contain letters only.', field='buyer_father_name')
+
+    buyer_phone = (data.get('buyer_phone') or '').strip()
+    if not buyer_phone:
+        raise InvoiceValidationError('Buyer phone number is required.', field='buyer_phone')
+    if len(buyer_phone) != 11 or not buyer_phone.isdigit():
+        raise InvoiceValidationError('Buyer phone number must be exactly 11 digits.', field='buyer_phone')
+
+    buyer_address = (data.get('buyer_address') or '').strip()
+    if not buyer_address:
+        raise InvoiceValidationError('Buyer address is required.', field='buyer_address')
 
     settings = get_active_fbr_settings()
 
     with transaction.atomic():
         motorcycle = Motorcycle.objects.select_for_update().filter(chassis_number=chassis_number).first()
-        if not motorcycle:
-            raise InvoiceValidationError(f'Motorcycle with chassis {chassis_number} not found in inventory.')
-        if motorcycle.status != Motorcycle.IN_STOCK:
-            raise InvoiceValidationError(f'Motorcycle {chassis_number} is already {motorcycle.status}.')
+        if motorcycle:
+            if motorcycle.status != Motorcycle.IN_STOCK:
+                raise InvoiceValidationError(f'Motorcycle {chassis_number} is already {motorcycle.status}.', field='chassis_number')
 
-        already_fiscalized = InvoiceItem.objects.filter(
-            motorcycle_id=motorcycle.id, invoice__is_fiscalized=True,
-        ).exists()
-        if already_fiscalized:
-            raise InvoiceValidationError(f'Chassis {chassis_number} is already fiscalized with FBR.')
+            already_fiscalized = InvoiceItem.objects.filter(
+                motorcycle_id=motorcycle.id, invoice__is_fiscalized=True,
+            ).exists()
+            if already_fiscalized:
+                raise InvoiceValidationError(f'Chassis {chassis_number} is already fiscalized with FBR.', field='chassis_number')
 
-        price = get_price_for_motorcycle(motorcycle)
+            price = get_price_for_motorcycle(motorcycle)
+        else:
+            # Chassis not in inventory - mirrors the desktop app's
+            # invoice_service.create_invoice fallback: create the
+            # Motorcycle record on the fly, already SOLD, as long as a
+            # model and color were given.
+            product_model_id = data.get('product_model_id')
+            color = (data.get('color') or '').strip()
+            if not product_model_id:
+                raise InvoiceValidationError(
+                    f'Chassis {chassis_number} was not found in inventory. Select a Model.', field='product_model_id'
+                )
+            if not color:
+                raise InvoiceValidationError(
+                    f'Chassis {chassis_number} was not found in inventory. Select a Color.', field='color'
+                )
+            product_model = ProductModel.objects.filter(id=product_model_id).first()
+            if not product_model:
+                raise InvoiceValidationError('Selected model was not found.', field='product_model_id')
+
+            engine_number = (data.get('engine_number') or '').strip().upper()
+            if not engine_number:
+                engine_number = f'UNKNOWN-{chassis_number}'
+
+            motorcycle = Motorcycle(
+                chassis_number=chassis_number,
+                engine_number=engine_number,
+                product_model=product_model,
+                year=datetime.now().year,
+                color=color.upper(),
+                cost_price=0.0,
+                sale_price=0.0,
+                status=Motorcycle.SOLD,
+                purchase_date=_pk_now_literal(),
+            )
+            motorcycle.save()
+            refresh_pk_after_insert(motorcycle)
+
+            price = get_price_for_model_color(product_model.id, color)
 
         def _num(key, fallback):
             val = data.get(key)
             return float(val) if val not in (None, '') else fallback
 
+        quantity = _num('quantity', 1.0)
+        if quantity <= 0:
+            raise InvoiceValidationError('Quantity must be greater than zero.', field='quantity')
+
         tax_rate = _num('tax_rate', float(settings.get('tax_rate') or 18.0))
-        sale_value = _num('sale_value', float(price.base_price) if price else 0.0)
-        tax_charged = _num('tax_charged', float(price.tax_amount) if price else round(sale_value * tax_rate / 100.0, 2))
-        further_tax = _num('further_tax', float(price.levy_amount) if price else round(sale_value * 3.0 / 100.0, 2))
+        unit_sale_value = _num('sale_value', float(price.base_price) if price else 0.0)
+        unit_tax_charged = _num('tax_charged', float(price.tax_amount) if price else round(unit_sale_value * tax_rate / 100.0, 2))
+        unit_further_tax = _num('further_tax', float(price.levy_amount) if price else round(unit_sale_value * 3.0 / 100.0, 2))
         discount = _num('discount', 0.0)
 
-        if sale_value <= 0:
-            raise InvoiceValidationError('Sale value must be greater than zero.')
+        if unit_sale_value <= 0:
+            raise InvoiceValidationError('Sale value must be greater than zero.', field='sale_value')
 
+        # sale_value/tax_charged/further_tax are per-unit; the invoice/item
+        # line reports the quantity-scaled total (standard invoicing
+        # convention: line total = unit price x quantity), with Quantity
+        # reported separately in the FBR payload.
+        sale_value = round(unit_sale_value * quantity, 2)
+        tax_charged = round(unit_tax_charged * quantity, 2)
+        further_tax = round(unit_further_tax * quantity, 2)
         total_amount = sale_value + tax_charged + further_tax
 
         buyer_type = data.get('buyer_type') or Customer.INDIVIDUAL
@@ -150,11 +268,11 @@ def create_invoice(data: dict) -> Invoice:
         else:
             customer = Customer(
                 cnic=buyer_cnic,
-                name=(data.get('buyer_name') or '').upper(),
-                father_name=(data.get('buyer_father_name') or '').upper(),
+                name=buyer_name.upper(),
+                father_name=buyer_father_name.upper(),
                 ntn=(data.get('buyer_ntn') or '').upper(),
-                phone=data.get('buyer_phone') or '',
-                address=(data.get('buyer_address') or '').upper(),
+                phone=buyer_phone,
+                address=buyer_address.upper(),
                 type=buyer_type,
                 is_deleted=False,
                 created_at=_pk_now_literal(),
@@ -182,7 +300,7 @@ def create_invoice(data: dict) -> Invoice:
             total_sale_value=sale_value,
             total_tax_charged=tax_charged,
             total_further_tax=further_tax,
-            total_quantity=1,
+            total_quantity=quantity,
             total_amount=total_amount,
             discount=discount,
             payment_mode=data.get('payment_mode') or 'Cash',
@@ -203,7 +321,7 @@ def create_invoice(data: dict) -> Invoice:
             item_code=final_item_code,
             item_name=final_item_name,
             pct_code=pct_code,
-            quantity=1,
+            quantity=quantity,
             tax_rate=tax_rate,
             sale_value=sale_value,
             tax_charged=tax_charged,
@@ -300,7 +418,7 @@ def _sync_invoice(invoice: Invoice, item: InvoiceItem, settings: dict) -> None:
                 base_msg = 'Fiscalized (IRIS Validated)'
             else:
                 base_msg = str(response_text) if response_text else 'Success'
-            invoice.fbr_response_message = base_msg
+            invoice.fbr_response_message = _safe_message(base_msg)
             invoice.fbr_full_response = response
             logger.info(f'FBR SUCCESS: Invoice {invoice.invoice_number} fiscalized as {returned_fbr_id}')
 
@@ -314,7 +432,7 @@ def _sync_invoice(invoice: Invoice, item: InvoiceItem, settings: dict) -> None:
         else:
             invoice.sync_status = Invoice.FAILED
             invoice.status_updated_at = _utc_now_literal()
-            invoice.fbr_response_message = response.get('Response', 'Unknown Error') if response else 'No response'
+            invoice.fbr_response_message = _safe_message(response.get('Response', 'Unknown Error') if response else 'No response')
             invoice.fbr_full_response = response
             logger.warning(f'FBR API Error for {invoice.invoice_number}: {invoice.fbr_response_message}')
 
@@ -322,7 +440,7 @@ def _sync_invoice(invoice: Invoice, item: InvoiceItem, settings: dict) -> None:
         logger.warning(f'Network error syncing {invoice.invoice_number}: {net_err}')
         invoice.sync_status = Invoice.PENDING
         invoice.status_updated_at = _utc_now_literal()
-        invoice.fbr_response_message = f'Network Error - Queued for retry: {str(net_err)[:300]}'
+        invoice.fbr_response_message = _safe_message(f'Network Error - Queued for retry: {net_err}')
 
     except RetryError as retry_err:
         try:
@@ -332,14 +450,14 @@ def _sync_invoice(invoice: Invoice, item: InvoiceItem, settings: dict) -> None:
         if isinstance(original_exception, requests.RequestException):
             invoice.sync_status = Invoice.PENDING
             invoice.status_updated_at = _utc_now_literal()
-            invoice.fbr_response_message = f'Network Error (Max Retries) - Queued for retry: {str(original_exception)[:300]}'
+            invoice.fbr_response_message = _safe_message(f'Network Error (Max Retries) - Queued for retry: {original_exception}')
         else:
             invoice.sync_status = Invoice.FAILED
             invoice.status_updated_at = _utc_now_literal()
-            invoice.fbr_response_message = f'Failed after retries: {original_exception}' if original_exception else 'Failed after retries'
+            invoice.fbr_response_message = _safe_message(f'Failed after retries: {original_exception}' if original_exception else 'Failed after retries')
 
     except Exception as e:
         logger.error(f'Invoice sync failed: {e}')
         invoice.sync_status = Invoice.FAILED
         invoice.status_updated_at = _utc_now_literal()
-        invoice.fbr_response_message = str(e)
+        invoice.fbr_response_message = _safe_message(e)

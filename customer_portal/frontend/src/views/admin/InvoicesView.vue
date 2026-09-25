@@ -33,13 +33,22 @@ onMounted(load);
         <h1 class="text-3xl font-bold text-gray-800 mb-2"><i class="fas fa-file-invoice mr-3"></i>Invoices</h1>
         <p class="text-gray-600">Sales invoices submitted to FBR</p>
       </div>
-      <router-link
-        v-if="auth.can('create_invoices')"
-        :to="{ name: 'admin-invoice-create' }"
-        class="inline-flex items-center px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white font-medium rounded-lg hover:shadow-lg transition"
-      >
-        <i class="fas fa-plus mr-2"></i>Create Invoice
-      </router-link>
+      <div class="flex gap-3">
+        <router-link
+          v-if="auth.can('manage_fbr_config')"
+          :to="{ name: 'admin-fbr-config' }"
+          class="inline-flex items-center px-6 py-3 bg-gray-200 text-gray-700 font-medium rounded-lg hover:bg-gray-300 transition"
+        >
+          <i class="fas fa-cog mr-2"></i>FBR Configuration
+        </router-link>
+        <router-link
+          v-if="auth.can('create_invoices')"
+          :to="{ name: 'admin-invoice-create' }"
+          class="inline-flex items-center px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white font-medium rounded-lg hover:shadow-lg transition"
+        >
+          <i class="fas fa-plus mr-2"></i>Create Invoice
+        </router-link>
+      </div>
     </div>
 
     <div class="mb-6">

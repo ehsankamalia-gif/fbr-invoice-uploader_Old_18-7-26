@@ -16,7 +16,7 @@ from rest_framework.validators import UniqueValidator
 from .models import (
     Customer, ProductModel, Motorcycle, FinanceCreditSale,
     FinanceInstallment, FinanceLedger, CustomerPortalAuth,
-    Invoice, InvoiceItem,
+    Invoice, InvoiceItem, FBRConfiguration,
 )
 from .permissions import get_profile
 
@@ -172,6 +172,21 @@ class InvoiceSerializer(serializers.ModelSerializer):
             'sync_status', 'fbr_response_code', 'fbr_response_message',
             'status_updated_at', 'items',
         ]
+
+
+class FBRConfigurationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FBRConfiguration
+        fields = [
+            'id', 'environment', 'is_active', 'api_base_url', 'pos_id', 'usin',
+            'auth_token', 'secret_key', 'tax_rate', 'invoice_type', 'discount',
+            'pos_fee', 'pct_code', 'item_code', 'item_name', 'business_name',
+        ]
+        # environment/is_active are managed by the dedicated activate endpoint
+        # (switching environments has to atomically flip is_active on BOTH
+        # rows - see api_fbr_config_views.activate_environment_view), not by
+        # a plain field update through this serializer.
+        read_only_fields = ['id', 'environment', 'is_active']
 
 
 class StaffUserSerializer(serializers.ModelSerializer):

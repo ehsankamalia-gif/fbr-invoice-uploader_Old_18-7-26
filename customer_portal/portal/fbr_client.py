@@ -30,10 +30,16 @@ logger = logging.getLogger(__name__)
 
 def get_active_fbr_settings() -> dict:
     """Read the FBR environment currently marked active by the desktop
-    app's Settings screen. Read-only - the portal never writes this table."""
-    config = FBRConfiguration.objects.filter(is_active=True).first()
+    app's Settings screen (or the portal's own FBR Configuration page).
+
+    The desktop app's startup code can race when two instances launch at
+    once, creating duplicate SANDBOX/PRODUCTION rows with blank values
+    (environment isn't actually enforced unique at the DB level for this
+    managed=False table) - order_by('id') keeps this deterministic rather
+    than picking an arbitrary duplicate."""
+    config = FBRConfiguration.objects.filter(is_active=True).order_by('id').first()
     if not config:
-        config = FBRConfiguration.objects.filter(environment='SANDBOX').first()
+        config = FBRConfiguration.objects.filter(environment='SANDBOX').order_by('id').first()
     if not config:
         raise RuntimeError('No FBR configuration found. Configure it from the desktop app first.')
 

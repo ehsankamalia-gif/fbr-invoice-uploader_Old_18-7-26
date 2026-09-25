@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import api_views, api_crud_views, api_invoice_views, api_staff_views
+from . import api_views, api_crud_views, api_fbr_config_views, api_invoice_views, api_staff_views
 
 urlpatterns = [
     path('auth/session/', api_views.session_view, name='api_session'),
@@ -65,6 +65,13 @@ urlpatterns = [
     path('admin/invoices/create/', api_invoice_views.invoice_create_view, name='api_invoice_create'),
     path('admin/invoices/options/', api_invoice_views.invoice_form_options_view, name='api_invoice_options'),
     path('admin/invoices/price-preview/<int:motorcycle_id>/', api_invoice_views.invoice_price_preview_view, name='api_invoice_price_preview'),
+    path('admin/invoices/price-preview-by-model/<int:product_model_id>/', api_invoice_views.invoice_price_preview_by_model_view, name='api_invoice_price_preview_by_model'),
+    path('admin/invoices/customer-lookup/', api_invoice_views.invoice_customer_lookup_view, name='api_invoice_customer_lookup'),
+
+    # --- FBR Configuration (shared with the desktop app's Settings screen) ---
+    path('admin/fbr-config/', api_fbr_config_views.fbr_config_list_view, name='api_fbr_config_list'),
+    path('admin/fbr-config/<str:environment>/', api_fbr_config_views.fbr_config_update_view, name='api_fbr_config_update'),
+    path('admin/fbr-config/<str:environment>/activate/', api_fbr_config_views.fbr_config_activate_view, name='api_fbr_config_activate'),
 
     # --- Phase 4: Staff Management ---
     path('admin/staff/', api_staff_views.StaffListView.as_view(), name='api_staff_list'),

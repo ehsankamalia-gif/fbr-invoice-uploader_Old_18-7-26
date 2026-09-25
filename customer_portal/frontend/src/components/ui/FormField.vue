@@ -10,6 +10,8 @@ defineProps({
   error: { type: String, default: '' },
   options: { type: Array, default: () => [] }, // [{ value, label }]
   span2: { type: Boolean, default: false },
+  placeholder: { type: String, default: '' },
+  maxlength: { type: [String, Number], default: undefined },
 });
 defineEmits(['update:modelValue']);
 </script>
@@ -52,6 +54,8 @@ defineEmits(['update:modelValue']);
       v-else
       :type="type"
       :value="modelValue"
+      :placeholder="placeholder"
+      :maxlength="maxlength"
       @input="$emit('update:modelValue', $event.target.value)"
       :class="INPUT_CLASS"
     />

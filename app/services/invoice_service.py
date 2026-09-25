@@ -9,6 +9,20 @@ from datetime import datetime
 from typing import Optional
 import json
 
+
+def _safe_message(text, max_len: int = 255) -> str:
+    """invoices.fbr_response_message is a varchar(255). FBR's own error
+    responses (especially from the Digital Invoicing gateway) can be much
+    longer multi-line JSON blobs, and saving one untruncated raises a MySQL
+    "Data too long for column" DataError that aborts the whole save - the
+    invoice never gets persisted at all, not even as FAILED. Truncating
+    here keeps the save working; the full response is still preserved
+    separately in fbr_full_response for anyone who needs the details."""
+    text = str(text) if text is not None else ""
+    text = " ".join(text.split())  # collapse newlines/indentation from raw JSON error bodies
+    return text[:max_len]
+
+
 class InvoiceService:
     def is_chassis_used_in_posted_invoice(self, db: Session, chassis_number: str) -> bool:
         """
@@ -368,7 +382,7 @@ class InvoiceService:
                     base_msg = "Fiscalized (IRIS Validated)"
                 else:
                     base_msg = str(response_text) if response_text else "Success"
-                invoice.fbr_response_message = base_msg
+                invoice.fbr_response_message = _safe_message(base_msg)
                 invoice.fbr_full_response = response
                 
                 logger.info(
@@ -390,7 +404,7 @@ class InvoiceService:
                 # Keep as FAILED so user checks it.
                 invoice.sync_status = "FAILED"
                 invoice.status_updated_at = datetime.utcnow()
-                invoice.fbr_response_message = response.get("Response", "Unknown Error") if response else "No response"
+                invoice.fbr_response_message = _safe_message(response.get("Response", "Unknown Error") if response else "No response")
                 invoice.fbr_full_response = response
                 logger.warning(f"FBR API Error for {invoice.invoice_number}: {invoice.fbr_response_message}")
                 
@@ -402,7 +416,7 @@ class InvoiceService:
             logger.warning(f"Network error syncing {invoice.invoice_number}: {re}")
             invoice.sync_status = "PENDING"
             invoice.status_updated_at = datetime.utcnow()
-            invoice.fbr_response_message = f"Network Error - Queued for retry: {str(re)[:300]}"
+            invoice.fbr_response_message = _safe_message(f"Network Error - Queued for retry: {re}")
             db.add(invoice)
 
         except RetryError as re:
@@ -415,12 +429,12 @@ class InvoiceService:
                     logger.warning(f"Max retries exhausted for {invoice.invoice_number} due to Network Error: {original_exception}")
                     invoice.sync_status = "PENDING"
                     invoice.status_updated_at = datetime.utcnow()
-                    invoice.fbr_response_message = f"Network Error (Max Retries) - Queued for retry: {str(original_exception)[:300]}"
+                    invoice.fbr_response_message = _safe_message(f"Network Error (Max Retries) - Queued for retry: {original_exception}")
                 else:
                     logger.error(f"Max retries exhausted for {invoice.invoice_number} due to Logic Error: {original_exception}")
                     invoice.sync_status = "FAILED"
                     invoice.status_updated_at = datetime.utcnow()
-                    invoice.fbr_response_message = f"Failed after retries: {str(original_exception)}"
+                    invoice.fbr_response_message = _safe_message(f"Failed after retries: {original_exception}")
             except Exception:
                  # Fallback if we can't extract exception
                  logger.error(f"RetryError caught but failed to extract cause: {re}")
@@ -435,7 +449,7 @@ class InvoiceService:
             logger.error(f"Invoice sync failed: {e}")
             invoice.sync_status = "FAILED"
             invoice.status_updated_at = datetime.utcnow()
-            invoice.fbr_response_message = str(e)
+            invoice.fbr_response_message = _safe_message(e)
             db.add(invoice)
 
     def delete_invoice(self, db: Session, invoice_id: int) -> bool:

@@ -42,7 +42,7 @@ REST_FRAMEWORK = {
 
 # Bumped on each frontend build; used as a cache-busting query param on the
 # SPA's built assets (see templates/spa/shell.html).
-SPA_BUILD_VERSION = '2'
+SPA_BUILD_VERSION = '20'
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',

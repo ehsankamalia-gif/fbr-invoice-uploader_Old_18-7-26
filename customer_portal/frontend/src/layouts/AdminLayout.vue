@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 
@@ -7,6 +7,15 @@ const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 const sidebarOpen = ref(false);
+
+const FBR_PORTAL_ROUTES = ['admin-invoices', 'admin-invoice-create', 'admin-fbr-config'];
+const fbrPortalOpen = ref(FBR_PORTAL_ROUTES.includes(route.name));
+watch(
+  () => route.name,
+  (name) => {
+    fbrPortalOpen.value = FBR_PORTAL_ROUTES.includes(name);
+  },
+);
 
 // Phases 1-4 of the SPA rewrite migrated Dashboard, all read-only reports,
 // "Manage Data" CRUD, and Staff Management to real Vue routes.
@@ -17,7 +26,13 @@ const mainItems = [
   { perm: 'view_sales', label: 'Credit Sales', icon: 'fas fa-shopping-cart', routeName: 'admin-sales' },
   { perm: 'view_payments', label: 'Payments', icon: 'fas fa-credit-card', routeName: 'admin-payments' },
   { perm: 'view_inventory', label: 'Inventory', icon: 'fas fa-motorcycle', routeName: 'admin-inventory' },
-  { perm: 'view_invoices', label: 'Invoices', icon: 'fas fa-file-invoice', routeName: 'admin-invoices' },
+  {
+    type: 'group', label: 'FBR Portal', icon: 'fas fa-file-invoice',
+    children: [
+      { perm: 'view_invoices', label: 'Invoices', icon: 'fas fa-file-invoice', routeName: 'admin-invoices' },
+      { perm: 'manage_fbr_config', label: 'FBR Configuration', icon: 'fas fa-cog', routeName: 'admin-fbr-config' },
+    ],
+  },
   { perm: 'view_transactions', label: 'Transactions', icon: 'fas fa-history', routeName: 'admin-transactions' },
   { perm: 'view_portal_accounts', label: 'Portal Accounts', icon: 'fas fa-user-shield', routeName: 'admin-portal-accounts' },
 ];
@@ -66,8 +81,30 @@ async function logout() {
 
       <nav class="flex-1 p-4 overflow-y-auto">
         <template v-for="item in mainItems" :key="item.label">
+          <template v-if="item.type === 'group'">
+            <button
+              v-if="item.children.some((c) => auth.can(c.perm))"
+              type="button"
+              @click="fbrPortalOpen = !fbrPortalOpen"
+              class="sidebar-link w-full flex items-center justify-between px-4 py-3 rounded-lg mb-2"
+            >
+              <span class="flex items-center"><i :class="item.icon" class="w-6 mr-3"></i>{{ item.label }}</span>
+              <i class="fas fa-chevron-down text-xs transition-transform" :class="{ 'rotate-180': fbrPortalOpen }"></i>
+            </button>
+            <template v-if="fbrPortalOpen">
+              <router-link
+                v-for="child in item.children.filter((c) => auth.can(c.perm))"
+                :key="child.label"
+                :to="{ name: child.routeName }"
+                class="sidebar-link flex items-center pl-10 pr-4 py-2 rounded-lg mb-2 text-sm text-white/80"
+                :class="{ 'active bg-white/15': route.name === child.routeName }"
+              >
+                <i :class="child.icon" class="w-5 mr-2"></i>{{ child.label }}
+              </router-link>
+            </template>
+          </template>
           <router-link
-            v-if="item.routeName && auth.can(item.perm)"
+            v-else-if="item.routeName && auth.can(item.perm)"
             :to="{ name: item.routeName }"
             class="sidebar-link flex items-center px-4 py-3 rounded-lg mb-2"
             :class="{ 'active bg-white/15': route.name === item.routeName }"
