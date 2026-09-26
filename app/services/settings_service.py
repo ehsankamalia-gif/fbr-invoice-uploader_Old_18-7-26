@@ -1001,6 +1001,87 @@ class SettingsService:
         self._invalidate_cache()
         self._bump_revision()
 
+    # --- Unassigned (company_id IS NULL) record recovery -----------------
+    # Safety net for data that predates multi-company support entirely, or
+    # otherwise ended up with no company at all - e.g. a restored backup
+    # taken before the company_id column existed, a future code path that
+    # forgets to stamp company_id, or a raw-SQL insert that bypasses the
+    # ORM. Such rows are invisible under EVERY company (with_loader_criteria
+    # filters by company_id = <active>, and NULL never equals anything, not
+    # even another NULL) - silently "lost" from the app's perspective even
+    # though the data still physically exists. This assigns ALL unassigned
+    # rows, across every scoped table, to one chosen company in a single
+    # operation - not per-table or per-record - since these rows' existing
+    # relationships to each other (e.g. an Invoice and the Customer it
+    # references) must move together to stay consistent.
+
+    # Same table list as app/db/company_scope.py's SCOPED_MODELS.
+    _UNASSIGNED_SCAN_MODELS = (
+        "Customer", "Motorcycle", "ProductModel", "Price", "Invoice", "InvoiceItem",
+        "FinanceCreditSale", "FinanceInstallment", "FinanceLedger", "CreditSale",
+        "CreditSaleItem", "CreditPayment", "BuyerLedger", "SpareLedgerTransaction",
+        "SpareLedgerMonthlyClose", "CapturedData", "AdvanceBooking",
+    )
+
+    def count_unassigned_records(self) -> Dict[str, int]:
+        """Per-table counts of rows with company_id IS NULL. Only tables
+        with at least one such row are included."""
+        import app.db.models as models_module
+        db = SessionLocal()
+        try:
+            counts = {}
+            for name in self._UNASSIGNED_SCAN_MODELS:
+                model = getattr(models_module, name)
+                count = (
+                    db.query(model)
+                    .filter(model.company_id.is_(None))
+                    .execution_options(skip_company_filter=True)
+                    .count()
+                )
+                if count:
+                    counts[model.__tablename__] = count
+            return counts
+        finally:
+            db.close()
+
+    def assign_unassigned_records_to_company(self, target_company_id: int) -> Dict[str, int]:
+        """Assigns every currently-unassigned row, across all scoped
+        tables, to `target_company_id` in one transaction. Returns
+        per-table counts of how many rows were actually updated."""
+        import app.db.models as models_module
+        db = SessionLocal()
+        try:
+            company = db.query(Company).filter_by(id=target_company_id, is_deleted=False).execution_options(skip_company_filter=True).first()
+            if not company:
+                raise ValueError(f"Company {target_company_id} not found.")
+
+            updated = {}
+            for name in self._UNASSIGNED_SCAN_MODELS:
+                model = getattr(models_module, name)
+                # Query.update() issues an UPDATE, not a SELECT, so it is
+                # never touched by the do_orm_execute listener in the first
+                # place (see app/db/company_scope.py: `if not
+                # execute_state.is_select: return`) - no skip_company_filter
+                # needed here, only on the earlier SELECT-based count.
+                count = (
+                    db.query(model)
+                    .filter(model.company_id.is_(None))
+                    .update({"company_id": target_company_id}, synchronize_session=False)
+                )
+                if count:
+                    updated[model.__tablename__] = count
+            db.commit()
+            logger.info(f"Assigned unassigned records to company {target_company_id}: {updated}")
+        except SQLAlchemyError as e:
+            db.rollback()
+            logger.error(f"Failed to assign unassigned records to company {target_company_id}: {e}")
+            raise
+        finally:
+            db.close()
+        self._invalidate_cache()
+        self._bump_revision()
+        return updated
+
     def get_environment(self, env: str) -> dict:
         env = env.upper()
         company_id = self.get_active_company_id()

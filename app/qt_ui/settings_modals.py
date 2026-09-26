@@ -2088,6 +2088,12 @@ class CompanyManagementDialog(BaseSettingsDialog):
         self.transfer_records_btn.setToolTip("Move a specific customer or never-sold motorcycle from one company to another.")
         self.transfer_records_btn.clicked.connect(self._on_open_transfer_records)
         bottom_actions.addWidget(self.transfer_records_btn)
+
+        self.claim_unassigned_btn = QPushButton("Claim Unassigned Data...")
+        self.claim_unassigned_btn.setStyleSheet("background-color: #d35400; color: white; padding: 8px; font-weight: bold; border-radius: 4px;")
+        self.claim_unassigned_btn.setToolTip("Assign any records with no company at all (e.g. from a restored old backup) to one company.")
+        self.claim_unassigned_btn.clicked.connect(self._on_open_claim_unassigned)
+        bottom_actions.addWidget(self.claim_unassigned_btn)
         self.content_layout.addLayout(bottom_actions)
 
         # This dialog saves each change immediately (Add/Update/Set Active),
@@ -2191,6 +2197,96 @@ class CompanyManagementDialog(BaseSettingsDialog):
     def _on_open_transfer_records(self):
         dialog = TransferRecordsDialog(self)
         dialog.exec()
+
+    def _on_open_claim_unassigned(self):
+        dialog = UnassignedDataDialog(self)
+        dialog.exec()
+
+
+class UnassignedDataDialog(BaseSettingsDialog):
+    """Safety net for records with NO company at all (company_id IS NULL) -
+    e.g. from a backup restored from before multi-company support existed,
+    a future code path that forgets to stamp company_id, or a raw-SQL
+    insert. Such rows are invisible under every company (NULL never
+    matches any company_id filter), so without this they'd be silently
+    unreachable from the app despite still existing in the database. Unlike
+    TransferRecordsDialog (which moves specific already-owned records
+    between two companies), this assigns EVERYTHING unassigned, across all
+    scoped tables, to one company in a single operation - these rows'
+    existing relationships to each other (e.g. an Invoice and the Customer
+    it references) must move together to stay consistent."""
+    def __init__(self, parent=None):
+        super().__init__("Claim Unassigned Data", parent)
+        self.setMinimumWidth(560)
+        self._init_ui()
+        self._reload()
+
+    def _init_ui(self):
+        intro = QLabel(
+            "Scans every company-scoped table for records with no company assigned at all "
+            "(not the same as belonging to a different company) and lets you assign all of "
+            "them to one company in a single operation."
+        )
+        intro.setWordWrap(True)
+        intro.setStyleSheet("color:#475569; font-size:12px;")
+        self.content_layout.addWidget(intro)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(2)
+        self.table.setHorizontalHeaderLabels(["Table", "Unassigned Rows"])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.content_layout.addWidget(self.table)
+
+        assign_row = QHBoxLayout()
+        assign_row.addWidget(QLabel("Assign all to:"))
+        self.target_combo = QComboBox()
+        for c in settings_service.list_companies():
+            self.target_combo.addItem(c["name"], c["id"])
+        assign_row.addWidget(self.target_combo, 1)
+        self.content_layout.addLayout(assign_row)
+
+        self.assign_btn = QPushButton("Assign All Unassigned Records")
+        self.assign_btn.setStyleSheet("background-color: #d35400; color: white; padding: 10px; font-weight: bold; border-radius: 4px;")
+        self.assign_btn.clicked.connect(self._on_assign)
+        self.content_layout.addWidget(self.assign_btn)
+
+        self.save_btn.setText("Close")
+        self.save_btn.clicked.disconnect()
+        self.save_btn.clicked.connect(self.accept)
+
+    def _reload(self):
+        counts = settings_service.count_unassigned_records()
+        self._total = sum(counts.values())
+        self.table.setRowCount(0)
+        for table_name, count in sorted(counts.items()):
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            self.table.setItem(row, 0, QTableWidgetItem(table_name))
+            self.table.setItem(row, 1, QTableWidgetItem(str(count)))
+        self.assign_btn.setEnabled(self._total > 0)
+        self.assign_btn.setText(
+            f"Assign All {self._total} Unassigned Record(s)" if self._total else "No Unassigned Records Found"
+        )
+
+    def _on_assign(self):
+        target_id = self.target_combo.currentData()
+        target_name = self.target_combo.currentText()
+        if target_id is None:
+            return
+        if QMessageBox.question(
+            self, "Confirm Assignment",
+            f"Assign all {self._total} unassigned record(s), across every table, to \"{target_name}\"? "
+            "This cannot be undone from this dialog."
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            result = settings_service.assign_unassigned_records_to_company(target_id)
+            details = "\n".join(f"  {table}: {count}" for table, count in sorted(result.items())) or "  (none)"
+            self._show_success("Assignment Complete", f"Assigned to \"{target_name}\":\n\n{details}")
+            self._reload()
+        except Exception as e:
+            self._show_error("Error", f"Failed to assign unassigned records: {e}")
 
 
 class TransferRecordsDialog(BaseSettingsDialog):
