@@ -469,6 +469,7 @@ class SettingsService:
         except SQLAlchemyError as e:
             db.rollback()
             logger.error(f"DB persistence failed while saving FBR settings for {env}: {e}")
+            raise RuntimeError(f"Failed to save {env} settings to the database: {e}") from e
         finally:
             db.close()
 
@@ -572,10 +573,19 @@ class SettingsService:
                 config.is_active = True
                 db.commit()
             else:
+                # Roll back the is_active=False update above too - failing
+                # to activate PRODUCTION must never leave the working
+                # SANDBOX config silently deactivated as a side effect.
+                db.rollback()
                 logger.warning(f"Configuration for {env} (company_id={active_company_id}) not found.")
+                raise ValueError(
+                    f"No {env} configuration exists yet for the active company. "
+                    f"Save the {env} settings first (enter POS ID/Auth Token and click Save) before activating it."
+                )
         except SQLAlchemyError as e:
             db.rollback()
             logger.error(f"DB persistence failed while setting active environment to {env}: {e}")
+            raise RuntimeError(f"Failed to set active environment to {env}: {e}") from e
         finally:
             db.close()
 
