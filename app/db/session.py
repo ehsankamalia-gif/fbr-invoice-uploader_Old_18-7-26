@@ -391,6 +391,7 @@ def run_migrations():
                 (15, "Make finance fields nullable and add defaults", _migration_v15_comprehensive_finance_fix),
                 (16, "Add sequential processing fields to invoices", _migration_v16_add_sequential_upload_fields),
                 (17, "Make customer CNIC non-nullable", _migration_v17_make_cnic_non_nullable),
+                (18, "Convert global unique constraints to per-company composite (multi-company support)", _migration_v18_company_scoped_unique_constraints),
             ]
 
             for version, description, func in migrations:
@@ -846,6 +847,75 @@ def _migration_v17_make_cnic_non_nullable(conn) -> bool:
         return True
     except Exception as e:
         logger.error(f"Migration v17 failed: {e}", exc_info=True)
+        return False
+
+
+def _migration_v18_company_scoped_unique_constraints(conn) -> bool:
+    """Converts unique constraints that predate multi-company support from
+    single-column (globally unique across every company) to composite
+    (company_id, column) - matching FBRConfiguration.environment /
+    ProductModel.model_name / Motorcycle.chassis_number|engine_number|vin's
+    __table_args__ declarations in models.py, which have said "composite"
+    for a while now.
+
+    Why this migration exists at all: on the machine this was first built
+    on, these composite indexes already existed in the live database from
+    unrelated prior work, so the model declarations above were simply
+    matching reality - no migration was ever needed THERE. But
+    verify_schema_integrity()'s self-heal only ever adds missing columns,
+    never touches indexes or constraints, so a database that was never
+    manually patched (e.g. a fresh checkout on another machine) keeps
+    whatever constraint it already had - typically a single-column UNIQUE
+    on environment/model_name/chassis_number/engine_number/vin left over
+    from before company_id existed at all. The result: saving a second
+    company's SANDBOX config, or importing inventory whose model name or
+    chassis number already exists under a different company, fails with a
+    duplicate-entry error - the exact "works on my machine" gap this
+    migration closes, by discovering and fixing whatever constraint is
+    actually there rather than assuming a name or prior state."""
+    is_sqlite = "sqlite" in str(engine.url)
+    if is_sqlite:
+        logger.info("SQLite: skipping composite-unique-constraint migration (dev-only backend, MySQL is the real target).")
+        return True
+
+    targets = [
+        ("fbr_configurations", "environment", "uq_company_environment"),
+        ("product_models", "model_name", "uq_company_model_name"),
+        ("motorcycles", "chassis_number", "uq_company_chassis_number"),
+        ("motorcycles", "engine_number", "uq_company_engine_number"),
+        ("motorcycles", "vin", "uq_company_vin"),
+    ]
+
+    try:
+        insp = inspect(engine)
+        for table, column, composite_name in targets:
+            existing_indexes = insp.get_indexes(table)
+
+            already_composite = any(
+                idx["unique"] and idx["column_names"] == ["company_id", column]
+                for idx in existing_indexes
+            )
+            if already_composite:
+                logger.info(f"{table}.{column}: composite unique index already present, skipping.")
+                continue
+
+            # Drop any UNIQUE index whose columns are exactly [column] alone
+            # (the pre-multi-company global constraint) - discovered by its
+            # actual reported column signature, not assumed by name, since
+            # different databases may have auto-named it differently.
+            for idx in existing_indexes:
+                if idx["unique"] and idx["column_names"] == [column]:
+                    logger.warning(f"Dropping legacy global-unique index '{idx['name']}' on {table}.{column}.")
+                    conn.execute(text(f"ALTER TABLE {table} DROP INDEX {idx['name']}"))
+
+            conn.execute(text(
+                f"ALTER TABLE {table} ADD UNIQUE INDEX {composite_name} (company_id, {column})"
+            ))
+            conn.commit()
+            logger.info(f"Created composite unique index {composite_name} on {table}(company_id, {column}).")
+        return True
+    except Exception as e:
+        logger.error(f"Migration v18 failed: {e}", exc_info=True)
         return False
 
 
