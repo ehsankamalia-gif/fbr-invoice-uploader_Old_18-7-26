@@ -423,9 +423,9 @@ class SettingsService:
         self.env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         load_dotenv(dotenv_path=self.env_path, override=True)
 
-    def save_environment(self, env: str, base_url: str, pos_id: str, usin: str, token: str, tax_rate: str, pct_code: str, 
+    def save_environment(self, env: str, base_url: str, pos_id: str, usin: str, token: str, tax_rate: str, pct_code: str,
                          invoice_type: str, discount: str, item_code: str, item_name: str, secret_key: str = "", business_name: str = "Ehsan Trader",
-                         pos_fee: str = "1.0"):
+                         pos_fee: str = "1.0", _retry: bool = False):
         env = env.upper()
         if env not in ("SANDBOX", "PRODUCTION"):
             raise ValueError("Environment must be SANDBOX or PRODUCTION")
@@ -468,6 +468,27 @@ class SettingsService:
             saved_to_db = True
         except SQLAlchemyError as e:
             db.rollback()
+            # Self-heal: a database that never got migration v18 applied -
+            # for any reason outside our control once this is deployed
+            # elsewhere (an earlier versioned migration failing first on
+            # that specific database, migration_history being in an
+            # unexpected state, etc.) - still has the pre-multi-company
+            # single-column UNIQUE(environment) constraint, so saving a
+            # second company's config collides here. Fix the constraint on
+            # the spot and retry once, rather than leaving the user stuck
+            # until a fresh migration run happens to succeed some other way.
+            if not _retry and "Duplicate entry" in str(e) and "environment" in str(e):
+                db.close()
+                from app.db.session import ensure_company_scoped_unique_constraint
+                if ensure_company_scoped_unique_constraint("fbr_configurations"):
+                    logger.warning("Legacy fbr_configurations constraint fixed on demand - retrying save.")
+                    return self.save_environment(
+                        env=env, base_url=base_url, pos_id=pos_id, usin=usin, token=token,
+                        tax_rate=tax_rate, pct_code=pct_code, invoice_type=invoice_type,
+                        discount=discount, item_code=item_code, item_name=item_name,
+                        secret_key=secret_key, business_name=business_name, pos_fee=pos_fee,
+                        _retry=True,
+                    )
             logger.error(f"DB persistence failed while saving FBR settings for {env}: {e}")
             raise RuntimeError(f"Failed to save {env} settings to the database: {e}") from e
         finally:

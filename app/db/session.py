@@ -878,44 +878,81 @@ def _migration_v18_company_scoped_unique_constraints(conn) -> bool:
         logger.info("SQLite: skipping composite-unique-constraint migration (dev-only backend, MySQL is the real target).")
         return True
 
-    targets = [
-        ("fbr_configurations", "environment", "uq_company_environment"),
-        ("product_models", "model_name", "uq_company_model_name"),
-        ("motorcycles", "chassis_number", "uq_company_chassis_number"),
-        ("motorcycles", "engine_number", "uq_company_engine_number"),
-        ("motorcycles", "vin", "uq_company_vin"),
-    ]
-
     try:
-        insp = inspect(engine)
-        for table, column, composite_name in targets:
-            existing_indexes = insp.get_indexes(table)
-
-            already_composite = any(
-                idx["unique"] and idx["column_names"] == ["company_id", column]
-                for idx in existing_indexes
-            )
-            if already_composite:
-                logger.info(f"{table}.{column}: composite unique index already present, skipping.")
-                continue
-
-            # Drop any UNIQUE index whose columns are exactly [column] alone
-            # (the pre-multi-company global constraint) - discovered by its
-            # actual reported column signature, not assumed by name, since
-            # different databases may have auto-named it differently.
-            for idx in existing_indexes:
-                if idx["unique"] and idx["column_names"] == [column]:
-                    logger.warning(f"Dropping legacy global-unique index '{idx['name']}' on {table}.{column}.")
-                    conn.execute(text(f"ALTER TABLE {table} DROP INDEX {idx['name']}"))
-
-            conn.execute(text(
-                f"ALTER TABLE {table} ADD UNIQUE INDEX {composite_name} (company_id, {column})"
-            ))
-            conn.commit()
-            logger.info(f"Created composite unique index {composite_name} on {table}(company_id, {column}).")
+        for table, column, composite_name in _COMPANY_SCOPED_UNIQUE_TARGETS:
+            _fix_single_column_unique_to_composite(conn, table, column, composite_name)
         return True
     except Exception as e:
         logger.error(f"Migration v18 failed: {e}", exc_info=True)
+        return False
+
+
+# Shared by _migration_v18_company_scoped_unique_constraints (the normal
+# startup path) and ensure_company_scoped_unique_constraint (the on-demand
+# fallback below, for when the startup path didn't reach a given table for
+# any reason - an earlier versioned migration failing first on that
+# specific database, migration_history being in an unexpected state, etc.
+# Both paths must fix the exact same set of constraints the same way).
+_COMPANY_SCOPED_UNIQUE_TARGETS = [
+    ("fbr_configurations", "environment", "uq_company_environment"),
+    ("product_models", "model_name", "uq_company_model_name"),
+    ("motorcycles", "chassis_number", "uq_company_chassis_number"),
+    ("motorcycles", "engine_number", "uq_company_engine_number"),
+    ("motorcycles", "vin", "uq_company_vin"),
+]
+
+
+def _fix_single_column_unique_to_composite(conn, table: str, column: str, composite_name: str) -> bool:
+    """Converts table's legacy single-column UNIQUE(column) constraint -
+    global across every company - to a composite UNIQUE(company_id,
+    column), whatever the existing index happens to be named on this
+    particular database. Idempotent: a no-op if the composite index
+    already exists. Returns True if it actually changed anything."""
+    insp = inspect(engine)
+    existing_indexes = insp.get_indexes(table)
+
+    already_composite = any(
+        idx["unique"] and idx["column_names"] == ["company_id", column]
+        for idx in existing_indexes
+    )
+    if already_composite:
+        logger.info(f"{table}.{column}: composite unique index already present, skipping.")
+        return False
+
+    # Drop any UNIQUE index whose columns are exactly [column] alone (the
+    # pre-multi-company global constraint) - discovered by its actual
+    # reported column signature, not assumed by name, since different
+    # databases may have auto-named it differently.
+    for idx in existing_indexes:
+        if idx["unique"] and idx["column_names"] == [column]:
+            logger.warning(f"Dropping legacy global-unique index '{idx['name']}' on {table}.{column}.")
+            conn.execute(text(f"ALTER TABLE {table} DROP INDEX {idx['name']}"))
+
+    conn.execute(text(f"ALTER TABLE {table} ADD UNIQUE INDEX {composite_name} (company_id, {column})"))
+    conn.commit()
+    logger.info(f"Created composite unique index {composite_name} on {table}(company_id, {column}).")
+    return True
+
+
+def ensure_company_scoped_unique_constraint(table: str) -> bool:
+    """On-demand version of migration v18's fix, for exactly one table -
+    callable from anywhere (e.g. settings_service.save_environment's
+    just-in-time self-heal) as a fallback for when the normal startup
+    migration path didn't reach this table on this particular database,
+    for whatever reason. Safe to call anytime: idempotent, and a no-op on
+    SQLite or if the composite constraint is already correct. Returns True
+    if it changed anything (i.e. the caller's failed operation is now
+    worth retrying)."""
+    if "sqlite" in str(engine.url):
+        return False
+    target = next((t for t in _COMPANY_SCOPED_UNIQUE_TARGETS if t[0] == table), None)
+    if not target:
+        return False
+    try:
+        with engine.begin() as conn:
+            return _fix_single_column_unique_to_composite(conn, *target)
+    except Exception as e:
+        logger.error(f"On-demand constraint fix for {table} failed: {e}", exc_info=True)
         return False
 
 
