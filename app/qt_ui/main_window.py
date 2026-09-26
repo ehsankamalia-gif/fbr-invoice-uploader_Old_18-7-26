@@ -6328,8 +6328,20 @@ class MainWindow(QMainWindow):
         delete_btn.setStyleSheet("background-color: #e74c3c; color: white; border: none; font-weight: bold; padding: 10px 20px; border-radius: 8px;")
         delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         delete_btn.clicked.connect(self._on_delete_price_clicked)
-        
+
+        export_btn = QPushButton("⬇ Export to Excel")
+        export_btn.setStyleSheet("background-color: white; color: #2c3e50; border: 1px solid #dee2e6; font-weight: bold; padding: 10px 20px; border-radius: 8px;")
+        export_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        export_btn.clicked.connect(self._on_export_prices_clicked)
+
+        import_btn = QPushButton("⬆ Import from Excel")
+        import_btn.setStyleSheet("background-color: white; color: #2c3e50; border: 1px solid #dee2e6; font-weight: bold; padding: 10px 20px; border-radius: 8px;")
+        import_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        import_btn.clicked.connect(self._on_import_prices_clicked)
+
         action_bar.addStretch(1)
+        action_bar.addWidget(export_btn)
+        action_bar.addWidget(import_btn)
         action_bar.addWidget(add_btn)
         action_bar.addWidget(edit_btn)
         action_bar.addWidget(delete_btn)
@@ -6438,6 +6450,61 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "Error", f"Failed to delete record: {e}")
             finally:
                 db.close()
+
+    def _on_export_prices_clicked(self) -> None:
+        """Exports whatever is currently shown in the price table (respects
+        the active search filter) to an .xlsx file."""
+        from PyQt6.QtWidgets import QFileDialog
+        from openpyxl import Workbook
+
+        rows = self.prices_table_model._rows
+        if not rows:
+            QMessageBox.warning(self, "Nothing to Export", "There are no prices to export.")
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(self, "Export Prices", "prices.xlsx", "Excel Files (*.xlsx)")
+        if not file_path:
+            return
+
+        try:
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Prices"
+            ws.append(["Model Name", "Color", "Base Price", "Sales Tax", "Further Tax", "Total Price", "Effective Date"])
+            for r in rows:
+                ws.append([
+                    r.model, r.color, r.base_price, r.tax, r.levy, r.total,
+                    r.effective_date.strftime("%Y-%m-%d") if r.effective_date else "",
+                ])
+            wb.save(file_path)
+            self._show_success("Export Complete", f"Exported {len(rows)} price(s) to:\n{file_path}")
+        except Exception as e:
+            logger.error(f"Failed to export prices: {e}", exc_info=True)
+            self._show_error("Export Error", f"Failed to export prices: {e}")
+
+    def _on_import_prices_clicked(self) -> None:
+        from PyQt6.QtWidgets import QFileDialog
+
+        file_path, _ = QFileDialog.getOpenFileName(self, "Import Prices", "", "Excel Files (*.xlsx *.xls *.xlsm)")
+        if not file_path:
+            return
+
+        try:
+            from app.services.excel_service import parse_recipients
+            raw_rows, headers = parse_recipients(file_path)
+        except Exception as e:
+            logger.error(f"Failed to read Excel file for price import: {e}", exc_info=True)
+            self._show_error("Read Error", f"Could not read the Excel file:\n{e}")
+            return
+
+        if not raw_rows:
+            QMessageBox.warning(self, "Empty File", "No data rows were found in that file.")
+            return
+
+        parsed_rows = price_service.parse_import_rows(raw_rows)
+        dialog = PriceImportPreviewDialog(parsed_rows, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._reload_prices()
 
     def _open_price_dialog(self, row_data: PriceRow | None = None) -> None:
         db = SessionLocal()
@@ -6923,12 +6990,22 @@ class MainWindow(QMainWindow):
                 if cap.model:
                     model_idx = self.invoice_model_combo.findText(cap.model, Qt.MatchFlag.MatchContains)
                     logger.info(f"DEBUG [cap model] model='{cap.model}', model_idx={model_idx}, combo_values={[self.invoice_model_combo.itemText(i) for i in range(self.invoice_model_combo.count())]}")
+                    if model_idx < 0:
+                        # The model dropdown only lists models that currently
+                        # have a configured price (see _load_invoice_models) -
+                        # a model with no price yet still needs to be
+                        # reflected/selectable here, not silently skipped.
+                        self.invoice_model_combo.addItem(cap.model)
+                        model_idx = self.invoice_model_combo.findText(cap.model, Qt.MatchFlag.MatchContains)
                     if model_idx >= 0:
                         self.invoice_model_combo.setCurrentIndex(model_idx)
-                
+
                 if cap.color:
                     color_idx = self.invoice_color_combo.findText(cap.color, Qt.MatchFlag.MatchContains)
                     logger.info(f"DEBUG [cap color] color='{cap.color}', color_idx={color_idx}")
+                    if color_idx < 0:
+                        self.invoice_color_combo.addItem(cap.color)
+                        color_idx = self.invoice_color_combo.findText(cap.color, Qt.MatchFlag.MatchContains)
                     if color_idx >= 0:
                         self.invoice_color_combo.setCurrentIndex(color_idx)
 
@@ -6944,12 +7021,23 @@ class MainWindow(QMainWindow):
                     self.invoice_engine_input.setText(bike.engine_number)
                 
                 if bike.product_model:
-                    model_idx = self.invoice_model_combo.findText(bike.product_model.model_name)
+                    model_name = bike.product_model.model_name
+                    model_idx = self.invoice_model_combo.findText(model_name)
+                    if model_idx < 0:
+                        # Same reasoning as the CapturedData branch above:
+                        # the dropdown only lists priced models, but this
+                        # specific physical motorcycle's own recorded model
+                        # must still be reflected here regardless.
+                        self.invoice_model_combo.addItem(model_name)
+                        model_idx = self.invoice_model_combo.findText(model_name)
                     if model_idx >= 0:
                         self.invoice_model_combo.setCurrentIndex(model_idx)
-                
+
                 if bike.color:
                     color_idx = self.invoice_color_combo.findText(bike.color)
+                    if color_idx < 0:
+                        self.invoice_color_combo.addItem(bike.color)
+                        color_idx = self.invoice_color_combo.findText(bike.color)
                     if color_idx >= 0:
                         self.invoice_color_combo.setCurrentIndex(color_idx)
                 
@@ -12167,6 +12255,80 @@ class PricesTableModel(QAbstractTableModel):
         self.beginResetModel()
         self._rows = rows
         self.endResetModel()
+
+
+class PriceImportPreviewDialog(QDialog):
+    """Shows every row parsed from the chosen Excel file before anything is
+    written to the database - rows that fail validation (missing model,
+    non-numeric/negative price, etc.) are shown greyed out with the reason,
+    and excluded from the count of what will actually be imported. Only the
+    rows that pass are committed via price_service.import_prices, which
+    reuses the exact same add_price() path (and active-company stamping)
+    as manually entering a price."""
+    def __init__(self, parsed_rows: list, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Import Prices - Preview")
+        self.setMinimumSize(700, 500)
+        self._parsed_rows = parsed_rows
+        self._init_ui()
+
+    def _init_ui(self):
+        layout = QVBoxLayout(self)
+
+        valid_count = sum(1 for r in self._parsed_rows if not r["error"])
+        invalid_count = len(self._parsed_rows) - valid_count
+        summary = QLabel(
+            f"{len(self._parsed_rows)} row(s) found in file - "
+            f"{valid_count} ready to import, {invalid_count} will be skipped (see reasons below)."
+        )
+        summary.setWordWrap(True)
+        summary.setStyleSheet("font-weight: bold; padding: 8px;")
+        layout.addWidget(summary)
+
+        table = QTableWidget()
+        headers = ["Model", "Color", "Base Price", "Tax", "Levy", "Total", "Status"]
+        table.setColumnCount(len(headers))
+        table.setHorizontalHeaderLabels(headers)
+        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        table.setRowCount(len(self._parsed_rows))
+        for row, rec in enumerate(self._parsed_rows):
+            values = [
+                rec["model"] or "", rec["color"] or "",
+                "" if rec["base_price"] is None else rec["base_price"],
+                "" if rec["tax"] is None else rec["tax"],
+                "" if rec["levy"] is None else rec["levy"],
+                "" if rec["total"] is None else rec["total"],
+                rec["error"] or "OK",
+            ]
+            for col, value in enumerate(values):
+                item = QTableWidgetItem(str(value))
+                if rec["error"]:
+                    item.setForeground(Qt.GlobalColor.gray)
+                table.setItem(row, col, item)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(table)
+
+        button_row = QHBoxLayout()
+        button_row.addStretch(1)
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        button_row.addWidget(cancel_btn)
+
+        self.import_btn = QPushButton(f"Import {valid_count} Valid Row(s)")
+        self.import_btn.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; padding: 8px 20px; border-radius: 4px;")
+        self.import_btn.setEnabled(valid_count > 0)
+        self.import_btn.clicked.connect(self._on_import)
+        button_row.addWidget(self.import_btn)
+        layout.addLayout(button_row)
+
+    def _on_import(self):
+        result = price_service.import_prices(self._parsed_rows)
+        message = f"Imported {result['imported']} price(s)."
+        if result["failed"]:
+            message += f"\n\n{len(result['failed'])} failed during import:\n" + "\n".join(result["failed"][:20])
+        QMessageBox.information(self, "Import Complete", message)
+        self.accept()
 
 
 class SpareLedgerTableModel(QAbstractTableModel):

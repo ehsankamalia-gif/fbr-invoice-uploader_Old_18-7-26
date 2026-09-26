@@ -2076,11 +2076,19 @@ class CompanyManagementDialog(BaseSettingsDialog):
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
         self.content_layout.addWidget(self.table)
 
+        bottom_actions = QHBoxLayout()
         self.activate_btn = QPushButton("Set Active")
         self.activate_btn.setStyleSheet("background-color: #27ae60; color: white; padding: 8px; font-weight: bold; border-radius: 4px;")
         self.activate_btn.setEnabled(False)
         self.activate_btn.clicked.connect(self._on_activate_company)
-        self.content_layout.addWidget(self.activate_btn)
+        bottom_actions.addWidget(self.activate_btn)
+
+        self.transfer_records_btn = QPushButton("Transfer Records...")
+        self.transfer_records_btn.setStyleSheet("background-color: #8e44ad; color: white; padding: 8px; font-weight: bold; border-radius: 4px;")
+        self.transfer_records_btn.setToolTip("Move a specific customer or never-sold motorcycle from one company to another.")
+        self.transfer_records_btn.clicked.connect(self._on_open_transfer_records)
+        bottom_actions.addWidget(self.transfer_records_btn)
+        self.content_layout.addLayout(bottom_actions)
 
         # This dialog saves each change immediately (Add/Update/Set Active),
         # so the bottom bar is just a Close button, matching AddressShortcodeDialog.
@@ -2179,3 +2187,182 @@ class CompanyManagementDialog(BaseSettingsDialog):
             self._load_data()
         except Exception as e:
             self._show_error("Error", f"Failed to set active company: {e}")
+
+    def _on_open_transfer_records(self):
+        dialog = TransferRecordsDialog(self)
+        dialog.exec()
+
+
+class TransferRecordsDialog(BaseSettingsDialog):
+    """Moves a single already-created customer or never-sold motorcycle
+    from one company to another - for fixing records created under the
+    wrong company (e.g. during testing or a web import done while the
+    wrong company was active). Only records with zero dependent rows in
+    other company-scoped tables are offered, so a transfer can never
+    orphan invoice/ledger history in the source company - see
+    settings_service.list_transferable_*/transfer_* for the exact rules."""
+    def __init__(self, parent=None):
+        super().__init__("Transfer Records Between Companies", parent)
+        self.setMinimumWidth(760)
+        self.setMinimumHeight(560)
+        self._records = []
+        self._init_ui()
+        self._reload_companies()
+
+    def _init_ui(self):
+        top_row = QGridLayout()
+        top_row.setSpacing(12)
+
+        top_row.addWidget(QLabel("Record Type:"), 0, 0)
+        self.type_combo = QComboBox()
+        self.type_combo.addItem("Motorcycles (Inventory)", "motorcycle")
+        self.type_combo.addItem("Customers", "customer")
+        self.type_combo.currentIndexChanged.connect(self._reload_records)
+        top_row.addWidget(self.type_combo, 0, 1)
+
+        top_row.addWidget(QLabel("From Company:"), 1, 0)
+        self.source_combo = QComboBox()
+        self.source_combo.currentIndexChanged.connect(self._reload_records)
+        top_row.addWidget(self.source_combo, 1, 1)
+
+        top_row.addWidget(QLabel("To Company:"), 2, 0)
+        self.target_combo = QComboBox()
+        top_row.addWidget(self.target_combo, 2, 1)
+
+        self.content_layout.addLayout(top_row)
+
+        self.hint_label = QLabel("")
+        self.hint_label.setWordWrap(True)
+        self.hint_label.setStyleSheet("color:#7f8c8d; font-size:12px; font-weight:normal; margin-top:4px;")
+        self.content_layout.addWidget(self.hint_label)
+
+        self.table = QTableWidget()
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.content_layout.addWidget(self.table)
+
+        self.transfer_btn = QPushButton("Transfer Selected")
+        self.transfer_btn.setStyleSheet("background-color: #8e44ad; color: white; padding: 10px; font-weight: bold; border-radius: 4px;")
+        self.transfer_btn.clicked.connect(self._on_transfer_selected)
+        self.content_layout.addWidget(self.transfer_btn)
+
+        self.save_btn.setText("Close")
+        self.save_btn.clicked.disconnect()
+        self.save_btn.clicked.connect(self.accept)
+
+    def _reload_companies(self):
+        companies = settings_service.list_companies()
+        self._companies = companies
+        for combo in (self.source_combo, self.target_combo):
+            combo.blockSignals(True)
+            combo.clear()
+            for c in companies:
+                combo.addItem(c["name"], c["id"])
+            combo.blockSignals(False)
+        self._reload_records()
+
+    def _current_record_type(self) -> str:
+        return self.type_combo.currentData()
+
+    def _reload_records(self):
+        source_id = self.source_combo.currentData()
+        if source_id is None:
+            self.table.setRowCount(0)
+            self.table.setColumnCount(0)
+            self._records = []
+            return
+
+        record_type = self._current_record_type()
+        if record_type == "motorcycle":
+            self._records = settings_service.list_transferable_motorcycles(source_id)
+            headers = ["Chassis Number", "Engine Number", "Model", "Color", "Status", "Transferable?"]
+            self.table.setColumnCount(len(headers))
+            self.table.setHorizontalHeaderLabels(headers)
+            self.table.setRowCount(0)
+            for rec in self._records:
+                row = self.table.rowCount()
+                self.table.insertRow(row)
+                self.table.setItem(row, 0, QTableWidgetItem(rec["chassis_number"]))
+                self.table.setItem(row, 1, QTableWidgetItem(rec["engine_number"] or ""))
+                self.table.setItem(row, 2, QTableWidgetItem(rec["model"] or ""))
+                self.table.setItem(row, 3, QTableWidgetItem(rec["color"] or ""))
+                self.table.setItem(row, 4, QTableWidgetItem(rec["status"]))
+                self.table.setItem(row, 5, QTableWidgetItem("Yes" if rec["transferable"] else "No - already sold"))
+                if not rec["transferable"]:
+                    for col in range(len(headers)):
+                        item = self.table.item(row, col)
+                        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable & ~Qt.ItemFlag.ItemIsEnabled)
+        else:
+            self._records = settings_service.list_transferable_customers(source_id)
+            headers = ["Name", "CNIC", "Phone", "Type", "Transferable?"]
+            self.table.setColumnCount(len(headers))
+            self.table.setHorizontalHeaderLabels(headers)
+            self.table.setRowCount(0)
+            for rec in self._records:
+                row = self.table.rowCount()
+                self.table.insertRow(row)
+                self.table.setItem(row, 0, QTableWidgetItem(rec["name"]))
+                self.table.setItem(row, 1, QTableWidgetItem(rec["cnic"] or ""))
+                self.table.setItem(row, 2, QTableWidgetItem(rec["phone"] or ""))
+                self.table.setItem(row, 3, QTableWidgetItem(rec["type"]))
+                self.table.setItem(row, 4, QTableWidgetItem("Yes" if rec["transferable"] else "No - has invoice/ledger history"))
+                if not rec["transferable"]:
+                    for col in range(len(headers)):
+                        item = self.table.item(row, col)
+                        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable & ~Qt.ItemFlag.ItemIsEnabled)
+
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        total = len(self._records)
+        transferable = sum(1 for r in self._records if r["transferable"])
+        self.hint_label.setText(
+            f"{transferable} of {total} record(s) are eligible to transfer. "
+            "Records already tied to an invoice, credit sale, or ledger entry are locked "
+            "(greyed out) to avoid breaking that history - move those manually if needed."
+        )
+
+    def _on_transfer_selected(self):
+        source_id = self.source_combo.currentData()
+        target_id = self.target_combo.currentData()
+        if source_id is None or target_id is None:
+            return
+        if source_id == target_id:
+            self._show_error("Invalid Selection", "Source and target company must be different.")
+            return
+
+        selected_rows = sorted({idx.row() for idx in self.table.selectedIndexes()})
+        if not selected_rows:
+            self._show_error("Nothing Selected", "Select at least one transferable record first.")
+            return
+
+        record_type = self._current_record_type()
+        target_name = self.target_combo.currentText()
+        if QMessageBox.question(
+            self, "Confirm Transfer",
+            f"Move {len(selected_rows)} {'motorcycle(s)' if record_type == 'motorcycle' else 'customer(s)'} "
+            f"to \"{target_name}\"? This cannot be undone from this dialog."
+        ) != QMessageBox.StandardButton.Yes:
+            return
+
+        succeeded, failed = 0, []
+        for row in selected_rows:
+            rec = self._records[row]
+            if not rec["transferable"]:
+                continue
+            try:
+                if record_type == "motorcycle":
+                    settings_service.transfer_motorcycle(rec["id"], target_id)
+                else:
+                    settings_service.transfer_customer(rec["id"], target_id)
+                succeeded += 1
+            except Exception as e:
+                failed.append(f"{rec.get('chassis_number') or rec.get('name')}: {e}")
+
+        self._reload_records()
+        if failed:
+            self._show_error(
+                "Some Transfers Failed",
+                f"Transferred {succeeded} record(s). {len(failed)} failed:\n\n" + "\n".join(failed),
+            )
+        else:
+            self._show_success("Transfer Complete", f"Successfully transferred {succeeded} record(s) to \"{target_name}\".")

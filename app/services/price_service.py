@@ -314,6 +314,114 @@ class PriceService:
             if close_db:
                 db.close()
 
+    # Column-header aliases accepted on import, matched case/space/punctuation
+    # -insensitively (see _normalize_header) so a sheet exported by this same
+    # feature, or a reasonably-named hand-made one, both work without the
+    # user needing to match column names exactly.
+    _IMPORT_HEADER_ALIASES = {
+        "model": "model",
+        "modelname": "model",
+        "color": "color",
+        "colour": "color",
+        "baseprice": "base_price",
+        "basepriceexcltax": "base_price",
+        "price": "base_price",
+        "salestax": "tax",
+        "taxamount": "tax",
+        "tax": "tax",
+        "furthertax": "levy",
+        "levyamount": "levy",
+        "levy": "levy",
+        "totalprice": "total",
+        "totalpriceincltax": "total",
+        "total": "total",
+    }
+
+    @staticmethod
+    def _normalize_header(raw: Any) -> str:
+        return re.sub(r"[^a-z0-9]", "", str(raw or "").strip().lower())
+
+    def parse_import_rows(self, raw_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Normalizes raw {header: value} dicts (as read from an Excel sheet
+        - see app/services/excel_service.py's header/row shape) into
+        validated {model, color, base_price, tax, levy, total, error} dicts,
+        one per input row. Never raises - validation failures are reported
+        per-row via the 'error' key instead, so the caller can show a full
+        preview (including bad rows) before committing anything."""
+        parsed = []
+        for raw_row in raw_rows:
+            normalized = {}
+            for key, value in raw_row.items():
+                mapped = self._IMPORT_HEADER_ALIASES.get(self._normalize_header(key))
+                if mapped:
+                    normalized[mapped] = value
+
+            model = str(normalized.get("model") or "").strip()
+            color = str(normalized.get("color") or "").strip().upper()
+            error = None
+
+            def _to_float(key: str, default: Optional[float] = None) -> Optional[float]:
+                value = normalized.get(key)
+                if value is None or str(value).strip() == "":
+                    return default
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    raise ValueError(f"'{key}' is not a valid number: {value!r}")
+
+            base_price = tax = levy = total = None
+            try:
+                if not model:
+                    raise ValueError("Model name is required.")
+                base_price = _to_float("base_price")
+                if base_price is None:
+                    raise ValueError("Base Price is required.")
+                tax = _to_float("tax", 0.0)
+                levy = _to_float("levy", 0.0)
+                total = _to_float("total")
+                if total is None:
+                    total = round(base_price + tax + levy, 2)
+                if base_price < 0 or tax < 0 or levy < 0 or total < 0:
+                    raise ValueError("Prices cannot be negative.")
+            except ValueError as e:
+                error = str(e)
+
+            parsed.append({
+                "model": model, "color": color, "base_price": base_price,
+                "tax": tax, "levy": levy, "total": total, "error": error,
+            })
+        return parsed
+
+    def import_prices(self, parsed_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Commits the valid (error-free) rows from parse_import_rows via
+        add_price (so find-or-create ProductModel, active-company stamping,
+        and expiring the prior price all happen exactly as they do for a
+        manually-entered price). Returns a summary; never raises - each
+        row's own failure is collected instead of aborting the whole batch."""
+        imported, failed = 0, []
+        db = self.get_db()
+        try:
+            for row in parsed_rows:
+                if row.get("error"):
+                    failed.append(f"{row.get('model') or '(blank model)'}: {row['error']}")
+                    continue
+                try:
+                    self.add_price(
+                        model=row["model"],
+                        base_price=row["base_price"],
+                        tax=row["tax"],
+                        levy=row["levy"],
+                        total=row["total"],
+                        optional_features={"colors": row["color"]} if row["color"] else {},
+                        db=db,
+                    )
+                    imported += 1
+                except Exception as e:
+                    failed.append(f"{row['model']}: {e}")
+        finally:
+            db.close()
+        return {"imported": imported, "failed": failed}
+
     def bulk_import_from_json(self, json_data: List[Dict], force: bool = False):
         """Import initial data from JSON. By default, skips if DB is not empty."""
         db = self.get_db()

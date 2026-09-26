@@ -82,10 +82,20 @@ class Customer(Base):
 
 class ProductModel(Base):
     __tablename__ = "product_models"
+    __table_args__ = (
+        # Per-company, not globally unique - real Honda model names like
+        # "CG125S" are shared vocabulary across every dealer, so multiple
+        # companies each need their own row for the same model name.
+        # Matches the DB's real uq_company_model_name index; a plain
+        # unique=True on model_name would be wrong now that company_id
+        # exists and could make the schema self-healer attempt an
+        # incompatible constraint.
+        Index('uq_company_model_name', 'company_id', 'model_name', unique=True),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
-    model_name = Column(String(50), unique=True, index=True, nullable=False)
+    model_name = Column(String(50), nullable=False)
     make = Column(String(50), default="Honda")
     engine_capacity = Column(String(20), nullable=True)
 
@@ -230,16 +240,24 @@ class CapturedData(Base):
 
 class Motorcycle(Base):
     __tablename__ = "motorcycles"
+    __table_args__ = (
+        # Per-company, not globally unique - each company's inventory is
+        # meant to be fully independent (see ProductModel.model_name for
+        # the same reasoning). Matches the DB's real uq_company_* indexes.
+        Index('uq_company_chassis_number', 'company_id', 'chassis_number', unique=True),
+        Index('uq_company_engine_number', 'company_id', 'engine_number', unique=True),
+        Index('uq_company_vin', 'company_id', 'vin', unique=True),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
 
     product_model_id = Column(Integer, ForeignKey("product_models.id"), nullable=False)
     product_model = relationship("ProductModel", back_populates="motorcycles")
-    
-    vin = Column(String(50), unique=True, index=True, nullable=True)
-    chassis_number = Column(String(50), unique=True, index=True, nullable=False)
-    engine_number = Column(String(50), unique=True, index=True, nullable=False)
+
+    vin = Column(String(50), nullable=True)
+    chassis_number = Column(String(50), nullable=False)
+    engine_number = Column(String(50), nullable=False)
     
     year = Column(Integer, nullable=False)
     color = Column(String(30), nullable=True)

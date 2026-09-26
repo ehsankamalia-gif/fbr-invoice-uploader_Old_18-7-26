@@ -2,7 +2,7 @@ import os
 import re
 from pathlib import Path
 from dotenv import load_dotenv
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import inspect, text
 from app.db.session import SessionLocal, engine
 from app.db.models import FBRConfiguration, AppConfiguration, Company
@@ -751,6 +751,255 @@ class SettingsService:
             "revision": revision,
             "ts": time.time(),
         })
+
+    # --- Cross-company record transfer ---------------------------------
+    # Lets an admin move a specific, already-created record (e.g. inventory
+    # or a customer imported under the wrong company) to a different
+    # company after the fact. Every query here explicitly passes
+    # skip_company_filter=True since, by design, this tool must be able to
+    # browse and act on ANY company's data regardless of which one is
+    # currently active - that escape hatch is otherwise reserved for
+    # resolving the active company itself (see app/db/company_scope.py).
+    #
+    # Only records with zero dependent rows in other company-scoped tables
+    # are exposed as transferable: moving a sold motorcycle or a customer
+    # with invoice/ledger history would either leave those dependents
+    # behind (orphaned, silently invisible under the new company) or drag
+    # along unrelated history alongside them. Rather than build a full
+    # cascading multi-table move (high risk, easy to get subtly wrong),
+    # this keeps the operation to units that can move cleanly on their own.
+
+    def list_transferable_motorcycles(self, company_id: int) -> list:
+        """Motorcycles in `company_id`, each flagged with whether it's safe
+        to transfer (zero InvoiceItem/CreditSaleItem references - i.e.
+        never sold)."""
+        from app.db.models import Motorcycle, InvoiceItem, CreditSaleItem
+        db = SessionLocal()
+        try:
+            motos = (
+                db.query(Motorcycle)
+                .filter_by(company_id=company_id)
+                # joinedload keeps the ProductModel fetch inside this SAME
+                # statement/execution, so it inherits skip_company_filter
+                # too - a separate lazy-load later would NOT, and would get
+                # filtered by whichever company happens to be active rather
+                # than the row's own company, silently blanking out .model
+                # whenever browsing a company other than the active one.
+                .options(joinedload(Motorcycle.product_model))
+                .execution_options(skip_company_filter=True)
+                .order_by(Motorcycle.chassis_number)
+                .all()
+            )
+            result = []
+            for m in motos:
+                has_invoice_item = (
+                    db.query(InvoiceItem.id)
+                    .filter_by(motorcycle_id=m.id)
+                    .execution_options(skip_company_filter=True)
+                    .first()
+                    is not None
+                )
+                has_credit_item = (
+                    db.query(CreditSaleItem.id)
+                    .filter_by(chassis_number=m.chassis_number)
+                    .execution_options(skip_company_filter=True)
+                    .first()
+                    is not None
+                )
+                result.append({
+                    "id": m.id,
+                    "chassis_number": m.chassis_number,
+                    "engine_number": m.engine_number,
+                    "model": m.model,
+                    "color": m.color,
+                    "status": m.status,
+                    "transferable": not (has_invoice_item or has_credit_item),
+                })
+            return result
+        finally:
+            db.close()
+
+    def list_transferable_customers(self, company_id: int) -> list:
+        """Customers in `company_id`, each flagged with whether it's safe
+        to transfer (zero Invoice/CreditSale/CreditPayment/BuyerLedger/
+        FinanceCreditSale/FinanceInstallment references)."""
+        from app.db.models import (
+            Customer, Invoice, CreditSale, CreditPayment, BuyerLedger,
+            FinanceCreditSale, FinanceInstallment,
+        )
+        db = SessionLocal()
+        try:
+            customers = (
+                db.query(Customer)
+                .filter_by(company_id=company_id)
+                .execution_options(skip_company_filter=True)
+                .order_by(Customer.name)
+                .all()
+            )
+            dependent_checks = (
+                (Invoice, "customer_id"),
+                (CreditSale, "buyer_id"),
+                (CreditPayment, "buyer_id"),
+                (BuyerLedger, "buyer_id"),
+                (FinanceCreditSale, "customer_id"),
+                (FinanceInstallment, "customer_id"),
+            )
+            result = []
+            for c in customers:
+                has_dependent = False
+                for model, fk_field in dependent_checks:
+                    exists = (
+                        db.query(model.id)
+                        .filter_by(**{fk_field: c.id})
+                        .execution_options(skip_company_filter=True)
+                        .first()
+                        is not None
+                    )
+                    if exists:
+                        has_dependent = True
+                        break
+                result.append({
+                    "id": c.id,
+                    "name": c.name,
+                    "cnic": c.cnic,
+                    "phone": c.phone,
+                    "type": c.type,
+                    "transferable": not has_dependent,
+                })
+            return result
+        finally:
+            db.close()
+
+    def transfer_motorcycle(self, motorcycle_id: int, target_company_id: int) -> None:
+        """Moves a single, never-sold motorcycle to another company,
+        auto-creating a matching ProductModel row in the target company if
+        one doesn't already exist there (each company has its own model
+        catalog - see ProductModel.model_name). Re-validates eligibility
+        at commit time, not just whatever the UI last displayed."""
+        from app.db.models import Motorcycle, InvoiceItem, CreditSaleItem, ProductModel
+        db = SessionLocal()
+        try:
+            moto = (
+                db.query(Motorcycle)
+                .filter_by(id=motorcycle_id)
+                .execution_options(skip_company_filter=True)
+                .first()
+            )
+            if not moto:
+                raise ValueError(f"Motorcycle {motorcycle_id} not found.")
+            if moto.company_id == target_company_id:
+                raise ValueError("Motorcycle is already assigned to that company.")
+
+            has_invoice_item = (
+                db.query(InvoiceItem.id)
+                .filter_by(motorcycle_id=moto.id)
+                .execution_options(skip_company_filter=True)
+                .first()
+                is not None
+            )
+            has_credit_item = (
+                db.query(CreditSaleItem.id)
+                .filter_by(chassis_number=moto.chassis_number)
+                .execution_options(skip_company_filter=True)
+                .first()
+                is not None
+            )
+            if has_invoice_item or has_credit_item:
+                raise ValueError(
+                    f"Motorcycle {moto.chassis_number} has already been sold/invoiced "
+                    "and cannot be transferred - moving it would break the existing invoice's records."
+                )
+
+            source_model = (
+                db.query(ProductModel)
+                .filter_by(id=moto.product_model_id)
+                .execution_options(skip_company_filter=True)
+                .first()
+            )
+            target_model = (
+                db.query(ProductModel)
+                .filter_by(company_id=target_company_id, model_name=source_model.model_name)
+                .execution_options(skip_company_filter=True)
+                .first()
+            )
+            if not target_model:
+                target_model = ProductModel(
+                    company_id=target_company_id,
+                    model_name=source_model.model_name,
+                    make=source_model.make,
+                    engine_capacity=source_model.engine_capacity,
+                    pct_code=source_model.pct_code,
+                    item_code=source_model.item_code,
+                )
+                db.add(target_model)
+                db.flush()
+
+            moto.company_id = target_company_id
+            moto.product_model_id = target_model.id
+            db.commit()
+            logger.info(f"Transferred motorcycle {moto.chassis_number} (id={motorcycle_id}) to company {target_company_id}.")
+        except SQLAlchemyError as e:
+            db.rollback()
+            logger.error(f"Failed to transfer motorcycle {motorcycle_id}: {e}")
+            raise
+        finally:
+            db.close()
+        self._invalidate_cache()
+        self._bump_revision()
+
+    def transfer_customer(self, customer_id: int, target_company_id: int) -> None:
+        """Moves a single customer with no invoice/sale/ledger history to
+        another company. Re-validates eligibility at commit time."""
+        from app.db.models import (
+            Customer, Invoice, CreditSale, CreditPayment, BuyerLedger,
+            FinanceCreditSale, FinanceInstallment,
+        )
+        db = SessionLocal()
+        try:
+            customer = (
+                db.query(Customer)
+                .filter_by(id=customer_id)
+                .execution_options(skip_company_filter=True)
+                .first()
+            )
+            if not customer:
+                raise ValueError(f"Customer {customer_id} not found.")
+            if customer.company_id == target_company_id:
+                raise ValueError("Customer is already assigned to that company.")
+
+            dependent_checks = (
+                (Invoice, "customer_id"),
+                (CreditSale, "buyer_id"),
+                (CreditPayment, "buyer_id"),
+                (BuyerLedger, "buyer_id"),
+                (FinanceCreditSale, "customer_id"),
+                (FinanceInstallment, "customer_id"),
+            )
+            for model, fk_field in dependent_checks:
+                exists = (
+                    db.query(model.id)
+                    .filter_by(**{fk_field: customer.id})
+                    .execution_options(skip_company_filter=True)
+                    .first()
+                    is not None
+                )
+                if exists:
+                    raise ValueError(
+                        f"Customer {customer.name} has existing {model.__tablename__} records "
+                        "and cannot be transferred - moving them would orphan that history."
+                    )
+
+            customer.company_id = target_company_id
+            db.commit()
+            logger.info(f"Transferred customer {customer.name} (id={customer_id}) to company {target_company_id}.")
+        except SQLAlchemyError as e:
+            db.rollback()
+            logger.error(f"Failed to transfer customer {customer_id}: {e}")
+            raise
+        finally:
+            db.close()
+        self._invalidate_cache()
+        self._bump_revision()
 
     def get_environment(self, env: str) -> dict:
         env = env.upper()
