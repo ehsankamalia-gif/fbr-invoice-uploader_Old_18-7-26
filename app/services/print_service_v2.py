@@ -1632,7 +1632,25 @@ class PrintServiceV2:
         let text_decoration = null;
         if (!isImg(el)) {{
           try {{
-            const cur = el.innerHTML || '';
+            // Read innerHTML from a clone with any live editor-only artifacts
+            // (resize handles) stripped out first. `el` itself may still
+            // have these as real DOM children at the moment this runs -
+            // e.g. endResizeDrag() calls persistEntry() immediately after a
+            // resize, before the handles are ever removed - so reading
+            // el.innerHTML directly here would permanently bake
+            // "<div class=resize-handle ...>" markup into the saved
+            // content. Once saved, it gets restored verbatim by
+            // applyEntryContent()'s `el.innerHTML = entry.html` on every
+            // future load, which is exactly why the handles kept
+            // reappearing after reopening the invoice, and even showed up
+            // in printed/exported output - they'd become part of the
+            // field's actual content, not a transient selection state.
+            const clone = el.cloneNode(true);
+            const staleHandles = clone.querySelectorAll('.resize-handle');
+            for (let i = 0; i < staleHandles.length; i++) {{
+              staleHandles[i].remove();
+            }}
+            const cur = clone.innerHTML || '';
             const orig = el.dataset.originalHtml || '';
             const hasRich = cur.indexOf('sub-hidden') >= 0 || cur.indexOf('sub-font') >= 0 || cur.indexOf('sub-bold') >= 0 || cur.indexOf('sub-italic') >= 0;
             if (hasRich || cur !== orig) html = cur;
@@ -2912,9 +2930,25 @@ class PrintServiceV2:
             logger.error(f"Dialog print failed: {e}", exc_info=True)
             QMessageBox.critical(parent, "Print Error", f"An error occurred while trying to print: {str(e)}")
 
+
+# Removes any in-progress template-editor selection artifacts (resize
+# handles, the dashed "selected" outline, the position HUD) from the live
+# DOM before it's rendered to PDF/print. QWebEnginePage.printToPdf() does
+# not reliably honor the page's own @media print CSS rules (which already
+# try to hide these) the same way an interactive print dialog does, so
+# without this, whatever field the user last clicked/resized in the
+# template editor could get baked into the actual printed invoice.
+_CLEAR_EDITOR_ARTIFACTS_JS = (
+    "document.querySelectorAll('.resize-handle').forEach(function(h){h.remove();});"
+    "document.querySelectorAll('.draggable.selected').forEach(function(el){el.classList.remove('selected');});"
+    "document.querySelectorAll('.dragging').forEach(function(el){el.classList.remove('dragging');});"
+    "var hud=document.querySelector('.pos-hud'); if(hud){hud.style.display='none';}"
+)
+
+
 class PrintPreviewDialog(QDialog):
     """Standalone dialog for document preview and printing."""
-    
+
     def __init__(self, html_content: str, title: str, parent=None):
         super().__init__(parent)
         self.setWindowTitle(title)
@@ -3129,89 +3163,104 @@ class PrintPreviewDialog(QDialog):
                     logger.error(f"Direct print failed: {exc}", exc_info=True)
                     fail(f"Printing failed: {exc}")
 
-            from tempfile import NamedTemporaryFile
-            tmp = NamedTemporaryFile(delete=False, suffix=".pdf")
-            tmp_path = tmp.name
-            tmp.close()
+            def _start_pdf_export(_js_result=None) -> None:
+                try:
+                    from tempfile import NamedTemporaryFile
+                    tmp = NamedTemporaryFile(delete=False, suffix=".pdf")
+                    tmp_path = tmp.name
+                    tmp.close()
 
-            try:
-                from PyQt6.QtGui import QPageLayout, QPageSize
-                from PyQt6.QtCore import QMarginsF
-
-                layout = QPageLayout(
-                    QPageSize(QPageSize.PageSizeId.A4),
-                    QPageLayout.Orientation.Portrait,
-                    QMarginsF(0, 0, 0, 0),
-                )
-            except Exception:
-                layout = None
-
-            finished_signal = getattr(page, "pdfPrintingFinished", None)
-            if hasattr(finished_signal, "connect"):
-                def _on_pdf_printing_finished(file_path: str, success: bool) -> None:
                     try:
-                        try:
-                            finished_signal.disconnect(_on_pdf_printing_finished)
-                        except Exception:
-                            pass
-                        if not success:
-                            fail("Failed to generate PDF for printing.")
+                        from PyQt6.QtGui import QPageLayout, QPageSize
+                        from PyQt6.QtCore import QMarginsF
+
+                        layout = QPageLayout(
+                            QPageSize(QPageSize.PageSizeId.A4),
+                            QPageLayout.Orientation.Portrait,
+                            QMarginsF(0, 0, 0, 0),
+                        )
+                    except Exception:
+                        layout = None
+
+                    finished_signal = getattr(page, "pdfPrintingFinished", None)
+                    if hasattr(finished_signal, "connect"):
+                        def _on_pdf_printing_finished(file_path: str, success: bool) -> None:
                             try:
-                                if os.path.exists(tmp_path):
-                                    os.unlink(tmp_path)
+                                try:
+                                    finished_signal.disconnect(_on_pdf_printing_finished)
+                                except Exception:
+                                    pass
+                                if not success:
+                                    fail("Failed to generate PDF for printing.")
+                                    try:
+                                        if os.path.exists(tmp_path):
+                                            os.unlink(tmp_path)
+                                    except Exception:
+                                        pass
+                                    return
+                                path_to_use = file_path or tmp_path
+                                print_pdf_file(path_to_use, delete_after=True)
+                            except Exception as exc:
+                                logger.error(f"PDF printing finished handler failed: {exc}", exc_info=True)
+                                fail(f"Printing failed: {exc}")
+
+                        finished_signal.connect(_on_pdf_printing_finished)
+                        try:
+                            if layout is not None:
+                                try:
+                                    page_print_to_pdf(tmp_path, layout)
+                                except TypeError:
+                                    page_print_to_pdf(layout, tmp_path)
+                            else:
+                                page_print_to_pdf(tmp_path)
+                        except Exception as exc:
+                            try:
+                                finished_signal.disconnect(_on_pdf_printing_finished)
                             except Exception:
                                 pass
-                            return
-                        path_to_use = file_path or tmp_path
-                        print_pdf_file(path_to_use, delete_after=True)
-                    except Exception as exc:
-                        logger.error(f"PDF printing finished handler failed: {exc}", exc_info=True)
-                        fail(f"Printing failed: {exc}")
+                            fail(f"Printing failed: {exc}")
+                        return
 
-                finished_signal.connect(_on_pdf_printing_finished)
-                try:
-                    if layout is not None:
+                    def on_pdf_ready(data) -> None:
                         try:
-                            page_print_to_pdf(tmp_path, layout)
-                        except TypeError:
-                            page_print_to_pdf(layout, tmp_path)
-                    else:
-                        page_print_to_pdf(tmp_path)
-                except Exception as exc:
-                    try:
-                        finished_signal.disconnect(_on_pdf_printing_finished)
-                    except Exception:
-                        pass
-                    fail(f"Printing failed: {exc}")
-                return
+                            raw = bytes(data) if data else b""
+                            if not raw:
+                                fail("Failed to generate PDF for printing.")
+                                return
+                            try:
+                                with open(tmp_path, "wb") as f:
+                                    f.write(raw)
+                            except Exception as exc:
+                                fail(f"Failed to generate PDF for printing: {exc}")
+                                return
+                            print_pdf_file(tmp_path, delete_after=True)
+                        except Exception as exc:
+                            logger.error(f"PDF callback print failed: {exc}", exc_info=True)
+                            fail(f"Printing failed: {exc}")
 
-            def on_pdf_ready(data) -> None:
-                try:
-                    raw = bytes(data) if data else b""
-                    if not raw:
-                        fail("Failed to generate PDF for printing.")
-                        return
                     try:
-                        with open(tmp_path, "wb") as f:
-                            f.write(raw)
+                        if layout is not None:
+                            try:
+                                page_print_to_pdf(on_pdf_ready, layout)
+                            except TypeError:
+                                page_print_to_pdf(layout, on_pdf_ready)
+                        else:
+                            page_print_to_pdf(on_pdf_ready)
                     except Exception as exc:
-                        fail(f"Failed to generate PDF for printing: {exc}")
-                        return
-                    print_pdf_file(tmp_path, delete_after=True)
+                        fail(f"Printing failed: {exc}")
                 except Exception as exc:
-                    logger.error(f"PDF callback print failed: {exc}", exc_info=True)
+                    logger.error(f"Print initialization failed: {exc}", exc_info=True)
                     fail(f"Printing failed: {exc}")
 
-            try:
-                if layout is not None:
-                    try:
-                        page_print_to_pdf(on_pdf_ready, layout)
-                    except TypeError:
-                        page_print_to_pdf(layout, on_pdf_ready)
-                else:
-                    page_print_to_pdf(on_pdf_ready)
-            except Exception as exc:
-                fail(f"Printing failed: {exc}")
+            # Strip any in-progress editor selection/resize-handles from the
+            # live DOM before rendering to PDF - printToPdf() does not
+            # reliably honor the page's @media print rules the way an
+            # interactive print dialog does, so without this fix, whatever
+            # field was last selected/resized in the editor (see the
+            # resize-handle JS earlier in this file) could get baked into
+            # the actual printed invoice. Runs as a callback (not fire-and-
+            # forget) so the DOM is guaranteed clean before export starts.
+            page.runJavaScript(_CLEAR_EDITOR_ARTIFACTS_JS, _start_pdf_export)
         except Exception as exc:
             logger.error(f"Print initialization failed: {exc}", exc_info=True)
             fail(f"Printing failed: {exc}")
@@ -3252,136 +3301,147 @@ class PrintPreviewDialog(QDialog):
                 fail("PDF export is not supported by this QtWebEngine build. Please install PyQt6-WebEngine properly.")
                 return
 
-            try:
-                from PyQt6.QtGui import QPageLayout, QPageSize
-                from PyQt6.QtCore import QMarginsF
-                layout = QPageLayout(
-                    QPageSize(QPageSize.PageSizeId.A4),
-                    QPageLayout.Orientation.Portrait,
-                    QMarginsF(0, 0, 0, 0),
-                )
-            except Exception:
-                layout = None
-
-            finished_signal = getattr(page, "pdfPrintingFinished", None)
-
-            def _write_to_target(pdf_bytes_or_path: Any, _is_path: bool) -> None:
+            def _start_pdf_export(_js_result=None) -> None:
                 try:
-                    if _is_path:
-                        src = str(pdf_bytes_or_path)
-                        if not os.path.exists(src):
-                            fail("PDF file was not created.")
-                            return
-                        import shutil
-                        if os.path.abspath(src) != os.path.abspath(target_path):
+                    try:
+                        from PyQt6.QtGui import QPageLayout, QPageSize
+                        from PyQt6.QtCore import QMarginsF
+                        layout = QPageLayout(
+                            QPageSize(QPageSize.PageSizeId.A4),
+                            QPageLayout.Orientation.Portrait,
+                            QMarginsF(0, 0, 0, 0),
+                        )
+                    except Exception:
+                        layout = None
+
+                    finished_signal = getattr(page, "pdfPrintingFinished", None)
+
+                    def _write_to_target(pdf_bytes_or_path: Any, _is_path: bool) -> None:
+                        try:
+                            if _is_path:
+                                src = str(pdf_bytes_or_path)
+                                if not os.path.exists(src):
+                                    fail("PDF file was not created.")
+                                    return
+                                import shutil
+                                if os.path.abspath(src) != os.path.abspath(target_path):
+                                    try:
+                                        shutil.copyfile(src, target_path)
+                                    finally:
+                                        try:
+                                            if os.path.exists(src):
+                                                os.unlink(src)
+                                        except Exception:
+                                            pass
+                                else:
+                                    # src already at target; nothing to do
+                                    pass
+                            else:
+                                raw = bytes(pdf_bytes_or_path) if pdf_bytes_or_path else b""
+                                if not raw:
+                                    fail("PDF generation produced empty output.")
+                                    return
+                                with open(target_path, "wb") as f:
+                                    f.write(raw)
+                            if os.path.exists(target_path):
+                                sz = os.path.getsize(target_path)
+                                logger.info(f"PDF saved: {target_path} ({sz} bytes)")
+                                self.download_pdf_btn.setEnabled(True)
+                                QMessageBox.information(
+                                    self,
+                                    "Download PDF",
+                                    f"PDF saved successfully:\n{target_path}\n\nSize: {sz:,} bytes",
+                                )
+                            else:
+                                fail("File was not written to the selected location.")
+                        except Exception as exc:
+                            logger.error(f"PDF save failed: {exc}", exc_info=True)
+                            fail(f"Failed to save PDF: {exc}")
+
+                    from tempfile import NamedTemporaryFile
+                    tmp = NamedTemporaryFile(delete=False, suffix=".pdf")
+                    tmp_path = tmp.name
+                    tmp.close()
+
+                    if hasattr(finished_signal, "connect"):
+                        def _on_pdf_printing_finished(file_path: str, success: bool) -> None:
                             try:
-                                shutil.copyfile(src, target_path)
-                            finally:
                                 try:
-                                    if os.path.exists(src):
-                                        os.unlink(src)
+                                    finished_signal.disconnect(_on_pdf_printing_finished)
                                 except Exception:
                                     pass
-                        else:
-                            # src already at target; nothing to do
-                            pass
-                    else:
-                        raw = bytes(pdf_bytes_or_path) if pdf_bytes_or_path else b""
-                        if not raw:
-                            fail("PDF generation produced empty output.")
-                            return
-                        with open(target_path, "wb") as f:
-                            f.write(raw)
-                    if os.path.exists(target_path):
-                        sz = os.path.getsize(target_path)
-                        logger.info(f"PDF saved: {target_path} ({sz} bytes)")
-                        self.download_pdf_btn.setEnabled(True)
-                        QMessageBox.information(
-                            self,
-                            "Download PDF",
-                            f"PDF saved successfully:\n{target_path}\n\nSize: {sz:,} bytes",
-                        )
-                    else:
-                        fail("File was not written to the selected location.")
-                except Exception as exc:
-                    logger.error(f"PDF save failed: {exc}", exc_info=True)
-                    fail(f"Failed to save PDF: {exc}")
-
-            from tempfile import NamedTemporaryFile
-            tmp = NamedTemporaryFile(delete=False, suffix=".pdf")
-            tmp_path = tmp.name
-            tmp.close()
-
-            if hasattr(finished_signal, "connect"):
-                def _on_pdf_printing_finished(file_path: str, success: bool) -> None:
-                    try:
+                                if not success:
+                                    try:
+                                        if os.path.exists(tmp_path):
+                                            os.unlink(tmp_path)
+                                    except Exception:
+                                        pass
+                                    fail("Failed to generate PDF.")
+                                    return
+                                actual_path = file_path or tmp_path
+                                _write_to_target(actual_path, True)
+                            except Exception as exc:
+                                logger.error(f"PDF download finished handler failed: {exc}", exc_info=True)
+                                fail(f"PDF download failed: {exc}")
+                        finished_signal.connect(_on_pdf_printing_finished)
                         try:
-                            finished_signal.disconnect(_on_pdf_printing_finished)
-                        except Exception:
-                            pass
-                        if not success:
+                            if layout is not None:
+                                try:
+                                    page_print_to_pdf(tmp_path, layout)
+                                except TypeError:
+                                    page_print_to_pdf(layout, tmp_path)
+                            else:
+                                page_print_to_pdf(tmp_path)
+                        except Exception as exc:
+                            try:
+                                finished_signal.disconnect(_on_pdf_printing_finished)
+                            except Exception:
+                                pass
                             try:
                                 if os.path.exists(tmp_path):
                                     os.unlink(tmp_path)
                             except Exception:
                                 pass
-                            fail("Failed to generate PDF.")
-                            return
-                        actual_path = file_path or tmp_path
-                        _write_to_target(actual_path, True)
-                    except Exception as exc:
-                        logger.error(f"PDF download finished handler failed: {exc}", exc_info=True)
-                        fail(f"PDF download failed: {exc}")
-                finished_signal.connect(_on_pdf_printing_finished)
-                try:
-                    if layout is not None:
+                            fail(f"PDF generation failed: {exc}")
+                        return
+
+                    def on_pdf_ready(data) -> None:
                         try:
-                            page_print_to_pdf(tmp_path, layout)
-                        except TypeError:
-                            page_print_to_pdf(layout, tmp_path)
-                    else:
-                        page_print_to_pdf(tmp_path)
-                except Exception as exc:
-                    try:
-                        finished_signal.disconnect(_on_pdf_printing_finished)
-                    except Exception:
-                        pass
-                    try:
-                        if os.path.exists(tmp_path):
-                            os.unlink(tmp_path)
-                    except Exception:
-                        pass
-                    fail(f"PDF generation failed: {exc}")
-                return
+                            _write_to_target(data, False)
+                        except Exception as exc:
+                            logger.error(f"PDF callback download failed: {exc}", exc_info=True)
+                            fail(f"Failed to generate PDF: {exc}")
+                        finally:
+                            try:
+                                if os.path.exists(tmp_path):
+                                    os.unlink(tmp_path)
+                            except Exception:
+                                pass
 
-            def on_pdf_ready(data) -> None:
-                try:
-                    _write_to_target(data, False)
+                    try:
+                        if layout is not None:
+                            try:
+                                page_print_to_pdf(on_pdf_ready, layout)
+                            except TypeError:
+                                page_print_to_pdf(layout, on_pdf_ready)
+                        else:
+                            page_print_to_pdf(on_pdf_ready)
+                    except Exception as exc:
+                        try:
+                            if os.path.exists(tmp_path):
+                                os.unlink(tmp_path)
+                        except Exception:
+                            pass
+                        fail(f"PDF generation failed: {exc}")
                 except Exception as exc:
-                    logger.error(f"PDF callback download failed: {exc}", exc_info=True)
-                    fail(f"Failed to generate PDF: {exc}")
-                finally:
-                    try:
-                        if os.path.exists(tmp_path):
-                            os.unlink(tmp_path)
-                    except Exception:
-                        pass
+                    logger.error(f"PDF download init failed: {exc}", exc_info=True)
+                    fail(f"Download failed: {exc}")
 
-            try:
-                if layout is not None:
-                    try:
-                        page_print_to_pdf(on_pdf_ready, layout)
-                    except TypeError:
-                        page_print_to_pdf(layout, on_pdf_ready)
-                else:
-                    page_print_to_pdf(on_pdf_ready)
-            except Exception as exc:
-                try:
-                    if os.path.exists(tmp_path):
-                        os.unlink(tmp_path)
-                except Exception:
-                    pass
-                fail(f"PDF generation failed: {exc}")
+            # See _handle_print's identical comment: printToPdf() doesn't
+            # reliably honor @media print, so the editor's live selection/
+            # resize-handles must be stripped from the DOM explicitly
+            # before exporting, not left to CSS alone.
+            page.runJavaScript(_CLEAR_EDITOR_ARTIFACTS_JS, _start_pdf_export)
         except Exception as exc:
             logger.error(f"PDF download init failed: {exc}", exc_info=True)
             fail(f"Download failed: {exc}")
