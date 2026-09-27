@@ -351,13 +351,21 @@ class PrintServiceV2:
         self.active_view: Optional[object] = None
 
     def _get_business_info(self) -> Dict[str, str]:
-        """Fetches current business configuration for template population."""
-        settings = settings_service.get_active_settings()
+        """Fetches the active company's profile for template population -
+        Company (name/address/phone/ntn) is the single source of truth for
+        company identity, so switching the active company changes what
+        prints on every invoice, ledger statement, and receipt
+        automatically. Previously this read from the FBR settings dict,
+        which only ever actually had a business_name field - address/
+        phone/ntn always silently fell back to hardcoded defaults, no
+        matter which company was active, since those keys never existed
+        there at all."""
+        company = settings_service.get_active_company() or {}
         return {
-            "business_name": settings.get("business_name", "Ehsan Trader"),
-            "business_address": settings.get("business_address", "Kamalia, Pakistan"),
-            "business_phone": settings.get("business_phone", "0302-8691288"),
-            "business_ntn": settings.get("business_ntn", "1234597-8")
+            "business_name": company.get("name") or "Ehsan Trader",
+            "business_address": company.get("address") or "Kamalia, Pakistan",
+            "business_phone": company.get("phone") or "0302-8691288",
+            "business_ntn": company.get("ntn") or "1234597-8",
         }
 
     def render_ledger_statement(self, ledger_data: Dict[str, Any]) -> str:
@@ -928,9 +936,9 @@ class PrintServiceV2:
         {fbr_pos_logo_html}
         {settings_logo_html}
 
-        <div id="businessName" class="field draggable" data-pos-key="business_name" data-default-left="2.40in" data-default-top="0.22in" style="left: 2.40in; top: 0.22in; font-size: {inv_fmt['business_name_size_pt']}pt; font-weight: {inv_fmt['business_name_weight']}; text-align: center; white-space: nowrap;">EHSAN TRADERS</div>
-        <div id="businessAddress" class="field draggable" data-pos-key="business_address" data-default-left="1.70in" data-default-top="0.52in" style="left: 1.70in; top: 0.52in; font-size: 10pt; font-weight: 600; text-align: center; white-space: nowrap;">NEAR BUS STAND RAJANA ROAD KAMALIA</div>
-        <div id="businessNtn" class="field draggable" data-pos-key="business_ntn" data-default-left="3.30in" data-default-top="0.78in" style="left: 3.30in; top: 0.78in; font-size: 10pt; font-weight: 700; text-align: center; white-space: nowrap;">NTN: 2755340</div>
+        <div id="businessName" class="field draggable" data-pos-key="business_name" data-default-left="2.40in" data-default-top="0.22in" style="left: 2.40in; top: 0.22in; font-size: {inv_fmt['business_name_size_pt']}pt; font-weight: {inv_fmt['business_name_weight']}; text-align: center; white-space: nowrap;">{esc(str(data.get('business_name') or '').upper())}</div>
+        <div id="businessAddress" class="field draggable" data-pos-key="business_address" data-default-left="1.70in" data-default-top="0.52in" style="left: 1.70in; top: 0.52in; font-size: 10pt; font-weight: 600; text-align: center; white-space: nowrap;">{esc(str(data.get('business_address') or '').upper())}</div>
+        <div id="businessNtn" class="field draggable" data-pos-key="business_ntn" data-default-left="3.30in" data-default-top="0.78in" style="left: 3.30in; top: 0.78in; font-size: 10pt; font-weight: 700; text-align: center; white-space: nowrap;">NTN: {esc(data.get('business_ntn') or '')}</div>
 
         <div id="lblDate" class="label draggable" data-pos-key="lbl_date" data-default-left="0.20in" data-default-top="1.05in" style="left: 0.20in; top: 1.05in;">Date:</div>
         <div id="invoiceDate" class="field mono draggable" data-pos-key="invoice_date" data-default-left="0.95in" data-default-top="1.05in" style="left: 0.95in; top: 1.05in;">{esc(date_str)}</div>
