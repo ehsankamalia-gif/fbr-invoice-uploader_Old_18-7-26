@@ -894,7 +894,8 @@ class MainWindow(QMainWindow):
         self._init_updater()
 
         self._init_ui()
-        
+        self._init_version_footer()
+
         self._settings_subscription_token = settings_service.subscribe(self._on_settings_event)
         self._active_fbr_settings_snapshot = settings_service.get_active_settings()
         self._last_settings_revision = settings_service.get_revision()
@@ -1045,17 +1046,18 @@ class MainWindow(QMainWindow):
         else:
             version_str = "1.0.0"
         
-        # Get Update URL from settings
-        version_url = config.settings.APP_UPDATE_URL
-        
-        # If URL is empty or explicitly set to placeholder, skip background update check
-        if not version_url or "your-server.com" in version_url:
-            logger.info("Update check skipped: No valid APP_UPDATE_URL configured.")
+        # Get the GitHub repo (and optional token, for a private repo) from settings
+        github_repo = config.settings.APP_UPDATE_GITHUB_REPO
+        github_token = config.settings.APP_UPDATE_GITHUB_TOKEN
+
+        if not github_repo:
+            logger.info("Update check skipped: No APP_UPDATE_GITHUB_REPO configured.")
             return
 
         self.updater_manager = UpdaterManager(
             current_version=version_str,
-            version_url=version_url,
+            repo=github_repo,
+            github_token=github_token or None,
             parent=self
         )
         
@@ -1077,6 +1079,16 @@ class MainWindow(QMainWindow):
         
         # Professional Auto-Backup on Startup (if it hasn't been done in the last 24h)
         self._perform_startup_backup()
+
+    def _init_version_footer(self) -> None:
+        """Shows the installed software version in the status bar - part of
+        the main window's chrome, not any individual page, so it stays
+        visible across every interface/page without needing to be added to
+        each one separately."""
+        version_label = QLabel(VersionManager.get_version_string())
+        version_label.setStyleSheet("color: #95a5a6; font-size: 11px; padding: 0 12px;")
+        version_label.setToolTip("Installed application version")
+        self.statusBar().addPermanentWidget(version_label)
 
     def _perform_startup_backup(self):
         """Background backup on startup to ensure data safety."""

@@ -188,8 +188,16 @@ class Settings(BaseModel):
     EVOLUTION_API_KEY: str = Field(default_factory=lambda: os.getenv("EVOLUTION_API_KEY", ""))
     EVOLUTION_INSTANCE_NAME: str = Field(default_factory=lambda: os.getenv("EVOLUTION_INSTANCE_NAME", ""))
 
-    # Update System
-    APP_UPDATE_URL: str = Field(default_factory=lambda: os.getenv("APP_UPDATE_URL", "https://bitbucket.org/python_desktop/python_repository/raw/main/version.json"))
+    # Update System - checks GitHub Releases for this repo ("owner/repo").
+    # This is a single, vendor-level update channel: every installation of
+    # this software (across every company it's deployed to) checks the same
+    # central repo, same as how any commercial desktop app's updater works -
+    # it is not meant to vary per company/customer.
+    APP_UPDATE_GITHUB_REPO: str = Field(default_factory=lambda: os.getenv("APP_UPDATE_GITHUB_REPO", "ehsankamalia-gif/fbr-invoice-uploader_Old_18-7-26"))
+    # Optional - only needed if APP_UPDATE_GITHUB_REPO is ever made private.
+    # Personal Access Token with at least "Contents: read" (fine-grained) or
+    # the classic "repo" scope.
+    APP_UPDATE_GITHUB_TOKEN: str = Field(default_factory=lambda: os.getenv("APP_UPDATE_GITHUB_TOKEN", ""))
 
 settings = Settings()
 

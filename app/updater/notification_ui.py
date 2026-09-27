@@ -86,9 +86,16 @@ class UpdateNotificationDialog(QDialog):
         self.progress_bar.setValue(0)
         
         def download_thread():
-            downloader = Downloader(self.update_info['download_url'], self.installer_path)
-            success = downloader.download(progress_callback=self.download_progress_signal.emit)
-            self.download_finished_signal.emit(success, self.installer_path)
+            downloader = Downloader(
+                self.update_info['download_url'],
+                self.installer_path,
+                expected_sha256=self.update_info.get('sha256'),
+            )
+            try:
+                downloader.download(progress_callback=self.download_progress_signal.emit)
+                self.download_finished_signal.emit(True, self.installer_path)
+            except Exception as e:
+                self.download_finished_signal.emit(False, str(e))
 
         threading.Thread(target=download_thread, daemon=True).start()
 
@@ -99,12 +106,12 @@ class UpdateNotificationDialog(QDialog):
             self.progress_bar.setValue(percent)
 
     @pyqtSlot(bool, str)
-    def _on_download_finished(self, success, path):
+    def _on_download_finished(self, success, path_or_error):
         if success:
             # Automatic Hand-off
-            InstallerLauncher.launch_and_exit(path)
+            InstallerLauncher.launch_and_exit(path_or_error)
         else:
-            QMessageBox.critical(self, "Update Error", "Failed to download the update. Please try again later.")
+            QMessageBox.critical(self, "Update Error", f"Failed to download the update:\n\n{path_or_error}")
             self.update_btn.setEnabled(True)
             self.later_btn.setEnabled(True)
             self.progress_bar.setVisible(False)

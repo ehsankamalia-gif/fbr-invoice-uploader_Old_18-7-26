@@ -17,30 +17,35 @@ class UpdaterManager(QObject):
     no_update_signal = pyqtSignal()
     update_error_signal = pyqtSignal(str)
 
-    def __init__(self, current_version: str, version_url: str, auth: Optional[tuple] = None, parent=None):
+    def __init__(self, current_version: str, repo: str, github_token: Optional[str] = None, parent=None):
         """
         Args:
-            current_version: Current installed version
-            version_url: URL to version.json (e.g., Bitbucket raw URL)
-            auth: Optional (username, app_password) for private repos
+            current_version: Current installed version (e.g. "1.1.0")
+            repo: GitHub repo to check, as "owner/repo"
+            github_token: Optional Personal Access Token, only needed if
+                          `repo` is private
             parent: Parent widget
         """
         super().__init__(parent)
         self.current_version = current_version
-        self.version_url = version_url
-        self.auth = auth
+        self.repo = repo
+        self.github_token = github_token
         self.parent_window = parent
-        
+
         self.update_available_signal.connect(self._show_notification)
 
     def check_for_updates_async(self):
-        """Runs the update check in a background thread."""
+        """Runs the update check in a background thread. A failed check
+        (network error, no releases published yet, a malformed release)
+        emits update_error_signal - it is never reported as "no update
+        available", which would silently hide the fact that the check
+        didn't actually happen."""
         def run():
             try:
                 logger.info("Starting background update check...")
-                checker = UpdateChecker(self.version_url, auth=self.auth)
+                checker = UpdateChecker(self.repo, token=self.github_token)
                 update_info = checker.check_for_update(self.current_version)
-                
+
                 # Check if the C++ object still exists before emitting signals
                 try:
                     if update_info:

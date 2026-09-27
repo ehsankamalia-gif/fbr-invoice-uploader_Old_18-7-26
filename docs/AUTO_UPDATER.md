@@ -1,97 +1,127 @@
-# Professional Auto-Update System for Windows Desktop Apps
+# Auto-Update System (GitHub Releases)
 
-This document outlines the architecture and integration steps for the modular update system implemented in the `app/updater/` package.
+This document describes the update system implemented in `app/updater/`, and
+how it's wired into the live app in `app/qt_ui/main_window.py`.
 
 ## 1. Directory Structure
 ```text
 app/
 └── updater/
     ├── __init__.py
-    ├── version_manager.py      # Semantic versioning logic
-    ├── update_checker.py       # Remote JSON fetching (HTTPS)
-    ├── downloader.py           # Secure chunked downloads
-    ├── installer_launcher.py   # App hand-off to installer
-    ├── notification_ui.py      # Detailed Update Dialog (PyQt6)
-    ├── toast_notification.py   # Professional Toast Alert (PyQt6)
+    ├── version_manager.py      # Semantic versioning: parsing & comparison
+    ├── update_checker.py       # Fetches the latest GitHub Release
+    ├── downloader.py           # Secure chunked download + SHA-256 verification
+    ├── installer_launcher.py   # App hand-off to the downloaded installer
+    ├── notification_ui.py      # Detailed update dialog (PyQt6)
+    ├── toast_notification.py   # Non-intrusive toast alert (PyQt6)
     └── updater_manager.py      # High-level orchestration
 ```
 
-## 2. Notification System
-The system uses a two-tier notification approach:
-1. **Toast Notification**: A non-intrusive alert in the bottom-right corner.
-2. **Detailed Dialog**: A modal window with the changelog and progress bar.
-To use Bitbucket as your update server, you can host the `version.json` in your repository and access it via the **Raw** URL.
+## 2. Update Source: GitHub Releases
 
-### Raw URL Format
-`https://bitbucket.org/<workspace>/<repo>/raw/<branch>/version.json`
+The updater checks **one central GitHub repo's Releases** - this is a
+vendor-level update channel, not a per-company setting. Every installation
+of this software, for every company it's deployed to, checks the same repo
+for new versions, exactly like any commercial desktop app's updater.
 
-Example for this project:
-`https://bitbucket.org/python_desktop/python_repository/raw/main/version.json`
+Configured via (`app/core/config.py`):
+- `APP_UPDATE_GITHUB_REPO` - `"owner/repo"`, e.g.
+  `ehsankamalia-gif/fbr-invoice-uploader_Old_18-7-26`. Defaults to that
+  repo; override with the `APP_UPDATE_GITHUB_REPO` environment variable if
+  it's ever renamed or moved.
+- `APP_UPDATE_GITHUB_TOKEN` - only needed if the repo is ever made
+  **private**. A fine-grained Personal Access Token with "Contents: read"
+  (or the classic `repo` scope) is enough. Public repos need no token.
 
-### Handling Private Repositories
-If your repository is private, you must use a Bitbucket **App Password** for the updater to fetch the file.
+If `APP_UPDATE_GITHUB_REPO` is empty, the updater doesn't initialize at all
+(no background check, no network calls).
 
-```python
-# In your integration code
-self.updater = UpdaterManager(
-    current_version="1.1.0",
-    version_url="https://bitbucket.org/python_desktop/python_repository/raw/main/version.json",
-    auth=("bitbucket_username", "your_app_password"), # Required for private repos
-    parent=self
-)
-```
+## 3. How a Release Is Read
 
-## 3. Remote `version.json` Example
+The updater calls `GET https://api.github.com/repos/<repo>/releases/latest`
+and expects:
+- `tag_name` - the version, e.g. `v1.2.0` (a leading `v`/`V` is stripped
+  automatically; the version parser also tolerates extra trailing segments
+  like `1.2.0.beta.1`, taking just the first three numeric parts).
+- An **asset** whose filename ends in `.exe` - this is the installer that
+  gets downloaded and launched. The first `.exe` asset found is used, so a
+  release should only attach one.
+- `body` - used as the changelog text shown to the user.
+- `published_at` - shown as the release date.
 
-## 3. Update Workflow Diagram
-1. **Startup**: App launches and initializes `UpdaterManager`.
-2. **Check**: `UpdaterManager` starts a background thread to fetch `version.json`.
-3. **Compare**: `VersionManager` parses `latest_version` and compares it with the local `APP_VERSION`.
-4. **Notify**: If an update exists, `UpdaterManager` emits a signal to the main thread.
-5. **UI**: `UpdateNotificationDialog` appears with the changelog.
-6. **Action**: User clicks "Update".
-7. **Download**: `Downloader` fetches the `.exe` to the system TEMP folder with a progress bar.
-8. **Hand-off**: `InstallerLauncher` starts the installer and exits the app immediately.
-9. **Install**: The installer overwrites the old files and optionally restarts the app.
+**Checksum verification** (optional but recommended): the downloaded
+installer is checked against a SHA-256 hash if one can be found, in this
+order:
+1. GitHub's own asset `digest` field (present automatically on newer
+   uploads - nothing extra to do).
+2. A sidecar asset named `<installer-filename>.exe.sha256` containing just
+   the hash (optionally followed by the filename, `sha256sum` style).
+3. A shared `checksums.txt` asset listing multiple files, one per line.
 
-## 4. Integration Guide
+If no checksum is found anywhere, the download still proceeds (a warning is
+logged) rather than being blocked - but publishing one closes a real
+security gap, since otherwise nothing verifies the installer wasn't
+corrupted or tampered with in transit.
 
-### Step A: Initialize in Main Window
-Add the following to your `MainWindow.__init__`:
+**No releases published yet** is treated as "you're up to date", not an
+error - GitHub returns a 404 for `/releases/latest` in exactly this case,
+and it's a completely normal state before your first release exists. Any
+*other* failure (network error, HTTP error other than that specific 404, a
+release missing a usable `.exe` asset) is treated as a real error and
+reported distinctly - it is never silently reported as "up to date". This
+was the actual bug in the previous (Bitbucket-based) version of this
+system: every failure, for any reason, was silently swallowed and reported
+as a successful "up to date" check.
 
-```python
-from app.updater.updater_manager import UpdaterManager
+## 4. Update Workflow
 
-class MainWindow(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        # ... your UI init code ...
-        
-        # Initialize Updater
-        self.updater = UpdaterManager(
-            current_version="1.1.0", 
-            version_url="https://your-server.com/version.json",
-            parent=self
-        )
-        
-        # Start background check (non-blocking)
-        self.updater.check_for_updates_async()
-```
+1. **Startup**: `MainWindow._init_updater()` creates a `UpdaterManager` and
+   kicks off a background check (also re-checked every 4 hours via a timer).
+2. **Check**: `UpdateChecker` fetches the latest release and compares it to
+   the locally-recorded version (`app/core/version_manager.py`'s
+   `version.json`).
+3. **Notify**: if newer, a toast appears bottom-right; clicking it opens the
+   detailed dialog with the changelog.
+4. **Download**: clicking "Download and Install Now" streams the `.exe` to
+   the system TEMP folder with a progress bar, then verifies its checksum
+   if one was published.
+5. **Hand-off**: `InstallerLauncher` launches the installer and exits the
+   app immediately, so the installer can overwrite the running files.
+6. **Install**: the installer (built via `build_exe.py` + Inno Setup - see
+   `docs/DISTRIBUTION_GUIDE.md`) takes over from there.
 
-### Step B: PyInstaller Build Instructions
-When building your executable, ensure you include the `updater` package and required assets.
+## 5. Publishing a Release (do this to actually ship an update)
 
-```bash
-pyinstaller --noconfirm --onefile --windowed --name "EhsanTraderFBR" \
-    --add-data "app/updater;app/updater" \
-    --collect-all "PyQt6" \
-    main.py
-```
+1. Build the installer as usual: `python build_exe.py`, then compile
+   `installer_setup.iss` in Inno Setup - see `docs/DISTRIBUTION_GUIDE.md`.
+2. (Optional but recommended) Generate a checksum file next to the
+   installer:
+   ```bash
+   certutil -hashfile installer_output\EhsanTraderFBR_Setup.exe SHA256 > EhsanTraderFBR_Setup.exe.sha256
+   ```
+3. Tag and publish a GitHub Release, e.g. via the `gh` CLI:
+   ```bash
+   gh release create v1.1.0 \
+     installer_output/EhsanTraderFBR_Setup.exe \
+     EhsanTraderFBR_Setup.exe.sha256 \
+     --title "v1.1.0" \
+     --notes "Changelog goes here."
+   ```
+   (or use the GitHub web UI: Releases -> Draft a new release -> attach
+   both files.)
+4. Every running installation will pick this up on its next check (within
+   4 hours, or immediately via Settings -> System Updates -> "Check for
+   Updates Now").
 
-*Note: If you use a custom installer (like Inno Setup or NSIS), the `InstallerLauncher` will work perfectly as it simply executes whatever `.exe` you provide in the `download_url`.*
-
-## 5. Security & Reliability
-- **HTTPS Only**: All requests are forced to use SSL verification.
-- **Error Resilience**: Failed downloads are cleaned up from the TEMP folder.
-- **Thread-Safe**: UI updates only occur via Qt Signals to prevent application crashes.
-- **Timeout Protection**: Network requests will timeout after 10-30 seconds to prevent "hanging" on poor connections.
+## 6. Security & Reliability
+- **HTTPS only**, with TLS verification enforced on every request.
+- **SHA-256 verification** of the downloaded installer when a checksum is
+  published with the release (see section 3).
+- **Failed checks are never mistaken for "up to date"** - see section 3.
+- **Thread-safe**: all UI updates happen via Qt signals from the background
+  check/download threads.
+- **Timeout protection**: network requests time out after 15-30 seconds
+  rather than hanging indefinitely.
+- Still recommended, not yet done: **code-signing** the installer (see
+  `docs/DISTRIBUTION_GUIDE.md` section 5) so Windows doesn't show an
+  "Unknown Publisher" warning during install.
