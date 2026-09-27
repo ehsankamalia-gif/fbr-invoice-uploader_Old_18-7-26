@@ -5970,6 +5970,39 @@ class MainWindow(QMainWindow):
         
         layout.addWidget(filter_card)
 
+        # Summary Strip - per-model stock counts for whatever the filters
+        # above are currently showing (search + status), computed with a
+        # dedicated GROUP BY query rather than counted off the on-screen
+        # table, since that table is capped at 500 rows for display
+        # performance and would silently undercount a larger inventory.
+        summary_card = QFrame()
+        summary_card.setObjectName("filterCard")
+        summary_card_layout = QVBoxLayout(summary_card)
+        summary_card_layout.setContentsMargins(20, 14, 20, 14)
+        summary_card_layout.setSpacing(8)
+
+        summary_title = QLabel("STOCK SUMMARY")
+        summary_title.setProperty("class", "filterLabel")
+        summary_card_layout.addWidget(summary_title)
+
+        self.inventory_summary_scroll = QScrollArea()
+        self.inventory_summary_scroll.setWidgetResizable(True)
+        self.inventory_summary_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.inventory_summary_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.inventory_summary_scroll.setFixedHeight(56)
+        self.inventory_summary_scroll.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
+
+        self.inventory_summary_content = QWidget()
+        self.inventory_summary_content.setStyleSheet("background-color: transparent;")
+        self.inventory_summary_layout = QHBoxLayout(self.inventory_summary_content)
+        self.inventory_summary_layout.setContentsMargins(0, 0, 0, 0)
+        self.inventory_summary_layout.setSpacing(10)
+        self.inventory_summary_layout.addStretch(1)
+        self.inventory_summary_scroll.setWidget(self.inventory_summary_content)
+
+        summary_card_layout.addWidget(self.inventory_summary_scroll)
+        layout.addWidget(summary_card)
+
         # Table Section
         table_container = QFrame()
         table_container.setStyleSheet("background-color: white; border: 1px solid #e0e0e0; border-radius: 12px;")
@@ -10335,11 +10368,7 @@ class MainWindow(QMainWindow):
         if status == "All Statuses":
             status = "All"
 
-        db = SessionLocal()
-        data: List[InventoryRow] = []
-        try:
-            query = db.query(Motorcycle).outerjoin(ProductModel)
-
+        def _apply_search(query):
             if search:
                 value = f"%{search}%"
                 query = query.filter(
@@ -10347,11 +10376,19 @@ class MainWindow(QMainWindow):
                     | Motorcycle.engine_number.ilike(value)
                     | ProductModel.model_name.ilike(value)
                 )
+            return query
 
+        def _apply_status(query):
             if status != "All":
                 query = query.filter(Motorcycle.status == status)
+            return query
 
-            rows = query.limit(500).all()
+        db = SessionLocal()
+        data: List[InventoryRow] = []
+        summary_counts: List[tuple] = []
+        status_counts: dict = {}
+        try:
+            rows = _apply_status(_apply_search(db.query(Motorcycle).outerjoin(ProductModel))).limit(500).all()
 
             for bike in rows:
                 model_name = bike.product_model.model_name if getattr(bike, "product_model", None) else ""
@@ -10364,12 +10401,91 @@ class MainWindow(QMainWindow):
                         status=bike.status or "",
                     )
                 )
+
+            # Per-model counts for the summary strip - a dedicated GROUP BY
+            # against the full filtered set (not the 500-row display list
+            # above), so the numbers stay correct regardless of inventory size.
+            from sqlalchemy import func
+            summary_query = _apply_status(_apply_search(
+                db.query(ProductModel.model_name, func.count(Motorcycle.id))
+                .join(Motorcycle, Motorcycle.product_model_id == ProductModel.id)
+            )).group_by(ProductModel.model_name).order_by(func.count(Motorcycle.id).desc())
+            summary_counts = summary_query.all()
+
+            # In Stock / Sold headline split - deliberately search-scoped
+            # only, ignoring the status dropdown, since this IS the status
+            # breakdown; filtering it by status too would always show one
+            # side as zero the moment a specific status is selected.
+            status_query = _apply_search(
+                db.query(Motorcycle.status, func.count(Motorcycle.id)).outerjoin(ProductModel)
+            ).group_by(Motorcycle.status)
+            status_counts = dict(status_query.all())
         except Exception as e:
             logger.error(f"Error reloading inventory: {e}")
         finally:
             db.close()
 
         self.inventory_table_model.update_rows(data)
+        self._update_inventory_summary(
+            summary_counts,
+            in_stock=status_counts.get("IN_STOCK", 0),
+            sold=status_counts.get("SOLD", 0),
+        )
+
+    def _update_inventory_summary(self, summary_counts: List[tuple], in_stock: int = 0, sold: int = 0) -> None:
+        """Rebuilds the Stock Summary chip strip on the Inventory page:
+        leading TOTAL / IN STOCK / SOLD headline chips (search-scoped only),
+        then one chip per model from (model_name, count) pairs, sorted by
+        count descending, matching whatever search/status filters are
+        currently applied."""
+        if not hasattr(self, "inventory_summary_layout"):
+            return
+
+        while self.inventory_summary_layout.count():
+            item = self.inventory_summary_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+        def _make_chip(label: str, count: int, *, bg: str = "#eef3f8", fg: str = "#2c3e50") -> QFrame:
+            chip = QFrame()
+            chip.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {bg};
+                    border-radius: 14px;
+                    padding: 2px 4px;
+                }}
+            """)
+            chip_layout = QHBoxLayout(chip)
+            chip_layout.setContentsMargins(14, 6, 14, 6)
+            chip_layout.setSpacing(6)
+            name_lbl = QLabel(label)
+            name_lbl.setStyleSheet(f"color: {fg}; font-weight: 600; font-size: 12px; background: transparent;")
+            count_lbl = QLabel(str(count))
+            count_lbl.setStyleSheet(f"color: {fg}; font-weight: bold; font-size: 13px; background: transparent;")
+            chip_layout.addWidget(name_lbl)
+            chip_layout.addWidget(count_lbl)
+            return chip
+
+        total = in_stock + sold
+        self.inventory_summary_layout.addWidget(_make_chip("TOTAL", total, bg="#3498db", fg="white"))
+        self.inventory_summary_layout.addWidget(_make_chip("IN STOCK", in_stock, bg="#27ae60", fg="white"))
+        self.inventory_summary_layout.addWidget(_make_chip("SOLD", sold, bg="#e67e22", fg="white"))
+
+        divider = QFrame()
+        divider.setFrameShape(QFrame.Shape.VLine)
+        divider.setStyleSheet("color: #dfe6ec;")
+        self.inventory_summary_layout.addWidget(divider)
+
+        if not summary_counts:
+            empty_lbl = QLabel("No stock matches the current filters.")
+            empty_lbl.setStyleSheet("color: #95a5a6; font-size: 12px; font-style: italic;")
+            self.inventory_summary_layout.addWidget(empty_lbl)
+        else:
+            for model_name, count in summary_counts:
+                self.inventory_summary_layout.addWidget(_make_chip(model_name or "(No Model)", count))
+
+        self.inventory_summary_layout.addStretch(1)
 
     def _on_inventory_row_double_clicked(self, index: QModelIndex) -> None:
         if not index.isValid():
