@@ -2080,7 +2080,7 @@ class MainWindow(QMainWindow):
         father_row_layout.addWidget(self.print_field_father, 1)
         form_grid.addWidget(father_row, 5, 1)
         self.print_field_address = add_field(6, 0, "Address", AddressShortcodeLineEdit)
-        self.print_field_model = add_field(6, 1, "Model")
+        self.print_field_model = add_field(6, 1, "Manufacture Year")
         self.print_field_color = add_field(8, 0, "Color")
 
         qr_lbl = QLabel("FBR Generated ID QR Code")
@@ -2194,7 +2194,7 @@ class MainWindow(QMainWindow):
             cust = invoice.customer
             first_item = invoice.items[0] if invoice.items else None
             bike = first_item.motorcycle if first_item else None
-            
+
             self.print_field_invoice.setText(invoice.invoice_number or "")
             self.print_field_fbr.setText(invoice.fbr_invoice_number or "")
             self.print_field_date.setText(invoice.datetime.strftime('%Y-%m-%d %H:%M') if invoice.datetime else "")
@@ -2206,7 +2206,7 @@ class MainWindow(QMainWindow):
                 if idx >= 0:
                     self.print_field_relation.setCurrentIndex(idx)
             self.print_field_address.setText((cust.address if cust else "") or "")
-            self.print_field_model.setText((bike.model if bike else (first_item.item_name if first_item else "")) or "")
+            self.print_field_model.setText(str(bike.year) if bike and bike.year else "")
             self.print_field_color.setText((bike.color if bike else "") or "")
 
             self._print_doc_qr_base64 = ""
@@ -7898,14 +7898,16 @@ class MainWindow(QMainWindow):
                 levy = float(getattr(item, "further_tax", 0.0) or 0.0)
                 line_total = sale_value + sales_tax + levy
                 model_value = bike.model if bike else item.item_name
+                year_value = str(bike.year) if bike and bike.year else ""
                 color_value = bike.color if bike else "-"
                 if idx == 0 and model_override:
-                    model_value = model_override
+                    year_value = model_override
                 if idx == 0 and color_override:
                     color_value = color_override
                 items.append({
                     "description": item.item_name,
                     "model": model_value,
+                    "manufacture_year": year_value,
                     "color": color_value,
                     "chassis": bike.chassis_number if bike else "-",
                     "engine": bike.engine_number if bike else "-",
@@ -7977,7 +7979,7 @@ class MainWindow(QMainWindow):
                 "relation_prefix": (o.get("relation_prefix") or "S/O").strip(),
                 "customer_cnic": (o.get("customer_cnic") or (cust.cnic if cust else "-") or "-").strip(),
                 "customer_address": (o.get("customer_address") or (cust.address if cust else "-") or "-").strip(),
-                "product_model": (o.get("model") or (bike.model if bike else item.item_name) or "-").strip(),
+                "product_model": (o.get("model") or (str(bike.year) if bike and bike.year else item.item_name) or "-").strip(),
                 "product_color": (o.get("color") or (bike.color if bike else "-") or "-").strip(),
                 "chassis_number": bike.chassis_number if bike else "-",
                 "engine_number": bike.engine_number if bike else "-",

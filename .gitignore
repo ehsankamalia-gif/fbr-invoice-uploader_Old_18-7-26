@@ -20,6 +20,8 @@ save_error.txt
 save_debug.txt
 build/
 dist/
+installer_output/
+build_exe_log.txt
 browser_profile/
 updates/
 backups/

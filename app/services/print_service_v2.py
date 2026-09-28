@@ -234,6 +234,13 @@ class _AuthorityLayoutFileBridge(QObject):
             parsed = json.loads(raw)
             if not isinstance(parsed, dict):
                 return ""
+            if _strip_resize_handle_pollution(parsed):
+                logger.warning("Self-healed resize-handle markup baked into the saved authority letter layout by a historical bug.")
+                try:
+                    with _AUTHORITY_LAYOUT_LOCK:
+                        path.write_text(json.dumps(parsed, ensure_ascii=False), encoding="utf-8")
+                except Exception as write_exc:
+                    logger.warning(f"Could not persist self-healed authority letter layout: {write_exc}")
             return json.dumps(parsed)
         except Exception as exc:
             logger.warning(f"Failed to load authority letter layout positions from file: {exc}")
@@ -251,6 +258,25 @@ class _AuthorityLayoutFileBridge(QObject):
             return True
         except Exception as exc:
             logger.warning(f"Failed to save authority letter layout positions to file: {exc}")
+            return False
+
+    @pyqtSlot(result=bool)
+    def download_current_page_pdf(self) -> bool:
+        try:
+            obj = self.parent()
+            while obj is not None:
+                dl = getattr(obj, "_handle_download_pdf", None)
+                if callable(dl):
+                    try:
+                        dl()
+                        return True
+                    except Exception as exc2:
+                        logger.error(f"Bridge: Download PDF handler error: {exc2}", exc_info=True)
+                        return False
+                obj = obj.parent() if hasattr(obj, "parent") else None
+            return False
+        except Exception as exc:
+            logger.error(f"Bridge: Download PDF failed: {exc}", exc_info=True)
             return False
 
 class _SilentPrintJob(QObject):
@@ -574,11 +600,26 @@ class PrintServiceV2:
         qr_base64 = str(data.get("qr_code_base64") or "")
         qr_img_html = ""
         if qr_base64.strip():
+            # Wrapped in a <div class="draggable"> (matching honda_logo /
+            # fbr_pos_logo / settingsLogo1 / custom_logo_*) rather than being
+            # a bare <img class="draggable">: browsers don't render or lay
+            # out child nodes appended to an <img> (it's a replaced element
+            # with no content model), so the resize-handle <div>s that
+            # buildResizeHandles() appends were silently invisible and
+            # non-interactive on a bare <img>, which is why the QR code
+            # alone couldn't be resized by dragging like every other image.
             qr_img_html = (
-                "<img id=\"invoiceQr\" class=\"draggable\" data-pos-key=\"invoice_qr\" "
+                "<div id=\"invoiceQr\" class=\"draggable\" data-pos-key=\"invoice_qr\" "
                 "data-default-left=\"2.95in\" data-default-top=\"1.52in\" "
-                "style=\"position:absolute; left: 2.95in; top: 1.52in; width: 1.65in; height: 1.65in;\" "
-                f"src=\"data:image/png;base64,{esc(qr_base64)}\" />"
+                "data-default-width=\"1.65in\" data-default-height=\"1.65in\" "
+                "draggable=\"false\" "
+                "style=\"position:absolute; left: 2.95in; top: 1.52in; width: 1.65in; height: 1.65in; "
+                "background: transparent; user-select: none; -webkit-user-select: none; "
+                "-webkit-user-drag: none; touch-action: none;\">"
+                f"<img src=\"data:image/png;base64,{esc(qr_base64)}\" draggable=\"false\" "
+                "style=\"pointer-events: none; display: block; width: 100%; height: 100%; "
+                "user-select: none; -webkit-user-select: none;\" />"
+                "</div>"
             )
 
         settings_logo_html = ""
@@ -1017,8 +1058,8 @@ class PrintServiceV2:
         <div id="lblChassisNo" class="label draggable" data-pos-key="lbl_chassis_no" data-default-left="0.20in" data-default-top="6.25in" style="left: 0.20in; top: 6.25in;">Chassis #:</div>
         <div id="chassisNo" class="field mono draggable" data-pos-key="chassis_no" data-default-left="0.95in" data-default-top="6.25in" style="left: 0.95in; top: 6.25in;">{esc(primary.get("chassis") or "")}</div>
 
-        <div id="lblModel" class="label draggable" data-pos-key="lbl_model" data-default-left="0.20in" data-default-top="6.65in" style="left: 0.20in; top: 6.65in;">Model:</div>
-        <div id="model" class="field draggable" data-pos-key="model" data-default-left="0.95in" data-default-top="6.65in" style="left: 0.95in; top: 6.65in;">{esc(primary.get("model") or "")}</div>
+        <div id="lblModel" class="label draggable" data-pos-key="lbl_model" data-default-left="0.20in" data-default-top="6.65in" style="left: 0.20in; top: 6.65in;">Manufacture Year:</div>
+        <div id="model" class="field draggable" data-pos-key="model" data-default-left="0.95in" data-default-top="6.65in" style="left: 0.95in; top: 6.65in;">{esc(primary.get("manufacture_year") or "")}</div>
 
         <div id="lblColor" class="label draggable" data-pos-key="lbl_color" data-default-left="0.20in" data-default-top="7.05in" style="left: 0.20in; top: 7.05in;">Color:</div>
         <div id="color" class="field draggable" data-pos-key="color" data-default-left="0.95in" data-default-top="7.05in" style="left: 0.95in; top: 7.05in;">{esc(primary.get("color") or "")}</div>
@@ -1294,6 +1335,31 @@ class PrintServiceV2:
         span.className = 'sub-font';
         span.style.fontSize = `${{next}}px`;
         return wrapRange(r, span);
+      }}
+      function findFocusedSpan(el, className) {{
+        const sel = window.getSelection();
+        const focusNode = sel ? sel.focusNode : null;
+        const focusEl = (focusNode instanceof HTMLElement) ? focusNode : (focusNode && focusNode.parentElement ? focusNode.parentElement : null);
+        const existing = focusEl ? focusEl.closest('span.' + className) : null;
+        return (existing && el.contains(existing)) ? existing : null;
+      }}
+      function applySelectionColor(el, colorHex) {{
+        const existing = findFocusedSpan(el, 'sub-color');
+        if (existing) {{
+          existing.style.color = colorHex;
+          return true;
+        }}
+        const r = getActiveRangeWithin(el);
+        if (!r) return false;
+        const span = document.createElement('span');
+        span.className = 'sub-color';
+        span.style.color = colorHex;
+        return wrapRange(r, span);
+      }}
+      function resetSelectionColor(el) {{
+        const existing = findFocusedSpan(el, 'sub-color');
+        if (existing) return unwrapSpan(existing);
+        return false;
       }}
 
       async function fetchJsonWithTimeout(url, options, timeoutMs) {{
@@ -1696,7 +1762,7 @@ class PrintServiceV2:
             }}
             const cur = clone.innerHTML || '';
             const orig = el.dataset.originalHtml || '';
-            const hasRich = cur.indexOf('sub-hidden') >= 0 || cur.indexOf('sub-font') >= 0 || cur.indexOf('sub-bold') >= 0 || cur.indexOf('sub-italic') >= 0;
+            const hasRich = cur.indexOf('sub-hidden') >= 0 || cur.indexOf('sub-font') >= 0 || cur.indexOf('sub-color') >= 0 || cur.indexOf('sub-bold') >= 0 || cur.indexOf('sub-italic') >= 0;
             if (hasRich || cur !== orig) html = cur;
           }} catch (_) {{}}
           try {{
@@ -2180,18 +2246,33 @@ class PrintServiceV2:
           showHud(selected);
         }});
 
-        // Color picker
+        // Color picker - if the field is in edit mode and a word/phrase is
+        // highlighted (or the caret is inside an already-colored span), the
+        // color applies to just that selection; otherwise it applies to the
+        // whole field, as before.
         stColor && stColor.addEventListener('input', (e) => {{
           if (!selected || isImg(selected)) return;
           const col = e.target.value || '#000000';
+          if (selected.classList.contains('edit-mode') && applySelectionColor(selected, col)) {{
+            persistEntry(selected, null);
+            showHud(selected);
+            return;
+          }}
           selected.style.color = col;
           persistEntry(selected, {{ color: col }});
           showHud(selected);
         }});
 
-        // Reset color
+        // Reset color - unwraps a focused per-word color span if the caret
+        // is inside one, otherwise resets the whole field's color.
         stResetColor && stResetColor.addEventListener('click', () => {{
           if (!selected || isImg(selected)) return;
+          if (selected.classList.contains('edit-mode') && resetSelectionColor(selected)) {{
+            persistEntry(selected, null);
+            syncToolbarFromSelected();
+            showHud(selected);
+            return;
+          }}
           selected.style.color = '';
           persistEntry(selected, {{ color: '' }});
           syncToolbarFromSelected();
@@ -2375,7 +2456,7 @@ class PrintServiceV2:
           startY: rel.y,
           startW: typeof rel.w === 'number' && rel.w > 0 ? rel.w : (el.offsetWidth || 100),
           startH: typeof rel.h === 'number' && rel.h > 0 ? rel.h : (el.offsetHeight || 80),
-          scale: getFitScale(),
+          scale: pageRect.scale,
           lockAspect: !!(stLockAspect && stLockAspect.checked),
         }};
         if (resizeDrag.startW && resizeDrag.startH) {{

@@ -59,12 +59,6 @@ end;
 function InitializeSetup(): Boolean;
 begin
   Result := True;
-
-  if GetSpaceOnDisk64(ExpandConstant('{sd}\'), True, False) < Int64(600) * 1024 * 1024 then
-  begin
-    MsgBox('Insufficient disk space. Please ensure at least 600 MB is available.', mbError, MB_OK);
-    Result := False;
-  end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -75,16 +69,16 @@ begin
     RegWriteStringValue(HKEY_LOCAL_MACHINE, 'Software\EhsanTrader', 'InstallPath', ExpandConstant('{app}'));
 
     if MySqlServerDetected() then
-      MsgBox('A MySQL server (Laragon/XAMPP) was detected.' #13#10#13#10
-             'The application will connect to it on first start and create its'
-             ' database and tables automatically.' #13#10#13#10
+      MsgBox('A MySQL server (Laragon/XAMPP) was detected.' + #13#10#13#10 +
+             'The application will connect to it on first start and create its' +
+             ' database and tables automatically.' + #13#10#13#10 +
              'Please make sure the MySQL service is running before opening the application.',
              mbInformation, MB_OK)
     else
-      MsgBox('No MySQL server (Laragon/XAMPP) was detected on this computer.' #13#10#13#10
-             'The application will run using a built-in local database, stored in'
-             ' your user profile. No further setup is required.' #13#10#13#10
-             'If you install Laragon or XAMPP later, the application will use it'
+      MsgBox('No MySQL server (Laragon/XAMPP) was detected on this computer.' + #13#10#13#10 +
+             'The application will run using a built-in local database, stored in' +
+             ' your user profile. No further setup is required.' + #13#10#13#10 +
+             'If you install Laragon or XAMPP later, the application will use it' +
              ' automatically the next time it starts.',
              mbInformation, MB_OK);
   end;

@@ -36,7 +36,7 @@
         .field.small { font-size: 10pt; font-weight: 700; }
         .field.mono { font-family: Consolas, "Courier New", monospace; letter-spacing: 0.2px; }
         .draggable {
-            outline: 1px dashed rgba(220, 53, 69, 0.75);
+            outline: none;
             outline-offset: 2px;
             touch-action: none;
             will-change: left, top, transform;
@@ -45,8 +45,16 @@
             -webkit-user-select: none;
             cursor: grab;
         }
+        .draggable:hover {
+            outline: 1px dashed rgba(37, 99, 235, 0.55);
+            outline-offset: 2px;
+        }
+        .draggable.selected {
+            outline: 1px dashed rgba(220, 53, 69, 0.85);
+            outline-offset: 2px;
+        }
         .dragging {
-            outline: 2px solid rgba(220, 53, 69, 0.95);
+            outline: 2px solid rgba(220, 53, 69, 0.95) !important;
             transform: scale(1.02);
             box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
             cursor: grabbing;
@@ -85,11 +93,179 @@
             opacity: 0.15;
             text-decoration: line-through;
         }
+        .style-toolbar {
+            position: fixed;
+            top: 12px;
+            right: 12px;
+            z-index: 99998;
+            background: rgba(30, 34, 41, 0.96);
+            color: #fff;
+            font: 12px/1.3 Arial, sans-serif;
+            padding: 10px 12px;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            min-width: 290px;
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .style-toolbar .st-title {
+            font-weight: 700;
+            font-size: 12px;
+            color: #dbeafe;
+            margin-bottom: 2px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .style-toolbar .st-title .st-target {
+            font-weight: 600;
+            color: #facc15;
+            max-width: 170px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .style-toolbar .st-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .style-toolbar label.st-lbl {
+            min-width: 70px;
+            color: #cbd5e1;
+            font-weight: 600;
+            font-size: 11px;
+        }
+        .style-toolbar button {
+            background: #334155;
+            border: 1px solid #475569;
+            color: #fff;
+            padding: 5px 9px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 120ms ease, transform 80ms ease, border-color 120ms ease;
+            line-height: 1;
+        }
+        .style-toolbar button:hover {
+            background: #475569;
+            border-color: #64748b;
+        }
+        .style-toolbar button:active {
+            transform: translateY(1px);
+        }
+        .style-toolbar button.active {
+            background: #2563eb;
+            border-color: #3b82f6;
+            color: #fff;
+        }
+        .style-toolbar button.danger {
+            background: #7f1d1d;
+            border-color: #991b1b;
+        }
+        .style-toolbar button.danger:hover {
+            background: #991b1b;
+        }
+        .style-toolbar input[type="range"] {
+            flex: 1;
+            min-width: 110px;
+            accent-color: #3b82f6;
+        }
+        .style-toolbar .st-val {
+            min-width: 38px;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+            color: #e2e8f0;
+            font-weight: 600;
+        }
+        .style-toolbar select,
+        .style-toolbar input[type="color"] {
+            background: #1e293b;
+            color: #f1f5f9;
+            border: 1px solid #475569;
+            border-radius: 6px;
+            padding: 4px 6px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .style-toolbar input[type="color"] {
+            padding: 2px;
+            width: 38px;
+            height: 28px;
+            cursor: pointer;
+        }
+        .style-toolbar .st-divider {
+            height: 1px;
+            background: rgba(148, 163, 184, 0.22);
+            margin: 2px 0;
+        }
+        .style-toolbar .st-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+        }
+        .style-toolbar .st-actions button {
+            font-size: 11px;
+            padding: 6px 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+        }
+        .style-toolbar button.add-logo {
+            background: #065f46;
+            border-color: #047857;
+        }
+        .style-toolbar button.add-logo:hover { background: #047857; border-color: #059669; }
+        .style-toolbar button.delete-selection {
+            background: #7f1d1d;
+            border-color: #991b1b;
+        }
+        .style-toolbar button.delete-selection:hover { background: #991b1b; border-color: #b91c1c; }
+        .style-toolbar button.delete-selection:disabled,
+        .style-toolbar button:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            background: #334155 !important;
+            border-color: #475569 !important;
+        }
+        #stSizeSliderRow label.st-lbl { min-width: 78px; }
+        .resize-handle {
+            position: absolute;
+            z-index: 100000;
+            width: 14px;
+            height: 14px;
+            background: #ffffff;
+            border: 2px solid #2563eb;
+            border-radius: 50%;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+            box-sizing: border-box;
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        .resize-handle:hover { background: #dbeafe; border-color: #1d4ed8; }
+        .resize-handle.nw { left: -8px; top: -8px; cursor: nwse-resize; }
+        .resize-handle.n  { left: calc(50% - 7px); top: -8px; cursor: ns-resize; }
+        .resize-handle.ne { right: -8px; top: -8px; cursor: nesw-resize; }
+        .resize-handle.e  { right: -8px; top: calc(50% - 7px); cursor: ew-resize; }
+        .resize-handle.se { right: -8px; bottom: -8px; cursor: nwse-resize; }
+        .resize-handle.s  { left: calc(50% - 7px); bottom: -8px; cursor: ns-resize; }
+        .resize-handle.sw { left: -8px; bottom: -8px; cursor: nesw-resize; }
+        .resize-handle.w  { left: -8px; top: calc(50% - 7px); cursor: ew-resize; }
         @media print {
+            .resize-handle { display: none !important; }
             .draggable { outline: none !important; box-shadow: none !important; }
             .pos-hud { display: none !important; }
             .hidden-field { display: none !important; }
             .sub-hidden { display: none !important; }
+            .style-toolbar { display: none !important; }
             body { background: #fff !important; }
             .page-wrap { height: auto !important; overflow: visible !important; padding: 0 !important; }
             .page-shell { width: auto !important; height: auto !important; }
@@ -122,6 +298,65 @@
         </div>
     </div>
 
+    <div id="styleToolbar" class="style-toolbar" style="display:none;">
+        <div class="st-title">
+            <span>Styling Toolbar</span>
+            <span id="stTarget" class="st-target">—</span>
+        </div>
+        <div class="st-divider"></div>
+        <div class="st-row st-actions">
+            <button id="stAddLogo" class="add-logo" type="button" title="Add a custom logo / image (PNG / JPG / SVG / GIF)">＋ Add Logo</button>
+            <button id="stDelete" class="delete-selection" type="button" title="Delete selected logo or field (Delete / Backspace)">🗑 Delete</button>
+        </div>
+        <div class="st-row" style="margin-top:4px;">
+            <button id="stDownloadPdf" type="button" title="Download this letter as a PDF file (Ctrl+S)" style="flex:1; background:#0369a1; border:1px solid #075985; color:#fff; font-weight:700; padding:6px 8px; display:flex; align-items:center; justify-content:center; gap:5px; border-radius:6px;">⬇ Download Letter as PDF</button>
+        </div>
+        <div id="stSizeSliderRow" class="st-row" style="margin-top:4px;">
+            <label class="st-lbl">Size</label>
+            <input id="stSize" type="range" min="20" max="600" step="1" value="120" />
+            <input id="stLockAspect" type="checkbox" title="Lock aspect ratio" checked style="accent-color:#3b82f6; margin:0 0 0 4px;" />
+        </div>
+        <div class="st-divider"></div>
+        <div class="st-row">
+            <label class="st-lbl">Font Size</label>
+            <input id="stFontSize" type="range" min="6" max="48" step="1" value="11" />
+            <span id="stFontSizeVal" class="st-val">11px</span>
+        </div>
+        <div class="st-row">
+            <label class="st-lbl">Font Family</label>
+            <select id="stFontFamily" style="flex:1;">
+                <option value="Arial, sans-serif">Arial</option>
+                <option value="Calibri, Arial, sans-serif">Calibri</option>
+                <option value="Times New Roman, serif">Times New Roman</option>
+                <option value="Georgia, serif">Georgia</option>
+                <option value="Verdana, Geneva, sans-serif">Verdana</option>
+                <option value="Consolas, &quot;Courier New&quot;, monospace">Consolas (Mono)</option>
+                <option value="'Courier New', Courier, monospace">Courier New</option>
+            </select>
+        </div>
+        <div class="st-row">
+            <label class="st-lbl">Style</label>
+            <button id="stBold" type="button" title="Bold (B)"><b>B</b></button>
+            <button id="stItalic" type="button" title="Italic (I)"><i>I</i></button>
+            <button id="stUnderline" type="button" title="Underline (U)"><u>U</u></button>
+            <label class="st-lbl" style="min-width:auto;margin-left:8px;">Color</label>
+            <input id="stColor" type="color" value="#000000" title="Text Color" />
+            <button id="stResetColor" type="button" title="Reset color to default" style="padding:5px 7px;">R</button>
+        </div>
+        <div class="st-divider"></div>
+        <div class="st-row">
+            <button id="stHide" type="button" title="Hide / Show (H)">Hide</button>
+            <button id="stWrap" type="button" title="Word Wrap (W)">Wrap</button>
+            <button id="stEdit" type="button" title="Edit Text (F2)">Edit</button>
+            <button id="stReset" class="danger" type="button" title="Reset this field's style & position (dbl-click)">Reset</button>
+        </div>
+        <div class="st-divider"></div>
+        <div class="st-row" style="margin-top:4px;">
+            <button id="stResetAll" type="button" title="Reset ALL fields, logos, and deletions to factory defaults (use to restore deleted fields)" style="flex:1; background:#fef3c7; border:1px solid #d97706; color:#92400e; font-weight:700; padding:6px 8px; border-radius:6px;">↺ Reset All (Restore Deleted)</button>
+        </div>
+    </div>
+    <input id="stFileInput" type="file" accept="image/png, image/jpeg, image/jpg, image/gif, image/svg+xml, image/webp" style="display:none;" />
+
     <div id="posHud" class="pos-hud"></div>
     <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
     <script>
@@ -133,8 +368,8 @@
             if (!page || !hud) return;
 
             let qtBridge = null;
-            function safeParseJson(text) { try { return JSON.parse(String(text || '')); } catch (_) { return null; } }
             function nowMs() { return Date.now(); }
+            function safeParseJson(text) { try { return JSON.parse(String(text || '')); } catch (_) { return null; } }
             function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
             function isImg(el) { return !!(el && el.tagName === 'IMG'); }
             function getFontPx(el) {
@@ -146,6 +381,56 @@
                     return null;
                 }
             }
+
+            function initQtBridge() {
+                if (qtBridge) return Promise.resolve(qtBridge);
+                const hasChannel = typeof QWebChannel !== 'undefined' && window.qt && qt.webChannelTransport;
+                if (!hasChannel) return Promise.resolve(null);
+                return new Promise((resolve) => {
+                    try {
+                        new QWebChannel(qt.webChannelTransport, (channel) => {
+                            qtBridge = (channel && channel.objects) ? channel.objects.authorityLayoutBridge : null;
+                            resolve(qtBridge || null);
+                        });
+                    } catch (_) { resolve(null); }
+                });
+            }
+
+            function getPageRect() {
+                const r = page.getBoundingClientRect();
+                const scale = (() => {
+                    const s = shell ? Number(shell.getAttribute('data-scale') || 1) : 1;
+                    return Number.isFinite(s) && s > 0 ? s : 1;
+                })();
+                return {
+                    left: r.left,
+                    top: r.top,
+                    width: page.offsetWidth || (r.width / scale),
+                    height: page.offsetHeight || (r.height / scale),
+                    scale,
+                };
+            }
+            function getRelPx(el, pageRect) {
+                const r = el.getBoundingClientRect();
+                const s = pageRect && pageRect.scale ? pageRect.scale : 1;
+                return { x: (r.left - pageRect.left) / s, y: (r.top - pageRect.top) / s, w: r.width / s, h: r.height / s };
+            }
+
+            function readSaved() {
+                try {
+                    const raw = localStorage.getItem(STORAGE_KEY);
+                    const parsed = safeParseJson(raw || '{}');
+                    if (!parsed || typeof parsed !== 'object') return { version: 2, updated_at: 0, elements: {} };
+                    if (parsed.version !== 2) return { version: 2, updated_at: 0, elements: {} };
+                    const elements = parsed.elements;
+                    if (!elements || typeof elements !== 'object') return { version: 2, updated_at: 0, elements: {} };
+                    return { version: 2, updated_at: Number(parsed.updated_at || 0), elements: elements };
+                } catch (_) {
+                    return { version: 2, updated_at: 0, elements: {} };
+                }
+            }
+            function writeSaved(doc) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(doc)); } catch (_) {} }
+
             function applyEntryVisuals(el, entry) {
                 if (!el || !entry || typeof entry !== 'object') return;
                 if (entry.hidden === true) el.classList.add('hidden-field');
@@ -159,6 +444,12 @@
                     el.classList.remove('wrap-field');
                     el.style.maxWidth = '';
                 }
+                if (typeof entry.w === 'number' && Number.isFinite(entry.w) && entry.w > 0) {
+                    el.style.width = `${entry.w}px`;
+                }
+                if (typeof entry.h === 'number' && Number.isFinite(entry.h) && entry.h > 0) {
+                    el.style.height = `${entry.h}px`;
+                }
                 if (typeof entry.font_px === 'number' && Number.isFinite(entry.font_px) && !isImg(el)) {
                     el.style.fontSize = `${entry.font_px}px`;
                 }
@@ -170,6 +461,16 @@
                 }
                 if (typeof entry.font_style === 'string' && entry.font_style.trim() && !isImg(el)) {
                     el.style.fontStyle = entry.font_style;
+                }
+                if (typeof entry.color === 'string' && entry.color.trim() && !isImg(el)) {
+                    el.style.color = entry.color;
+                } else if (typeof entry.color === 'string' && entry.color === '' && !isImg(el)) {
+                    el.style.color = '';
+                }
+                if (typeof entry.text_decoration === 'string' && entry.text_decoration.trim() && !isImg(el)) {
+                    el.style.textDecoration = entry.text_decoration;
+                } else if (typeof entry.text_decoration === 'string' && entry.text_decoration === '' && !isImg(el)) {
+                    el.style.textDecoration = '';
                 }
             }
             function applyEntryContent(el, entry) {
@@ -250,92 +551,208 @@
                 span.style.fontSize = `${next}px`;
                 return wrapRange(r, span);
             }
+            function findFocusedSpan(el, className) {
+                const sel = window.getSelection();
+                const focusNode = sel ? sel.focusNode : null;
+                const focusEl = (focusNode instanceof HTMLElement) ? focusNode : (focusNode && focusNode.parentElement ? focusNode.parentElement : null);
+                const existing = focusEl ? focusEl.closest('span.' + className) : null;
+                return (existing && el.contains(existing)) ? existing : null;
+            }
+            function applySelectionColor(el, colorHex) {
+                const existing = findFocusedSpan(el, 'sub-color');
+                if (existing) {
+                    existing.style.color = colorHex;
+                    return true;
+                }
+                const r = getActiveRangeWithin(el);
+                if (!r) return false;
+                const span = document.createElement('span');
+                span.className = 'sub-color';
+                span.style.color = colorHex;
+                return wrapRange(r, span);
+            }
+            function resetSelectionColor(el) {
+                const existing = findFocusedSpan(el, 'sub-color');
+                if (existing) return unwrapSpan(existing);
+                return false;
+            }
 
-            function initQtBridge() {
-                if (qtBridge) return Promise.resolve(qtBridge);
-                const hasChannel = typeof QWebChannel !== 'undefined' && window.qt && qt.webChannelTransport;
-                if (!hasChannel) return Promise.resolve(null);
-                return new Promise((resolve) => {
+            async function loadFromBackend() {
+                await initQtBridge();
+                if (!qtBridge || typeof qtBridge.load_positions !== 'function') return null;
+                return await new Promise((resolve) => {
                     try {
-                        new QWebChannel(qt.webChannelTransport, (channel) => {
-                            qtBridge = (channel && channel.objects) ? channel.objects.authorityLayoutBridge : null;
-                            resolve(qtBridge || null);
+                        qtBridge.load_positions((txt) => {
+                            const obj = safeParseJson(txt || '');
+                            if (!obj || typeof obj !== 'object') return resolve(null);
+                            const v = obj.version;
+                            const els = obj.elements;
+                            if (v !== 2 || !els || typeof els !== 'object') return resolve(null);
+                            resolve(obj);
                         });
-                    } catch (_) { resolve(null); }
+                    } catch (_) {
+                        resolve(null);
+                    }
+                });
+            }
+            function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms || 0))); }
+
+            function setSelected(nextEl) {
+                const prev = (typeof selected !== 'undefined') ? selected : null;
+                const el = (nextEl && nextEl instanceof Element) ? nextEl : null;
+                if (prev && prev !== el && prev instanceof Element) {
+                    try { prev.classList.remove('selected'); } catch (_) {}
+                }
+                if (!el) {
+                    selected = null;
+                    try { clearResizeHandles(); } catch (_) {}
+                    return;
+                }
+                try { el.classList.add('selected'); } catch (_) {}
+                selected = el;
+            }
+            async function loadFromBackendWithRetry(maxAttempts, baseDelayMs) {
+                await initQtBridge();
+                if (qtBridge && typeof qtBridge.load_positions === 'function') {
+                    return await loadFromBackend();
+                }
+                const attempts = Math.max(1, Number(maxAttempts || 1));
+                let delay = Math.max(120, Number(baseDelayMs || 140));
+                for (let i = 0; i < attempts; i++) {
+                    const positions = await loadFromBackend();
+                    if (positions) return positions;
+                    await sleep(delay);
+                    delay = Math.min(600, Math.floor(delay * 1.25));
+                }
+                return null;
+            }
+            async function saveToBackend(positions) {
+                await initQtBridge();
+                if (!qtBridge || typeof qtBridge.save_positions !== 'function') return false;
+                return await new Promise((resolve) => {
+                    try {
+                        qtBridge.save_positions(JSON.stringify(positions || {}), (ok) => resolve(!!ok));
+                    } catch (_) {
+                        resolve(false);
+                    }
                 });
             }
 
-            function getPageRect() {
-                const r = page.getBoundingClientRect();
-                const scale = (() => {
-                    const s = shell ? Number(shell.getAttribute('data-scale') || 1) : 1;
-                    return Number.isFinite(s) && s > 0 ? s : 1;
-                })();
-                return { left: r.left, top: r.top, width: page.offsetWidth || (r.width / scale), height: page.offsetHeight || (r.height / scale), scale };
+            function coerceNumber(n) {
+                const x = typeof n === 'number' ? n : Number(n);
+                return Number.isFinite(x) ? x : null;
             }
+            function validateAndNormalizeEntry(entry, pageRect, elRect) {
+                if (!entry || typeof entry !== 'object') return null;
+                const x = coerceNumber(entry.x);
+                const y = coerceNumber(entry.y);
+                const base_w = coerceNumber(entry.base_w);
+                const base_h = coerceNumber(entry.base_h);
+                const xr = coerceNumber(entry.xr);
+                const yr = coerceNumber(entry.yr);
 
-            function getRelPx(el, pageRect) {
-                const r = el.getBoundingClientRect();
-                const s = pageRect && pageRect.scale ? pageRect.scale : 1;
-                return { x: (r.left - pageRect.left) / s, y: (r.top - pageRect.top) / s, w: r.width / s, h: r.height / s };
-            }
+                let finalX = x;
+                let finalY = y;
 
-            function readSaved() {
-                try {
-                    const raw = localStorage.getItem(STORAGE_KEY);
-                    const parsed = safeParseJson(raw || '{}');
-                    if (!parsed || typeof parsed !== 'object' || parsed.version !== 2 || typeof parsed.elements !== 'object') {
-                        return { version: 2, updated_at: 0, elements: {} };
-                    }
-                    return parsed;
-                } catch (_) {
-                    return { version: 2, updated_at: 0, elements: {} };
+                if (finalX === null || finalY === null) {
+                    if (xr === null || yr === null) return null;
+                    finalX = xr * pageRect.width;
+                    finalY = yr * pageRect.height;
+                } else if (base_w !== null && base_h !== null && (Math.abs(base_w - pageRect.width) > 1 || Math.abs(base_h - pageRect.height) > 1)) {
+                    const safeBaseW = base_w || pageRect.width;
+                    const safeBaseH = base_h || pageRect.height;
+                    finalX = (finalX / safeBaseW) * pageRect.width;
+                    finalY = (finalY / safeBaseH) * pageRect.height;
                 }
-            }
 
-            function writeSaved(doc) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(doc)); } catch (_) {} }
+                finalX = clamp(finalX, 0, Math.max(0, pageRect.width - elRect.width));
+                finalY = clamp(finalY, 0, Math.max(0, pageRect.height - elRect.height));
+
+                return { x: finalX, y: finalY };
+            }
 
             function applyDefaultsIfMissing(el, pageRect) {
                 const left = (el.getAttribute('data-default-left') || '').trim();
                 const top = (el.getAttribute('data-default-top') || '').trim();
+                const dw = (el.getAttribute('data-default-width') || '').trim();
+                const dh = (el.getAttribute('data-default-height') || '').trim();
                 if (!left || !top) return;
                 const tmp = document.createElement('div');
                 tmp.style.position = 'absolute';
                 tmp.style.left = left;
                 tmp.style.top = top;
-                tmp.style.width = '0px';
-                tmp.style.height = '0px';
+                tmp.style.width = dw || '0px';
+                tmp.style.height = dh || '0px';
                 page.appendChild(tmp);
                 const r = tmp.getBoundingClientRect();
                 tmp.remove();
                 const s = pageRect && pageRect.scale ? pageRect.scale : 1;
                 el.style.left = `${(r.left - pageRect.left) / s}px`;
                 el.style.top = `${(r.top - pageRect.top) / s}px`;
+                if (dw) {
+                    try {
+                        const tmpW = document.createElement('div');
+                        tmpW.style.position = 'absolute';
+                        tmpW.style.visibility = 'hidden';
+                        tmpW.style.pointerEvents = 'none';
+                        tmpW.style.width = dw;
+                        tmpW.style.height = '1px';
+                        page.appendChild(tmpW);
+                        const rw = tmpW.getBoundingClientRect();
+                        tmpW.remove();
+                        if (rw.width > 0) el.style.width = `${rw.width / s}px`;
+                    } catch (_) {}
+                } else {
+                    el.style.width = '';
+                }
+                if (dh) {
+                    try {
+                        const tmpH = document.createElement('div');
+                        tmpH.style.position = 'absolute';
+                        tmpH.style.visibility = 'hidden';
+                        tmpH.style.pointerEvents = 'none';
+                        tmpH.style.height = dh;
+                        tmpH.style.width = '1px';
+                        page.appendChild(tmpH);
+                        const rh = tmpH.getBoundingClientRect();
+                        tmpH.remove();
+                        if (rh.height > 0) el.style.height = `${rh.height / s}px`;
+                    } catch (_) {}
+                } else {
+                    el.style.height = '';
+                }
             }
 
             function applyAllPositions() {
                 const doc = readSaved();
                 const pageRect = getPageRect();
                 const els = Array.from(document.querySelectorAll('[data-pos-key]'));
-                els.forEach((el) => applyDefaultsIfMissing(el, pageRect));
-                const refresh = getPageRect();
+                // FIRST PASS: remove elements permanently marked as deleted (deleted: true)
                 els.forEach((el) => {
                     const key = (el.getAttribute('data-pos-key') || '').trim();
                     if (!key) return;
+                    const entry = (doc.elements && typeof doc.elements === 'object') ? doc.elements[key] : null;
+                    if (entry && typeof entry === 'object' && entry.deleted === true) {
+                        try { el.parentNode && el.parentNode.removeChild(el); } catch (_) {}
+                    }
+                });
+                // SECOND PASS: re-query remaining elements, apply defaults + positions
+                const remainingEls = Array.from(document.querySelectorAll('[data-pos-key]'));
+                remainingEls.forEach((el) => applyDefaultsIfMissing(el, pageRect));
+                const refreshPageRect = getPageRect();
+                remainingEls.forEach((el) => {
+                    const key = (el.getAttribute('data-pos-key') || '').trim();
+                    if (!key) return;
                     const entry = doc.elements[key];
-                    if (!entry) return;
+                    if (!entry || typeof entry !== 'object') return;
+                    if (entry.deleted === true) return;
                     applyEntryContent(el, entry);
                     const elRect = el.getBoundingClientRect();
-                    const s = refresh.scale || 1;
-                    const w = elRect.width / s;
-                    const h = elRect.height / s;
-                    let x = typeof entry.x === 'number' ? entry.x : null;
-                    let y = typeof entry.y === 'number' ? entry.y : null;
-                    if (x === null || y === null) return;
-                    x = clamp(x, 0, Math.max(0, refresh.width - w));
-                    y = clamp(y, 0, Math.max(0, refresh.height - h));
-                    el.style.left = `${x}px`;
-                    el.style.top = `${y}px`;
+                    const s = refreshPageRect && refreshPageRect.scale ? refreshPageRect.scale : 1;
+                    const normalized = validateAndNormalizeEntry(entry, refreshPageRect, { width: elRect.width / s, height: elRect.height / s });
+                    if (!normalized) return;
+                    el.style.left = `${normalized.x}px`;
+                    el.style.top = `${normalized.y}px`;
                     applyEntryVisuals(el, entry);
                 });
             }
@@ -352,36 +769,12 @@
                 page.style.transform = `scale(${scale})`;
             }
 
-            async function loadFromFile() {
-                await initQtBridge();
-                if (!qtBridge || typeof qtBridge.load_positions !== 'function') return null;
-                return await new Promise((resolve) => {
-                    try {
-                        qtBridge.load_positions((txt) => {
-                            const obj = safeParseJson(txt || '');
-                            if (!obj || typeof obj !== 'object' || obj.version !== 2 || typeof obj.elements !== 'object') return resolve(null);
-                            resolve(obj);
-                        });
-                    } catch (_) { resolve(null); }
-                });
-            }
-
-            async function saveToFile(doc) {
-                await initQtBridge();
-                if (!qtBridge || typeof qtBridge.save_positions !== 'function') return false;
-                return await new Promise((resolve) => {
-                    try { qtBridge.save_positions(JSON.stringify(doc || {}), (ok) => resolve(!!ok)); }
-                    catch (_) { resolve(false); }
-                });
-            }
-
             let userTouched = false;
             (function initFast() {
                 try {
                     const seed = Array.from(document.querySelectorAll('[data-pos-key]'));
                     for (const el of seed) {
                         if (!(el instanceof HTMLElement)) continue;
-                        if (isImg(el)) continue;
                         if (!el.dataset.originalHtml) el.dataset.originalHtml = el.innerHTML || '';
                     }
                 } catch (_) {}
@@ -403,18 +796,19 @@
                     } catch (_) {}
                 });
 
-                (async function syncFromFile() {
+                (async function syncFromBackendLater() {
                     const localDoc = readSaved();
-                    const fromFile = await loadFromFile();
-                    if (!fromFile || userTouched) return;
-                    const localCount = localDoc && localDoc.elements ? Object.keys(localDoc.elements).length : 0;
-                    const fileCount = fromFile && fromFile.elements ? Object.keys(fromFile.elements).length : 0;
+                    const backend = await loadFromBackendWithRetry(18, 140);
+                    if (!backend || userTouched) return;
                     const localUpdated = Number(localDoc.updated_at || 0);
-                    const fileUpdated = Number(fromFile.updated_at || 0);
-                    if (fileCount > 0 && (localCount === 0 || fileUpdated >= localUpdated)) {
-                        writeSaved(fromFile);
+                    const backendUpdated = Number(backend.updated_at || 0);
+                    const localCount = localDoc && localDoc.elements ? Object.keys(localDoc.elements).length : 0;
+                    const backendCount = backend && backend.elements ? Object.keys(backend.elements).length : 0;
+                    if (backendCount > 0 && (localCount === 0 || backendUpdated >= localUpdated)) {
+                        writeSaved(backend);
                         applyAllPositions();
                         updateFitScale();
+                        try { window.__restoreDynamicCustomLogos && window.__restoreDynamicCustomLogos(); } catch (_) {}
                     }
                 })();
             })();
@@ -431,7 +825,8 @@
                 const hidden = el.classList.contains('hidden-field');
                 const fontPart = (fontPx !== null && !isImg(el)) ? `, font ${Math.round(fontPx)}px` : '';
                 const hiddenPart = hidden ? ' (hidden)' : '';
-                hud.textContent = `${key}: x ${Math.round(rel.x)}px, y ${Math.round(rel.y)}px${fontPart}${hiddenPart} [F2 edit, W wrap, +/- font, H hide/show, double-click reset]`;
+                const sizePart = (typeof rel.w === 'number' && typeof rel.h === 'number') ? `, ${Math.round(rel.w)}×${Math.round(rel.h)}px` : '';
+                hud.textContent = `${key}: x ${Math.round(rel.x)}px, y ${Math.round(rel.y)}px${sizePart}${fontPart}${hiddenPart} · Drag to move · Drag corner handles to resize · [Del to remove, +/= bigger, - smaller]`;
                 hud.style.display = 'block';
             }
             function hideHud() { hud.style.display = 'none'; }
@@ -451,11 +846,22 @@
                 let font_family = null;
                 let font_weight = null;
                 let font_style = null;
+                let color = null;
+                let text_decoration = null;
                 if (!isImg(el)) {
                     try {
-                        const cur = el.innerHTML || '';
+                        // Read innerHTML from a clone with any live editor-only artifacts
+                        // (resize handles) stripped out first, so they never get baked
+                        // into the saved content (see print_service_v2.py's invoice
+                        // persistEntry for the historical bug this avoids).
+                        const clone = el.cloneNode(true);
+                        const staleHandles = clone.querySelectorAll('.resize-handle');
+                        for (let i = 0; i < staleHandles.length; i++) {
+                            staleHandles[i].remove();
+                        }
+                        const cur = clone.innerHTML || '';
                         const orig = el.dataset.originalHtml || '';
-                        const hasRich = cur.indexOf('sub-hidden') >= 0 || cur.indexOf('sub-font') >= 0 || cur.indexOf('sub-bold') >= 0 || cur.indexOf('sub-italic') >= 0;
+                        const hasRich = cur.indexOf('sub-hidden') >= 0 || cur.indexOf('sub-font') >= 0 || cur.indexOf('sub-color') >= 0 || cur.indexOf('sub-bold') >= 0 || cur.indexOf('sub-italic') >= 0;
                         if (hasRich || cur !== orig) html = cur;
                     } catch (_) {}
                     try {
@@ -463,12 +869,23 @@
                         font_family = cs && cs.fontFamily ? String(cs.fontFamily) : null;
                         font_weight = cs && cs.fontWeight ? String(cs.fontWeight) : null;
                         font_style = cs && cs.fontStyle ? String(cs.fontStyle) : null;
+                        const curColor = cs && cs.color ? String(cs.color) : '';
+                        if (curColor && curColor !== 'rgb(0, 0, 0)' && curColor.toLowerCase() !== '#000000' && curColor.toLowerCase() !== 'black') {
+                            color = curColor;
+                        }
+                        const curDeco = cs && cs.textDecoration ? String(cs.textDecoration) : '';
+                        const decoLine = (curDeco || '').trim().split(/\s+/)[0] || '';
+                        if (decoLine && decoLine !== 'none') {
+                            text_decoration = curDeco;
+                        }
                     } catch (_) {}
                 }
                 doc.elements[key] = {
                     ...prev,
                     x: rel.x,
                     y: rel.y,
+                    xr: pageRect.width ? rel.x / pageRect.width : 0,
+                    yr: pageRect.height ? rel.y / pageRect.height : 0,
                     base_w: pageRect.width,
                     base_h: pageRect.height,
                     updated_at: nowMs(),
@@ -476,10 +893,14 @@
                     ...(font_family ? { font_family: font_family } : {}),
                     ...(font_weight ? { font_weight: font_weight } : {}),
                     ...(font_style ? { font_style: font_style } : {}),
-                    ...(extras || {})
+                    ...(color ? { color: color } : {}),
+                    ...(text_decoration ? { text_decoration: text_decoration } : {}),
+                    ...((typeof rel.w === 'number' && Number.isFinite(rel.w) && rel.w > 0) ? { w: rel.w } : {}),
+                    ...((typeof rel.h === 'number' && Number.isFinite(rel.h) && rel.h > 0) ? { h: rel.h } : {}),
+                    ...(extras || {}),
                 };
                 writeSaved(doc);
-                saveToFile(doc).catch(() => {});
+                saveToBackend(doc).catch(() => {});
             }
 
             function startDragPointer(ev, el) {
@@ -487,7 +908,19 @@
                 selected = el;
                 const pageRect = getPageRect();
                 const rel = getRelPx(el, pageRect);
-                drag = { el, pointerId: ev.pointerId, startClientX: ev.clientX, startClientY: ev.clientY, startX: rel.x, startY: rel.y, pageW: pageRect.width, pageH: pageRect.height, elW: rel.w, elH: rel.h, scale: pageRect.scale || 1 };
+                drag = {
+                    el,
+                    pointerId: ev.pointerId,
+                    startClientX: ev.clientX,
+                    startClientY: ev.clientY,
+                    startX: rel.x,
+                    startY: rel.y,
+                    pageW: pageRect.width,
+                    pageH: pageRect.height,
+                    elW: rel.w,
+                    elH: rel.h,
+                    scale: pageRect.scale || 1,
+                };
                 el.classList.add('dragging');
                 showHud(el);
                 try { el.setPointerCapture(ev.pointerId); } catch (_) {}
@@ -498,8 +931,10 @@
                 const s = drag.scale || 1;
                 const dx = (ev.clientX - drag.startClientX) / s;
                 const dy = (ev.clientY - drag.startClientY) / s;
-                const x = clamp(drag.startX + dx, 0, Math.max(0, drag.pageW - drag.elW));
-                const y = clamp(drag.startY + dy, 0, Math.max(0, drag.pageH - drag.elH));
+                const rawX = drag.startX + dx;
+                const rawY = drag.startY + dy;
+                const x = clamp(rawX, 0, Math.max(0, drag.pageW - drag.elW));
+                const y = clamp(rawY, 0, Math.max(0, drag.pageH - drag.elH));
                 drag.nextX = x;
                 drag.nextY = y;
                 if (!raf) {
@@ -525,10 +960,10 @@
 
             page.addEventListener('pointerdown', (ev) => {
                 const target = ev.target;
-                if (!(target instanceof HTMLElement)) return;
+                if (!(target instanceof Element)) return;
                 const el = target.closest('.draggable[data-pos-key]');
                 if (!el) return;
-                selected = el;
+                setSelected(el);
                 if (el.classList.contains('edit-mode') && !isImg(el)) return;
                 startDragPointer(ev, el);
                 ev.preventDefault();
@@ -544,39 +979,48 @@
 
             document.addEventListener('dblclick', (ev) => {
                 const target = ev.target;
-                if (!(target instanceof HTMLElement)) return;
+                if (!(target instanceof Element)) return;
                 const el = target.closest('.draggable[data-pos-key]');
                 if (!el) return;
-                selected = el;
+                setSelected(el);
                 const key = el.getAttribute('data-pos-key') || '';
                 const pageRect = getPageRect();
                 applyDefaultsIfMissing(el, pageRect);
+                // Full factory-style reset (mirrors the toolbar Reset button)
+                try {
+                    el.style.color = '';
+                    el.classList.remove('hidden-field');
+                    el.classList.remove('wrap-field');
+                    el.style.maxWidth = '';
+                    el.classList.remove('edit-mode');
+                    if (typeof el.contentEditable !== 'undefined') el.contentEditable = 'false';
+                    if (el.dataset && el.dataset.originalHtml) {
+                        el.innerHTML = el.dataset.originalHtml;
+                    }
+                } catch (_) {}
+                if (!isImg(el)) {
+                    try {
+                        el.style.fontSize = '';
+                        el.style.fontFamily = '';
+                        el.style.fontWeight = '';
+                        el.style.fontStyle = '';
+                        el.style.textDecoration = '';
+                    } catch (_) {}
+                }
                 if (key) {
                     const doc = readSaved();
                     if (doc.elements && typeof doc.elements === 'object') delete doc.elements[key];
                     doc.updated_at = nowMs();
                     writeSaved(doc);
-                    saveToFile(doc).catch(() => {});
+                    saveToBackend(doc).catch(() => {});
                 }
+                syncToolbarFromSelected();
                 showHud(el);
                 ev.preventDefault();
             });
 
-            document.addEventListener('click', (ev) => {
-                const target = ev.target;
-                if (!(target instanceof HTMLElement)) return;
-                const hit = target.closest('.draggable[data-pos-key]');
-                if (hit) {
-                    selected = hit;
-                    showHud(hit);
-                    return;
-                }
-                hideHud();
-                selected = null;
-            });
-
             document.addEventListener('keydown', (ev) => {
-                if (selected && (ev.key === 'b' || ev.key === 'B' || ev.key === 'i' || ev.key === 'I' || ev.key === 'f' || ev.key === 'F')) {
+                if (selected && (ev.key === 'b' || ev.key === 'B' || ev.key === 'i' || ev.key === 'I' || ev.key === 'f' || ev.key === 'F' || ev.key === 'u' || ev.key === 'U')) {
                     const el = selected;
                     const key = (el.getAttribute('data-pos-key') || '').trim();
                     if (!key || isImg(el)) return;
@@ -587,6 +1031,7 @@
                         const next = (cur === '700' || cur === '800' || cur === '900' || cur.toLowerCase() === 'bold') ? '400' : '700';
                         el.style.fontWeight = next;
                         persistEntry(el, { font_weight: next });
+                        syncToolbarFromSelected();
                         showHud(el);
                         ev.preventDefault();
                         return;
@@ -596,6 +1041,19 @@
                         const next = cur.toLowerCase() === 'italic' ? 'normal' : 'italic';
                         el.style.fontStyle = next;
                         persistEntry(el, { font_style: next });
+                        syncToolbarFromSelected();
+                        showHud(el);
+                        ev.preventDefault();
+                        return;
+                    }
+                    if (ev.key === 'u' || ev.key === 'U') {
+                        const cur = String(prev.text_decoration || getComputedStyle(el).textDecoration || 'none');
+                        const firstPart = (cur || '').trim().split(/\s+/)[0] || 'none';
+                        const isUnderline = firstPart === 'underline';
+                        const next = isUnderline ? 'none' : 'underline';
+                        el.style.textDecoration = next;
+                        persistEntry(el, { text_decoration: next });
+                        syncToolbarFromSelected();
                         showHud(el);
                         ev.preventDefault();
                         return;
@@ -607,6 +1065,7 @@
                         const next = fonts[(idx + 1) % fonts.length];
                         el.style.fontFamily = next;
                         persistEntry(el, { font_family: next });
+                        syncToolbarFromSelected();
                         showHud(el);
                         ev.preventDefault();
                         return;
@@ -696,10 +1155,707 @@
                         selected.classList.remove('edit-mode');
                         selected.contentEditable = 'false';
                     }
-                    selected = null;
+                    setSelected(null);
                     if (drag) endDragPointer();
                 }
             });
+
+            document.addEventListener('click', (ev) => {
+                const target = ev.target;
+                if (!(target instanceof Element)) return;
+                const hit = target.closest('.draggable[data-pos-key]');
+                if (hit) {
+                    setSelected(hit);
+                    showHud(hit);
+                    syncToolbarFromSelected();
+                    return;
+                }
+                hideHud();
+                setSelected(null);
+                syncToolbarFromSelected();
+            });
+
+            // -------- Styling Toolbar wiring --------
+            const toolbar = document.getElementById('styleToolbar');
+            const stTarget = document.getElementById('stTarget');
+            const stFontSize = document.getElementById('stFontSize');
+            const stFontSizeVal = document.getElementById('stFontSizeVal');
+            const stFontFamily = document.getElementById('stFontFamily');
+            const stBold = document.getElementById('stBold');
+            const stItalic = document.getElementById('stItalic');
+            const stUnderline = document.getElementById('stUnderline');
+            const stColor = document.getElementById('stColor');
+            const stResetColor = document.getElementById('stResetColor');
+            const stHide = document.getElementById('stHide');
+            const stWrap = document.getElementById('stWrap');
+            const stEdit = document.getElementById('stEdit');
+            const stReset = document.getElementById('stReset');
+            const stResetAll = document.getElementById('stResetAll');
+
+            function rgbToHex(rgbStr) {
+                try {
+                    const s = String(rgbStr || '').trim();
+                    if (s.startsWith('#')) return s.length === 4 ? s.split('').map((c,i) => i === 0 ? c : c+c).join('') : s;
+                    const m = s.match(/rgba?\(([^)]+)\)/i);
+                    if (!m) return '#000000';
+                    const parts = m[1].split(',').map(p => parseInt((p || '').trim(), 10));
+                    const [r=0, g=0, b=0] = parts;
+                    const toHex = (n) => clamp(n|0, 0, 255).toString(16).padStart(2, '0');
+                    return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+                } catch (_) {
+                    return '#000000';
+                }
+            }
+
+            function syncToolbarFromSelected() {
+                if (!toolbar) return;
+                const el = selected;
+                if (!el || !(el instanceof HTMLElement) || isImg(el)) {
+                    toolbar.style.display = 'none';
+                    if (stTarget) stTarget.textContent = '—';
+                    return;
+                }
+                toolbar.style.display = 'flex';
+                const key = (el.getAttribute('data-pos-key') || '').trim();
+                if (stTarget) stTarget.textContent = key || 'field';
+                const doc = readSaved();
+                const prev = (doc.elements && doc.elements[key] && typeof doc.elements[key] === 'object') ? doc.elements[key] : {};
+                const cs = getComputedStyle(el);
+                // Font size
+                const fontPx = (typeof prev.font_px === 'number' && Number.isFinite(prev.font_px)) ? prev.font_px : getFontPx(el);
+                if (stFontSize) {
+                    const rounded = Math.round(fontPx || 11);
+                    stFontSize.value = String(clamp(rounded, 6, 48));
+                    if (stFontSizeVal) stFontSizeVal.textContent = `${rounded}px`;
+                }
+                // Font family
+                if (stFontFamily) {
+                    const curFam = String(prev.font_family || (cs && cs.fontFamily) || 'Arial, sans-serif').toLowerCase();
+                    let matchIdx = 0;
+                    for (let i = 0; i < stFontFamily.options.length; i++) {
+                        const v = String(stFontFamily.options[i].value || '').toLowerCase().split(',')[0].trim();
+                        if (v && curFam.indexOf(v) >= 0) { matchIdx = i; break; }
+                    }
+                    stFontFamily.selectedIndex = matchIdx;
+                }
+                // Bold
+                if (stBold) {
+                    const fw = String(prev.font_weight || (cs && cs.fontWeight) || '400').toLowerCase();
+                    const isBold = fw === '700' || fw === '800' || fw === '900' || fw === 'bold';
+                    stBold.classList.toggle('active', isBold);
+                }
+                // Italic
+                if (stItalic) {
+                    const fs = String(prev.font_style || (cs && cs.fontStyle) || 'normal').toLowerCase();
+                    stItalic.classList.toggle('active', fs === 'italic' || fs === 'oblique');
+                }
+                // Underline
+                if (stUnderline) {
+                    const td = String(prev.text_decoration || (cs && cs.textDecoration) || 'none').trim();
+                    const first = (td.split(/\s+/)[0] || 'none').toLowerCase();
+                    stUnderline.classList.toggle('active', first === 'underline');
+                }
+                // Color
+                if (stColor) {
+                    const cc = typeof prev.color === 'string' && prev.color ? prev.color : ((cs && cs.color) || '#000000');
+                    stColor.value = rgbToHex(cc);
+                }
+                // Hide/Show button label
+                if (stHide) {
+                    const hidden = el.classList.contains('hidden-field') || prev.hidden === true;
+                    stHide.textContent = hidden ? 'Show' : 'Hide';
+                    stHide.classList.toggle('active', hidden);
+                }
+                // Wrap button
+                if (stWrap) {
+                    const wrapped = el.classList.contains('wrap-field') || prev.wrap === true;
+                    stWrap.classList.toggle('active', wrapped);
+                }
+                // Edit button
+                if (stEdit) {
+                    const editing = el.classList.contains('edit-mode');
+                    stEdit.classList.toggle('active', editing);
+                    stEdit.textContent = editing ? 'Save' : 'Edit';
+                }
+            }
+
+            if (toolbar) {
+                // Font size slider
+                stFontSize && stFontSize.addEventListener('input', (e) => {
+                    if (!selected || isImg(selected)) return;
+                    const px = clamp(parseInt(e.target.value || '11', 10), 6, 48);
+                    selected.style.fontSize = `${px}px`;
+                    if (stFontSizeVal) stFontSizeVal.textContent = `${px}px`;
+                    persistEntry(selected, { font_px: px });
+                    showHud(selected);
+                });
+
+                // Font family
+                stFontFamily && stFontFamily.addEventListener('change', (e) => {
+                    if (!selected || isImg(selected)) return;
+                    const fam = e.target.value || 'Arial, sans-serif';
+                    selected.style.fontFamily = fam;
+                    persistEntry(selected, { font_family: fam });
+                    showHud(selected);
+                });
+
+                // Bold toggle
+                stBold && stBold.addEventListener('click', () => {
+                    if (!selected || isImg(selected)) return;
+                    const key = (selected.getAttribute('data-pos-key') || '').trim();
+                    const doc = readSaved();
+                    const prev = (doc.elements && doc.elements[key] && typeof doc.elements[key] === 'object') ? doc.elements[key] : {};
+                    const cur = String(prev.font_weight || getComputedStyle(selected).fontWeight || '400');
+                    const isBold = cur === '700' || cur === '800' || cur === '900' || cur.toLowerCase() === 'bold';
+                    const next = isBold ? '400' : '700';
+                    selected.style.fontWeight = next;
+                    persistEntry(selected, { font_weight: next });
+                    syncToolbarFromSelected();
+                    showHud(selected);
+                });
+
+                // Italic toggle
+                stItalic && stItalic.addEventListener('click', () => {
+                    if (!selected || isImg(selected)) return;
+                    const key = (selected.getAttribute('data-pos-key') || '').trim();
+                    const doc = readSaved();
+                    const prev = (doc.elements && doc.elements[key] && typeof doc.elements[key] === 'object') ? doc.elements[key] : {};
+                    const cur = String(prev.font_style || getComputedStyle(selected).fontStyle || 'normal');
+                    const next = cur.toLowerCase() === 'italic' ? 'normal' : 'italic';
+                    selected.style.fontStyle = next;
+                    persistEntry(selected, { font_style: next });
+                    syncToolbarFromSelected();
+                    showHud(selected);
+                });
+
+                // Underline toggle
+                stUnderline && stUnderline.addEventListener('click', () => {
+                    if (!selected || isImg(selected)) return;
+                    const key = (selected.getAttribute('data-pos-key') || '').trim();
+                    const doc = readSaved();
+                    const prev = (doc.elements && doc.elements[key] && typeof doc.elements[key] === 'object') ? doc.elements[key] : {};
+                    const cur = String(prev.text_decoration || getComputedStyle(selected).textDecoration || 'none');
+                    const first = (cur || '').trim().split(/\s+/)[0] || 'none';
+                    const isUnderline = first === 'underline';
+                    const next = isUnderline ? 'none' : 'underline';
+                    selected.style.textDecoration = next;
+                    persistEntry(selected, { text_decoration: next });
+                    syncToolbarFromSelected();
+                    showHud(selected);
+                });
+
+                // Color picker - if the field is in edit mode and a word/phrase is
+                // highlighted (or the caret is inside an already-colored span), the
+                // color applies to just that selection; otherwise it applies to the
+                // whole field.
+                stColor && stColor.addEventListener('input', (e) => {
+                    if (!selected || isImg(selected)) return;
+                    const col = e.target.value || '#000000';
+                    if (selected.classList.contains('edit-mode') && applySelectionColor(selected, col)) {
+                        persistEntry(selected, null);
+                        showHud(selected);
+                        return;
+                    }
+                    selected.style.color = col;
+                    persistEntry(selected, { color: col });
+                    showHud(selected);
+                });
+
+                // Reset color - unwraps a focused per-word color span if the caret
+                // is inside one, otherwise resets the whole field's color.
+                stResetColor && stResetColor.addEventListener('click', () => {
+                    if (!selected || isImg(selected)) return;
+                    if (selected.classList.contains('edit-mode') && resetSelectionColor(selected)) {
+                        persistEntry(selected, null);
+                        syncToolbarFromSelected();
+                        showHud(selected);
+                        return;
+                    }
+                    selected.style.color = '';
+                    persistEntry(selected, { color: '' });
+                    syncToolbarFromSelected();
+                    showHud(selected);
+                });
+
+                // Hide / Show
+                stHide && stHide.addEventListener('click', () => {
+                    if (!selected) return;
+                    const key = (selected.getAttribute('data-pos-key') || '').trim();
+                    if (!key) return;
+                    const doc = readSaved();
+                    const prev = (doc.elements && doc.elements[key] && typeof doc.elements[key] === 'object') ? doc.elements[key] : {};
+                    const nextHidden = !(prev.hidden === true || selected.classList.contains('hidden-field'));
+                    if (nextHidden) selected.classList.add('hidden-field');
+                    else selected.classList.remove('hidden-field');
+                    persistEntry(selected, { hidden: nextHidden });
+                    syncToolbarFromSelected();
+                    showHud(selected);
+                });
+
+                // Word wrap toggle
+                stWrap && stWrap.addEventListener('click', () => {
+                    if (!selected) return;
+                    const key = (selected.getAttribute('data-pos-key') || '').trim();
+                    if (!key) return;
+                    const doc = readSaved();
+                    const prev = (doc.elements && doc.elements[key] && typeof doc.elements[key] === 'object') ? doc.elements[key] : {};
+                    const nextWrap = !(prev.wrap === true || selected.classList.contains('wrap-field'));
+                    if (nextWrap) {
+                        selected.classList.add('wrap-field');
+                        if (typeof prev.wrap_max_px !== 'number' || !Number.isFinite(prev.wrap_max_px)) {
+                            selected.style.maxWidth = '280px';
+                        }
+                        persistEntry(selected, { wrap: true, wrap_max_px: (typeof prev.wrap_max_px === 'number' && Number.isFinite(prev.wrap_max_px)) ? prev.wrap_max_px : 280 });
+                    } else {
+                        selected.classList.remove('wrap-field');
+                        selected.style.maxWidth = '';
+                        persistEntry(selected, { wrap: false });
+                    }
+                    syncToolbarFromSelected();
+                    showHud(selected);
+                });
+
+                // Edit mode toggle
+                stEdit && stEdit.addEventListener('click', () => {
+                    if (!selected || isImg(selected)) return;
+                    const isEditing = selected.classList.contains('edit-mode');
+                    if (isEditing) {
+                        selected.classList.remove('edit-mode');
+                        selected.contentEditable = 'false';
+                        persistEntry(selected, null);
+                    } else {
+                        selected.classList.add('edit-mode');
+                        selected.contentEditable = 'true';
+                        selected.setAttribute('spellcheck', 'false');
+                        try {
+                            const r = document.createRange();
+                            r.selectNodeContents(selected);
+                            r.collapse(false);
+                            const sel = window.getSelection();
+                            if (sel) {
+                                sel.removeAllRanges();
+                                sel.addRange(r);
+                            }
+                        } catch (_) {}
+                    }
+                    syncToolbarFromSelected();
+                    showHud(selected);
+                });
+
+                // Reset (remove stored entry, restore defaults, reapply visuals)
+                stReset && stReset.addEventListener('click', () => {
+                    if (!selected) return;
+                    const key = (selected.getAttribute('data-pos-key') || '').trim();
+                    const pageRect = getPageRect();
+                    applyDefaultsIfMissing(selected, pageRect);
+                    try {
+                        selected.style.color = '';
+                        selected.classList.remove('hidden-field');
+                        selected.classList.remove('wrap-field');
+                        selected.style.maxWidth = '';
+                        selected.classList.remove('edit-mode');
+                        if (typeof selected.contentEditable !== 'undefined') selected.contentEditable = 'false';
+                        if (selected.dataset && selected.dataset.originalHtml) {
+                            selected.innerHTML = selected.dataset.originalHtml;
+                        }
+                    } catch (_) {}
+                    if (!isImg(selected)) {
+                        selected.style.fontSize = '';
+                        selected.style.fontFamily = '';
+                        selected.style.fontWeight = '';
+                        selected.style.fontStyle = '';
+                        selected.style.textDecoration = '';
+                    }
+                    if (key) {
+                        const doc = readSaved();
+                        if (doc.elements && typeof doc.elements === 'object') delete doc.elements[key];
+                        doc.updated_at = nowMs();
+                        writeSaved(doc);
+                        saveToBackend(doc).catch(() => {});
+                    }
+                    syncToolbarFromSelected();
+                    showHud(selected);
+                });
+
+                // Reset All: clear all saved positions, styles, custom logos AND deleted markers
+                // This re-renders the letter like a fresh page load.
+                stResetAll && stResetAll.addEventListener('click', () => {
+                    const ok = confirm("Reset ALL authority letter layout, styles, and permanently deleted fields?\n\n- All fields return to default positions/styles\n- Deleted fields are restored\n- Custom added logos are removed\n\nThis cannot be undone.");
+                    if (!ok) return;
+                    userTouched = true;
+                    try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
+                    const empty = { version: 2, updated_at: nowMs(), elements: {} };
+                    writeSaved(empty);
+                    saveToBackend(empty).catch(() => {});
+                    setTimeout(() => { saveToBackend(readSaved()).catch(() => {}); }, 350);
+                    setTimeout(() => { try { window.location.reload(); } catch (_) {} }, 120);
+                });
+
+                toolbar.addEventListener('click', (e) => { e.stopPropagation(); });
+                toolbar.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
+                try { syncToolbarFromSelected(); } catch (_) {}
+            }
+            // -------- End Styling Toolbar wiring --------
+
+            // -------- Logo / Resize / Add-Delete wiring --------
+            const stAddLogo = document.getElementById('stAddLogo');
+            const stDelete = document.getElementById('stDelete');
+            const stFileInput = document.getElementById('stFileInput');
+            const stSize = document.getElementById('stSize');
+            const stLockAspect = document.getElementById('stLockAspect');
+            const HANDLE_TYPES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+            let resizeHandles = [];
+            let resizeDrag = null;
+
+            function clearResizeHandles() {
+                for (const h of resizeHandles) {
+                    try { if (h.parentNode) h.parentNode.removeChild(h); } catch (_) {}
+                }
+                resizeHandles = [];
+            }
+
+            function buildResizeHandles(el) {
+                clearResizeHandles();
+                if (!el || !(el instanceof HTMLElement)) return;
+                for (const t of HANDLE_TYPES) {
+                    const h = document.createElement('div');
+                    h.className = `resize-handle ${t}`;
+                    h.dataset.handle = t;
+                    h.setAttribute('draggable', 'false');
+                    el.appendChild(h);
+                    resizeHandles.push(h);
+                    h.addEventListener('pointerdown', (ev) => {
+                        ev.stopPropagation();
+                        ev.preventDefault();
+                        startResizeDrag(ev, el, t);
+                    });
+                }
+            }
+
+            function startResizeDrag(ev, el, handleType) {
+                if (!ev.isPrimary) return;
+                const pageRect = getPageRect();
+                const rel = getRelPx(el, pageRect);
+                resizeDrag = {
+                    el,
+                    handle: handleType,
+                    pointerId: ev.pointerId,
+                    startClientX: ev.clientX,
+                    startClientY: ev.clientY,
+                    startX: rel.x,
+                    startY: rel.y,
+                    startW: typeof rel.w === 'number' && rel.w > 0 ? rel.w : (el.offsetWidth || 100),
+                    startH: typeof rel.h === 'number' && rel.h > 0 ? rel.h : (el.offsetHeight || 80),
+                    scale: pageRect.scale,
+                    lockAspect: !!(stLockAspect && stLockAspect.checked),
+                };
+                if (resizeDrag.startW && resizeDrag.startH) {
+                    resizeDrag.aspect = resizeDrag.startW / resizeDrag.startH;
+                } else {
+                    resizeDrag.aspect = null;
+                }
+                try { el.setPointerCapture(ev.pointerId); } catch (_) {}
+                try { document.body && document.body.setPointerCapture(ev.pointerId); } catch (_) {}
+                el.classList.add('dragging');
+                selected = el;
+            }
+
+            function moveResizeDrag(ev) {
+                if (!resizeDrag || ev.pointerId !== resizeDrag.pointerId) return;
+                const { startClientX, startClientY, startX, startY, startW, startH, handle, scale, lockAspect, aspect } = resizeDrag;
+                const s = typeof scale === 'number' && scale > 0 ? scale : 1;
+                const dx = (ev.clientX - startClientX) / s;
+                const dy = (ev.clientY - startClientY) / s;
+                let x = startX;
+                let y = startY;
+                let w = startW;
+                let h = startH;
+                if (handle.indexOf('e') >= 0) w = Math.max(10, startW + dx);
+                if (handle.indexOf('s') >= 0) h = Math.max(10, startH + dy);
+                if (handle.indexOf('w') >= 0) {
+                    const newW = Math.max(10, startW - dx);
+                    x = startX + (startW - newW);
+                    w = newW;
+                }
+                if (handle.indexOf('n') >= 0) {
+                    const newH = Math.max(10, startH - dy);
+                    y = startY + (startH - newH);
+                    h = newH;
+                }
+                if (lockAspect && aspect && aspect > 0) {
+                    if (handle === 'e' || handle === 'w') {
+                        h = Math.max(10, Math.round(w / aspect));
+                    } else if (handle === 'n' || handle === 's') {
+                        w = Math.max(10, Math.round(h * aspect));
+                    } else {
+                        const rw = w / startW;
+                        const rh = h / startH;
+                        const r = Math.max(rw, rh);
+                        w = Math.max(10, Math.round(startW * r));
+                        h = Math.max(10, Math.round(startH * r));
+                        if (handle.indexOf('w') >= 0) x = startX + (startW - w);
+                        if (handle.indexOf('n') >= 0) y = startY + (startH - h);
+                    }
+                }
+                const el2 = resizeDrag.el;
+                el2.style.left = `${x}px`;
+                el2.style.top = `${y}px`;
+                el2.style.width = `${w}px`;
+                el2.style.height = `${h}px`;
+                syncSizeSliderFromElement(el2);
+                showHud(el2);
+            }
+
+            function endResizeDrag(ev) {
+                if (!resizeDrag) return;
+                if (ev && ev.pointerId !== resizeDrag.pointerId) return;
+                const el2 = resizeDrag.el;
+                resizeDrag = null;
+                el2.classList.remove('dragging');
+                persistEntry(el2, null);
+                syncToolbarFromSelected();
+                showHud(el2);
+            }
+
+            document.addEventListener('pointermove', (ev) => {
+                if (resizeDrag) {
+                    moveResizeDrag(ev);
+                    ev.preventDefault();
+                }
+            });
+            document.addEventListener('pointerup', (ev) => { endResizeDrag(ev); });
+            document.addEventListener('pointercancel', (ev) => { endResizeDrag(ev); });
+
+            function syncSizeSliderFromElement(el) {
+                if (!stSize || !el || !(el instanceof HTMLElement)) return;
+                const w = el.offsetWidth || 0;
+                if (w <= 0) return;
+                const minV = parseInt(stSize.min || '20', 10);
+                const maxV = parseInt(stSize.max || '600', 10);
+                stSize.value = String(clamp(w, minV, maxV));
+            }
+
+            function deleteSelectedField() {
+                if (!selected || !(selected instanceof HTMLElement)) return;
+                const key = (selected.getAttribute('data-pos-key') || '').trim();
+                if (!key) return;
+                const confirmName = selected.dataset && selected.dataset.originalHtml ? '' : (selected.textContent || '').slice(0, 40);
+                const ok = confirm(`Delete selected "${key}" from letter?${confirmName ? `\n("${confirmName}")` : ''}\n\nThis deletion is permanent and saved to the database.\nTo restore, select any remaining field and click "Reset All" in the toolbar.`);
+                if (!ok) return;
+                userTouched = true;
+                try { selected.parentNode && selected.parentNode.removeChild(selected); } catch (_) {}
+                const doc = readSaved();
+                doc.version = 2;
+                doc.updated_at = nowMs();
+                doc.elements = doc.elements && typeof doc.elements === 'object' ? doc.elements : {};
+                const prev = (doc.elements[key] && typeof doc.elements[key] === 'object') ? doc.elements[key] : {};
+                doc.elements[key] = Object.assign({}, prev, {
+                    deleted: true,
+                    updated_at: doc.updated_at,
+                });
+                writeSaved(doc);
+                saveToBackend(doc).catch(() => {});
+                setTimeout(() => { saveToBackend(readSaved()).catch(() => {}); }, 350);
+                clearResizeHandles();
+                setSelected(null);
+                hideHud();
+                syncToolbarFromSelected();
+            }
+
+            function addLogoFromDataUrl(dataUrl, fileName) {
+                const pageEl = document.getElementById('letterPage');
+                if (!pageEl) return;
+                const doc = readSaved();
+                let idx = 1;
+                let newKey = `custom_logo_1`;
+                const ex = (doc.elements && typeof doc.elements === 'object') ? Object.keys(doc.elements) : [];
+                while (ex.indexOf(newKey) >= 0 || document.querySelector(`[data-pos-key="${newKey}"]`)) {
+                    idx += 1;
+                    newKey = `custom_logo_${idx}`;
+                }
+                const wrap = document.createElement('div');
+                wrap.id = newKey;
+                wrap.className = 'draggable';
+                wrap.setAttribute('data-pos-key', newKey);
+                wrap.setAttribute('data-default-left', '2.00in');
+                wrap.setAttribute('data-default-top', '1.50in');
+                wrap.setAttribute('draggable', 'false');
+                wrap.style.cssText = `position:absolute; left: 2.00in; top: 1.50in; width: 140px; height: auto; background: transparent; user-select: none; -webkit-user-select: none; -webkit-user-drag: none; touch-action: none;`;
+                const img = document.createElement('img');
+                img.src = dataUrl;
+                img.alt = fileName || newKey;
+                img.setAttribute('draggable', 'false');
+                img.style.cssText = `pointer-events: none; display: block; width: 100%; height: auto; max-width: 100%; user-select: none; -webkit-user-select: none;`;
+                wrap.appendChild(img);
+                pageEl.appendChild(wrap);
+                wrap.dataset.originalHtml = wrap.innerHTML || '';
+                try { applyDefaultsIfMissing(wrap, getPageRect()); } catch (_) {}
+                setSelected(wrap);
+                showHud(wrap);
+                syncToolbarFromSelected();
+                buildResizeHandles(wrap);
+                persistEntry(wrap, { html: wrap.innerHTML || '' });
+            }
+
+            // Delete shortcut
+            document.addEventListener('keydown', (ev) => {
+                if (!selected) return;
+                if (ev.key === 'Delete' || ev.key === 'Backspace') {
+                    const ae = document.activeElement;
+                    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || (ae instanceof HTMLElement && ae.isContentEditable && ae !== selected))) return;
+                    deleteSelectedField();
+                    ev.preventDefault();
+                }
+            });
+
+            // Size slider input
+            stSize && stSize.addEventListener('input', (e) => {
+                if (!selected || !(selected instanceof HTMLElement)) return;
+                const newW = clamp(parseInt(e.target.value || '100', 10), 20, 600);
+                const lock = !!(stLockAspect && stLockAspect.checked);
+                const oldW = selected.offsetWidth || 1;
+                const oldH = selected.offsetHeight || 1;
+                selected.style.width = `${newW}px`;
+                if (lock && oldW > 0 && oldH > 0) {
+                    const aspect = oldW / oldH;
+                    const newH = Math.max(10, Math.round(newW / aspect));
+                    selected.style.height = `${newH}px`;
+                }
+                persistEntry(selected, null);
+                showHud(selected);
+            });
+
+            stLockAspect && stLockAspect.addEventListener('change', () => {
+                if (selected && selected instanceof HTMLElement) syncSizeSliderFromElement(selected);
+            });
+
+            stDelete && stDelete.addEventListener('click', () => { deleteSelectedField(); });
+
+            const stDownloadPdf = document.getElementById('stDownloadPdf');
+            function doDownloadPdf() {
+                if (qtBridge && typeof qtBridge.download_current_page_pdf === 'function') {
+                    try {
+                        const r = qtBridge.download_current_page_pdf();
+                        if (r === true) return;
+                    } catch (_) {}
+                }
+                try {
+                    if (window.__pdf_download_lock) return;
+                    window.__pdf_download_lock = true;
+                    try {
+                        window.focus();
+                        window.print();
+                    } finally {
+                        setTimeout(() => { window.__pdf_download_lock = false; }, 1000);
+                    }
+                } catch (exc) {
+                    alert('Unable to open print dialog: ' + (exc && exc.message ? exc.message : exc));
+                }
+            }
+            stDownloadPdf && stDownloadPdf.addEventListener('click', () => { doDownloadPdf(); });
+
+            document.addEventListener('keydown', (ev) => {
+                const ctrl = (ev.ctrlKey === true) || (ev.metaKey === true);
+                if (ctrl && !ev.shiftKey && !ev.altKey && (ev.key === 's' || ev.key === 'S')) {
+                    ev.preventDefault();
+                    doDownloadPdf();
+                }
+            });
+
+            stAddLogo && stAddLogo.addEventListener('click', () => {
+                if (!stFileInput) return;
+                try { stFileInput.value = ''; } catch (_) {}
+                stFileInput.click();
+            });
+
+            stFileInput && stFileInput.addEventListener('change', (ev) => {
+                const f = ev.target && ev.target.files && ev.target.files[0];
+                if (!f) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const url = String(reader.result || '');
+                    if (!url) return;
+                    addLogoFromDataUrl(url, f.name || '');
+                };
+                reader.onerror = () => { alert('Failed to read the image file.'); };
+                reader.readAsDataURL(f);
+            });
+
+            (function wrapSelection() {
+                const origSync = syncToolbarFromSelected;
+                syncToolbarFromSelected = function() {
+                    try { origSync(); } catch (_) {}
+                    const el = selected;
+                    if (stDelete) stDelete.disabled = !(el && el instanceof HTMLElement);
+                    if (el && el instanceof HTMLElement) {
+                        buildResizeHandles(el);
+                        syncSizeSliderFromElement(el);
+                        if (stSize) stSize.disabled = false;
+                    } else {
+                        clearResizeHandles();
+                        if (stSize) stSize.disabled = true;
+                    }
+                };
+            })();
+
+            // Re-create any dynamically-added custom logos that exist in saved layout but missing from DOM
+            function restoreDynamicCustomLogos() {
+                try {
+                    const doc = readSaved();
+                    if (!doc || !doc.elements || typeof doc.elements !== 'object') return;
+                    const pageEl = document.getElementById('letterPage');
+                    if (!pageEl) return;
+                    const keys = Object.keys(doc.elements);
+                    let anyAdded = false;
+                    for (const key of keys) {
+                        if (!key || typeof key !== 'string') continue;
+                        if (key.indexOf('custom_logo_') !== 0) continue;
+                        if (document.querySelector(`[data-pos-key="${key}"]`)) continue;
+                        const entry = doc.elements[key];
+                        if (!entry || typeof entry !== 'object') continue;
+                        const innerHtml = typeof entry.html === 'string' && entry.html ? entry.html : '';
+                        if (!innerHtml) continue;
+                        anyAdded = true;
+                        const wrap = document.createElement('div');
+                        wrap.id = key;
+                        wrap.className = 'draggable';
+                        wrap.setAttribute('data-pos-key', key);
+                        wrap.setAttribute('data-default-left', '2.00in');
+                        wrap.setAttribute('data-default-top', '1.50in');
+                        wrap.setAttribute('draggable', 'false');
+                        wrap.style.cssText = `position:absolute; left: 2.00in; top: 1.50in; width: 140px; height: auto; background: transparent; user-select: none; -webkit-user-select: none; -webkit-user-drag: none; touch-action: none;`;
+                        wrap.innerHTML = innerHtml;
+                        const images = wrap.querySelectorAll('img, svg');
+                        for (const im of images) {
+                            if (im.tagName === 'IMG') {
+                                im.setAttribute('draggable', 'false');
+                                im.style.cssText = `${im.style.cssText || ''} pointer-events: none; display: block; width: 100%; height: auto; max-width: 100%; user-select: none; -webkit-user-select: none;`;
+                            } else {
+                                im.setAttribute('draggable', 'false');
+                                im.style.cssText = `${im.style.cssText || ''} pointer-events: none; display: block; user-select: none; -webkit-user-select: none;`;
+                            }
+                        }
+                        pageEl.appendChild(wrap);
+                        wrap.dataset.originalHtml = innerHtml;
+                        applyDefaultsIfMissing(wrap, getPageRect());
+                        const pageRect2 = getPageRect();
+                        const elRect = wrap.getBoundingClientRect();
+                        const s = pageRect2 && pageRect2.scale ? pageRect2.scale : 1;
+                        const normalized = validateAndNormalizeEntry(entry, pageRect2, { width: elRect.width / s, height: elRect.height / s });
+                        if (normalized) {
+                            wrap.style.left = `${normalized.x}px`;
+                            wrap.style.top = `${normalized.y}px`;
+                        }
+                        applyEntryVisuals(wrap, entry);
+                    }
+                    if (anyAdded) {
+                        try { applyAllPositions(); } catch (_) {}
+                        try { updateFitScale(); } catch (_) {}
+                    }
+                } catch (_) {}
+            }
+            try { window.__restoreDynamicCustomLogos = restoreDynamicCustomLogos; } catch (_) {}
+            restoreDynamicCustomLogos();
 
             window.addEventListener('resize', () => { updateFitScale(); });
         })();
