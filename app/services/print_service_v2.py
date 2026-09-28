@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import json
+import re
 import threading
 import base64
 import datetime as dt
@@ -121,6 +122,42 @@ def _authority_layout_file_path() -> Path:
     return target_dir / "authority_letter_layout_positions.json"
 
 
+_RESIZE_HANDLE_MARKUP_RE = re.compile(
+    r'<div class="resize-handle [a-z]+" data-handle="[a-z]+" draggable="false"></div>'
+)
+
+
+def _strip_resize_handle_pollution(parsed: dict) -> bool:
+    """Removes resize-handle <div> markup that a historical bug could have
+    permanently baked into a saved field's html: persistEntry() used to
+    read el.innerHTML while the interactive resize handles were still
+    attached as real DOM children (e.g. immediately after a resize
+    completes), so their markup got captured and saved as if it were part
+    of the field's actual content - then restored verbatim on every future
+    load. The JS-side bug is fixed (persistEntry now reads from a cleaned
+    clone), but that fix only prevents new pollution; it can't retroactively
+    clean a file that already has it baked in. This file lives outside the
+    git repo (per-machine local data, see _invoice_layout_file_path), so a
+    git pull of the code fix alone never reaches it - each machine's own
+    copy needs this same cleanup applied to it directly, which is what this
+    self-heals on every load. Mutates `parsed` in place; returns True if
+    anything actually changed."""
+    changed = False
+    elements = parsed.get("elements")
+    if not isinstance(elements, dict):
+        return False
+    for entry in elements.values():
+        if not isinstance(entry, dict):
+            continue
+        html = entry.get("html")
+        if isinstance(html, str) and "resize-handle" in html:
+            new_html = _RESIZE_HANDLE_MARKUP_RE.sub("", html)
+            if new_html != html:
+                entry["html"] = new_html
+                changed = True
+    return changed
+
+
 class _InvoiceLayoutFileBridge(QObject):
     def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
@@ -136,6 +173,13 @@ class _InvoiceLayoutFileBridge(QObject):
             parsed = json.loads(raw)
             if not isinstance(parsed, dict):
                 return ""
+            if _strip_resize_handle_pollution(parsed):
+                logger.warning("Self-healed resize-handle markup baked into the saved invoice layout by a historical bug.")
+                try:
+                    with _INVOICE_LAYOUT_LOCK:
+                        path.write_text(json.dumps(parsed, ensure_ascii=False), encoding="utf-8")
+                except Exception as write_exc:
+                    logger.warning(f"Could not persist self-healed invoice layout: {write_exc}")
             return json.dumps(parsed)
         except Exception as exc:
             logger.warning(f"Failed to load invoice layout positions from file: {exc}")
