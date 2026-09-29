@@ -289,7 +289,20 @@ def main() -> None:
         from app.services.settings_service import settings_service
         settings_service.initialize_if_connected()
     except Exception as e:
-        print(f"Database initialization failed: {e}")
+        # A windowed (--windowed) build has no console, so print() here is
+        # invisible to an installed user - nothing ever reaches them. Show it
+        # instead, so an unexpected startup failure is never silently
+        # swallowed (see app/db/session.py's init_db for the separate,
+        # already-visible QMessageBox path for an actual DB connection
+        # failure via check_connection() further below).
+        import logging
+        logging.getLogger(__name__).error("Database initialization failed: %s", e, exc_info=True)
+        QMessageBox.warning(
+            None,
+            "Startup Warning",
+            f"Database initialization encountered an issue and may not be fully configured:\n{e}\n\n"
+            "The application will continue starting; check Settings > Database if data looks missing.",
+        )
 
     startup.set_status("Starting reporting…")
     # Start server in background thread to avoid blocking splash screen

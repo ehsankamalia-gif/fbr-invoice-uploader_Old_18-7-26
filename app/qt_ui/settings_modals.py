@@ -616,7 +616,7 @@ class DatabaseSettingsDialog(BaseSettingsDialog):
         db_settings = settings_service.get_db_settings()
         self.db_server.setText(db_settings.get("server", "localhost"))
         self.db_port.setText(db_settings.get("port", "3306"))
-        self.db_name.setText(db_settings.get("name", "honda_fbr"))
+        self.db_name.setText(db_settings.get("name", "fbr_invoice_uploader"))
         self.db_user.setText(db_settings.get("user", "root"))
         self.db_password.setText(db_settings.get("password", ""))
 

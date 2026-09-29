@@ -30,10 +30,42 @@ SEED_FILES = (
 )
 
 
+def _heal_stale_db_name(env_file: Path) -> None:
+    """Corrects a known-bad DB_NAME left over from an older build.
+
+    Installs seeded from a build before this database name was fixed ended
+    up with DB_NAME=honda_fbr baked into their per-user .env - a leftover
+    from when this app was called "Honda FBR Uploader", never a value any
+    real install's actual data lives under (that's "fbr_invoice_uploader").
+    Since _seed_env_file only writes .env once and never touches it again,
+    those installs would otherwise keep silently connecting to a wrong,
+    empty database forever. Only this one specific, unambiguously-wrong
+    value is corrected in place; any other DB_NAME (including one the user
+    deliberately customized) is left untouched.
+    """
+    try:
+        text = env_file.read_text(encoding="utf-8")
+    except Exception:
+        return
+    if "DB_NAME=honda_fbr" not in text:
+        return
+    healed = text.replace("DB_NAME=honda_fbr", "DB_NAME=fbr_invoice_uploader")
+    try:
+        env_file.write_text(healed, encoding="utf-8")
+        logger.warning(
+            "Self-healed a stale DB_NAME=honda_fbr in %s (leftover from an older build) "
+            "to DB_NAME=fbr_invoice_uploader.",
+            env_file,
+        )
+    except Exception as exc:
+        logger.error("Could not self-heal stale DB_NAME in %s: %s", env_file, exc)
+
+
 def _seed_env_file(target_dir: Path) -> None:
     """Ensure a .env exists, preferring a bundled one, else the example."""
     env_file = target_dir / ".env"
     if env_file.exists():
+        _heal_stale_db_name(env_file)
         return
 
     for candidate in (".env", ".env.example"):

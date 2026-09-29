@@ -1,11 +1,11 @@
 {
-    "latest_version": "1.1.0",
+    "latest_version": "1.1.1",
     "major": 1,
     "minor": 1,
-    "patch": 0,
+    "patch": 1,
     "build": "stable",
     "api_version": 1,
     "db_version": 1,
-    "release_date": "2026-09-28",
-    "changelog": "First GitHub Releases-based update: multi-company support, print template editor overhaul (mouse-drag resize, per-word text color, QR code resizing), Authority Letter feature parity, and a rebuilt auto-updater."
+    "release_date": "2026-09-29",
+    "changelog": "Fixes a critical bug where installed copies connected to the wrong, empty database (leftover DB_NAME=honda_fbr from before this app was renamed) instead of the real fbr_invoice_uploader database, making existing customer/invoice/motorcycle data appear missing. Existing installs self-heal this automatically on next start."
 }
