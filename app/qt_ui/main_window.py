@@ -28,7 +28,8 @@ from PyQt6.QtCore import (
     QObject, 
     QEvent,
     QThread,
-    QPoint
+    QPoint,
+    QSize
 )
 from PyQt6.QtGui import QPixmap, QKeySequence, QShortcut, QCursor
 from PyQt6.QtWidgets import (
@@ -194,6 +195,32 @@ class PanScrollArea(QScrollArea):
     def __del__(self):
         """Cleanup auto scroll manager when scroll area is destroyed"""
         self.auto_scroll.uninstall_from_widget()
+
+
+class _CurrentPageStackedWidget(QStackedWidget):
+    """A QStackedWidget that sizes itself off only the currently visible
+    page, not the union of every page ever added to it.
+
+    Qt's default QStackedWidget computes its minimumSizeHint/sizeHint as
+    the max across ALL child pages, even ones that are hidden - in this
+    app, Credit Ledger System alone needs a 661px-tall minimum, which
+    silently became a floor under the WHOLE application's window height:
+    no page could ever be shown in a shorter window, even one like
+    Invoice that only needs ~320px. This is why a screen-aware initial
+    window size still got silently overridden back up to 661px regardless
+    of which page was actually showing. Overriding these two methods to
+    defer to the current widget only is the standard fix for this
+    well-known Qt limitation, and makes every page's own layout (e.g. the
+    Invoice form's scrollable body + fixed button bar) the thing that
+    actually determines how small that page's window can get."""
+
+    def sizeHint(self) -> QSize:
+        current = self.currentWidget()
+        return current.sizeHint() if current is not None else super().sizeHint()
+
+    def minimumSizeHint(self) -> QSize:
+        current = self.currentWidget()
+        return current.minimumSizeHint() if current is not None else super().minimumSizeHint()
 
 
 class ClearableDateEdit(QDateEdit):
@@ -575,6 +602,26 @@ class BookingCard(QFrame):
         if model_name.upper() == self.model_name.upper():
             self.update_quantity(count)
 
+# Sidebar design tokens - the single place to retheme the Side Menu as a
+# whole. Shared by NavigationButton, GroupHeaderButton, and the sidebar
+# chrome built in MainWindow._init_ui/apply_sidebar_font_settings. Kept as
+# module-level constants (not instance state) since NavigationButton and
+# GroupHeaderButton are standalone classes, not MainWindow methods.
+_SB_BG_TOP = "#1b2531"
+_SB_BG_BOTTOM = "#223047"
+_SB_HEADER_BG = "#141b24"
+_SB_BORDER = "rgba(255, 255, 255, 0.07)"
+_SB_TEXT_MUTED = "#8a96a8"
+_SB_TEXT = "#c3cbd6"
+_SB_TEXT_BRIGHT = "#ffffff"
+_SB_HOVER_BG = "rgba(255, 255, 255, 0.07)"
+_SB_ACTIVE_BG = "rgba(52, 152, 219, 0.20)"
+_SB_ACCENT = "#3498db"
+_SB_ACCENT_HOVER = "#2980b9"
+_SB_DANGER = "#e8747c"
+_SB_DANGER_HOVER_BG = "#e74c3c"
+
+
 class NavigationButton(QPushButton):
     def __init__(
         self,
@@ -603,46 +650,49 @@ class NavigationButton(QPushButton):
             self.setStyleSheet(f"""
                 NavigationButton {{
                     background-color: transparent;
-                    color: #bdc3c7;
+                    color: {_SB_TEXT};
                     border: none;
-                    border-left: 4px solid transparent;
                     text-align: center;
-                    padding: 10px 0px;
+                    padding: 11px 0px;
+                    margin: 1px 6px;
                     font-size: {self.collapsed_font_size}px;
-                    border-radius: 0;
+                    border-radius: 9px;
                 }}
                 NavigationButton:hover {{
-                    background-color: #3e4f5f;
-                    color: white;
+                    background-color: {_SB_HOVER_BG};
+                    color: {_SB_TEXT_BRIGHT};
                 }}
                 NavigationButton:checked {{
-                    background-color: #3498db;
-                    color: white;
-                    border-left: 4px solid #2980b9;
+                    background-color: {_SB_ACTIVE_BG};
+                    color: {_SB_TEXT_BRIGHT};
+                    font-weight: 600;
                 }}
             """)
         else:
-            self.setText(f"{self.icon_text}  {self.title}")
+            self.setText(f"{self.icon_text}   {self.title}")
             self.setToolTip("")
             self.setStyleSheet(f"""
                 NavigationButton {{
                     background-color: transparent;
-                    color: #bdc3c7;
+                    color: {_SB_TEXT};
                     border: none;
-                    border-left: 4px solid transparent;
+                    border-left: 3px solid transparent;
                     text-align: left;
-                    padding: 10px 15px;
+                    padding: 11px 16px;
+                    margin: 1px 10px 1px 0px;
                     font-size: {self.expanded_font_size}px;
-                    border-radius: 0;
+                    border-top-right-radius: 10px;
+                    border-bottom-right-radius: 10px;
                 }}
                 NavigationButton:hover {{
-                    background-color: #3e4f5f;
-                    color: white;
+                    background-color: {_SB_HOVER_BG};
+                    color: {_SB_TEXT_BRIGHT};
                 }}
                 NavigationButton:checked {{
-                    background-color: #3498db;
-                    color: white;
-                    border-left: 4px solid #2980b9;
+                    background-color: {_SB_ACTIVE_BG};
+                    color: {_SB_TEXT_BRIGHT};
+                    border-left: 3px solid {_SB_ACCENT};
+                    font-weight: 600;
                 }}
             """)
 
@@ -660,20 +710,23 @@ class GroupHeaderButton(QPushButton):
         self.setCheckable(True)
         self.setChecked(True) # Expanded by default
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setText(f"{arrow} {group_name}")
+        self.setText(f"{arrow}  {group_name}")
+        self._apply_style()
+
+    def _apply_style(self) -> None:
         self.setStyleSheet(f"""
             QPushButton {{
                 background-color: transparent;
-                color: #7f8c8d;
+                color: {_SB_TEXT_MUTED};
                 border: none;
                 text-align: left;
-                padding: 15px 20px 5px 20px;
+                padding: 18px 20px 8px 20px;
                 font-size: {self.font_size}px;
-                font-weight: bold;
-                letter-spacing: 1px;
+                font-weight: 700;
+                letter-spacing: 1.2px;
             }}
             QPushButton:hover {{
-                color: white;
+                color: {_SB_TEXT_BRIGHT};
             }}
         """)
 
@@ -682,26 +735,12 @@ class GroupHeaderButton(QPushButton):
             self.setText("") # Hide group headers in collapsed mode
             self.setMaximumHeight(0)
         else:
-            self.setText(f"{self.arrow} {self.group_name}")
+            self.setText(f"{self.arrow}  {self.group_name}")
             self.setMaximumHeight(16777215)
 
     def set_font_size(self, font_size: int) -> None:
         self.font_size = int(font_size)
-        self.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                color: #7f8c8d;
-                border: none;
-                text-align: left;
-                padding: 15px 20px 5px 20px;
-                font-size: {self.font_size}px;
-                font-weight: bold;
-                letter-spacing: 1px;
-            }}
-            QPushButton:hover {{
-                color: white;
-            }}
-        """)
+        self._apply_style()
 
 
 class AutocompleteLineEdit(QLineEdit):
@@ -846,7 +885,30 @@ class MainWindow(QMainWindow):
     def __init__(self, parent: QWidget | None = None, db_status: str = "") -> None:
         super().__init__(parent)
         self.setWindowTitle("Ehsan Trader FBR System")
-        self.resize(1100, 700)
+        # A fixed 1100x700 open size doesn't fit every screen - on a
+        # display whose usable height (after the taskbar) is shorter than
+        # that, the window opens anchored at the top with its bottom edge
+        # (e.g. the Invoice form's button bar) rendered below the visible
+        # screen, invisible until the window is manually resized or
+        # maximized. Clamp to the actual available screen geometry and
+        # center the window within it, so the whole window - title bar to
+        # bottom edge - is always on-screen from first launch.
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is not None:
+            avail = screen.availableGeometry()
+            # A ceiling, not a floor: never request more than the screen
+            # actually has room for. If this ends up smaller than the
+            # Invoice page's own minimum layout size, Qt's layout engine
+            # bumps the window back up to that true minimum on its own
+            # (already verified) - so this never fights with that.
+            target_width = min(1100, avail.width() - 40)
+            target_height = min(700, avail.height() - 40)
+            self.resize(target_width, target_height)
+            frame = self.frameGeometry()
+            frame.moveCenter(avail.center())
+            self.move(frame.topLeft())
+        else:
+            self.resize(1100, 700)
         self.db_status = db_status # Store DB status to show warning if missing
 
         self._pages: Dict[str, QWidget] = {}
@@ -1109,8 +1171,12 @@ class MainWindow(QMainWindow):
                 background-color: #f8f9fa;
             }
             #navWidget {
-                background-color: #2c3e50;
-                border-right: 1px solid #dee2e6;
+                /* Matches the _SB_BG_TOP/_SB_BG_BOTTOM tokens above
+                   NavigationButton - kept as a literal here since this is
+                   the one sidebar rule living in the app-wide stylesheet
+                   string, not an f-string. */
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1b2531, stop:1 #223047);
+                border-right: 1px solid rgba(0, 0, 0, 0.12);
                 min-width: 200px;
             }
             #pageHeader {
@@ -1199,42 +1265,80 @@ class MainWindow(QMainWindow):
         self.nav_widget.setFixedWidth(200) # Set initial fixed width
         nav_layout = QVBoxLayout(self.nav_widget)
         nav_layout.setContentsMargins(0, 0, 0, 0)
-        nav_layout.setSpacing(0)
+        nav_layout.setSpacing(2)
 
         # Nav Header
         nav_header_container = QWidget()
-        nav_header_container.setStyleSheet("background-color: #1a252f;")
+        nav_header_container.setStyleSheet(f"background-color: {_SB_HEADER_BG}; border-bottom: 1px solid {_SB_BORDER};")
         self.nav_header_layout = QHBoxLayout(nav_header_container)
-        self.nav_header_layout.setContentsMargins(15, 15, 15, 15)
+        self.nav_header_layout.setContentsMargins(16, 16, 16, 16)
         self.nav_header_layout.setSpacing(10)
-        
+
         # Toggle Button (Hamburger Menu)
-        self.sidebar_toggle_btn = QPushButton("≡")
-        self.sidebar_toggle_btn.setFixedSize(40, 40) # Slightly larger
+        self.sidebar_toggle_btn = QPushButton("☰")
+        self.sidebar_toggle_btn.setFixedSize(38, 38) # Slightly larger
         self.sidebar_toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.sidebar_toggle_btn.setStyleSheet("""
-            QPushButton {
+        self.sidebar_toggle_btn.setStyleSheet(f"""
+            QPushButton {{
                 background-color: transparent;
-                color: white;
+                color: {_SB_TEXT_BRIGHT};
                 border: none;
-                font-size: 28px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #34495e;
-                border-radius: 4px;
-            }
+                font-size: 20px;
+                font-weight: 600;
+                border-radius: 9px;
+            }}
+            QPushButton:hover {{
+                background-color: {_SB_HOVER_BG};
+            }}
         """)
         self.sidebar_toggle_btn.clicked.connect(self._toggle_sidebar)
         self.nav_header_layout.addWidget(self.sidebar_toggle_btn)
-        
+
         self.nav_header_label = QLabel("EHSAN TRADER")
-        self.nav_header_label.setStyleSheet("color: white; font-weight: bold; border: none;")
-        
+        self.nav_header_label.setStyleSheet(
+            f"color: {_SB_TEXT_BRIGHT}; font-weight: 700; letter-spacing: 0.5px; border: none;"
+        )
+
         self.nav_header_layout.addWidget(self.nav_header_label, 1)
         nav_layout.addWidget(nav_header_container)
 
-        self.stack = QStackedWidget(central)
+        # Menu items (group headers + nav buttons) live in their own
+        # scrollable area, with the header above and the footer (session
+        # card / version / update / exit) below both pinned outside it.
+        # The sidebar previously had no scrolling at all, so its natural
+        # stacked height (every group + every visible item + the whole
+        # footer, all at once) became a hard floor under the WHOLE
+        # window's minimum height - taller than some screens can show,
+        # which was hiding bottom content (e.g. the Invoice form's button
+        # bar) no matter how that page's own layout was optimized. This
+        # mirrors the same scrollable-body/pinned-footer pattern already
+        # used elsewhere in this app (e.g. the Quotation edit dialog).
+        self.sidebar_scroll_area = QScrollArea(self.nav_widget)
+        self.sidebar_scroll_area.setObjectName("sidebarScrollArea")
+        self.sidebar_scroll_area.setWidgetResizable(True)
+        self.sidebar_scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.sidebar_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.sidebar_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.sidebar_scroll_area.setStyleSheet(f"""
+            QScrollArea#sidebarScrollArea {{ background-color: transparent; border: none; }}
+            QScrollArea#sidebarScrollArea QWidget {{ background-color: transparent; }}
+            QScrollArea#sidebarScrollArea QScrollBar:vertical {{
+                border: none; background: transparent; width: 8px; margin: 0px;
+            }}
+            QScrollArea#sidebarScrollArea QScrollBar::handle:vertical {{
+                background: rgba(255, 255, 255, 0.18); min-height: 24px; border-radius: 4px;
+            }}
+            QScrollArea#sidebarScrollArea QScrollBar::add-line:vertical,
+            QScrollArea#sidebarScrollArea QScrollBar::sub-line:vertical {{ height: 0px; }}
+        """)
+        nav_items_host = QWidget()
+        nav_items_layout = QVBoxLayout(nav_items_host)
+        nav_items_layout.setContentsMargins(0, 0, 0, 0)
+        nav_items_layout.setSpacing(2)
+        self.sidebar_scroll_area.setWidget(nav_items_host)
+        nav_layout.addWidget(self.sidebar_scroll_area, 1)
+
+        self.stack = _CurrentPageStackedWidget(central)
 
         root_layout.addWidget(self.nav_widget)
         root_layout.addWidget(self.stack, 1)
@@ -1258,8 +1362,8 @@ class MainWindow(QMainWindow):
         self._add_page("welcome", self._create_welcome_page(), "Welcome")
         self._add_page("portal_accounts", self._create_portal_accounts_page(), "Portal Accounts")
 
-        nav_layout.addSpacing(10)
-        
+        nav_items_layout.addSpacing(10)
+
         self.nav_icons = {
             "dashboard": "📊",
             "reports": "📈",
@@ -1308,7 +1412,7 @@ class MainWindow(QMainWindow):
             header.setChecked(is_first)
             header.clicked.connect(self._on_group_header_clicked)
             self._group_header_manager.addButton(header)
-            nav_layout.addWidget(header)
+            nav_items_layout.addWidget(header)
             self._group_headers[group_name] = header
             self._group_buttons[group_name] = []
 
@@ -1332,36 +1436,36 @@ class MainWindow(QMainWindow):
                 button.set_collapsed(self._is_sidebar_collapsed)
                 button.clicked.connect(self._on_nav_clicked)  # type: ignore[arg-type]
                 button.setVisible(is_first) # Only first group visible by default
-                nav_layout.addWidget(button)
+                nav_items_layout.addWidget(button)
                 self._nav_buttons[key] = button
                 self._group_buttons[group_name].append(button)
 
-        nav_layout.addStretch(1)
+        nav_items_layout.addStretch(1)
 
         # Logged-in-as card - shows the current desktop session's identity
         # (account, role) and lets them log out without exiting the app,
         # right above the version badge it visually groups with.
         if auth_session.is_logged_in():
             session_card = QFrame()
-            session_card.setStyleSheet("""
-                QFrame { background-color: rgba(255, 255, 255, 0.05); border-top: 1px solid rgba(255, 255, 255, 0.1); }
+            session_card.setStyleSheet(f"""
+                QFrame {{ background-color: rgba(255, 255, 255, 0.04); border-top: 1px solid {_SB_BORDER}; }}
             """)
             session_layout = QVBoxLayout(session_card)
-            session_layout.setContentsMargins(16, 10, 16, 6)
-            session_layout.setSpacing(2)
+            session_layout.setContentsMargins(18, 14, 18, 10)
+            session_layout.setSpacing(3)
 
             role_text = "Admin" if auth_session.is_admin() else "Staff"
             identity_label = QLabel(f"{auth_session.current_full_name()} · {role_text}")
-            identity_label.setStyleSheet("color: white; font-size: 12px; font-weight: 600;")
+            identity_label.setStyleSheet(f"color: {_SB_TEXT_BRIGHT}; font-size: 12px; font-weight: 600;")
             identity_label.setWordWrap(True)
             session_layout.addWidget(identity_label)
 
-            self.logout_btn = QPushButton("🔓 Log Out")
+            self.logout_btn = QPushButton("⏻  Log Out")
             self.logout_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             self.logout_btn.setStyleSheet("""
-                QPushButton { background-color: transparent; color: #e67e22; border: none;
-                              text-align: left; padding: 6px 0 0 0; font-size: 12px; font-weight: 600; }
-                QPushButton:hover { color: #f39c12; }
+                QPushButton { background-color: transparent; color: #e8a23e; border: none;
+                              text-align: left; padding: 7px 0 0 0; font-size: 12px; font-weight: 600; }
+                QPushButton:hover { color: #f5b958; }
             """)
             self.logout_btn.clicked.connect(self._on_logout_clicked)
             session_layout.addWidget(self.logout_btn)
@@ -1372,70 +1476,42 @@ class MainWindow(QMainWindow):
         # small pill badge in the sidebar, right above the update/exit
         # actions it's most relevant to.
         version_row = QHBoxLayout()
-        version_row.setContentsMargins(16, 0, 16, 12)
+        version_row.setContentsMargins(16, 10, 16, 12)
         version_row.addStretch(1)
         self.sidebar_version_label = QLabel(f"●  {VersionManager.get_version_string()}")
         self.sidebar_version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.sidebar_version_label.setToolTip("Installed application version")
-        self.sidebar_version_label.setStyleSheet("""
-            QLabel {
+        self.sidebar_version_label.setStyleSheet(f"""
+            QLabel {{
                 color: #7fd97f;
-                background-color: rgba(255, 255, 255, 0.06);
-                border: 1px solid rgba(255, 255, 255, 0.14);
+                background-color: rgba(255, 255, 255, 0.05);
+                border: 1px solid {_SB_BORDER};
                 border-radius: 11px;
                 padding: 5px 16px;
                 font-size: 11px;
                 font-weight: 600;
                 letter-spacing: 0.5px;
-            }
+            }}
         """)
         version_row.addWidget(self.sidebar_version_label)
         version_row.addStretch(1)
         nav_layout.addLayout(version_row)
 
         # Update Button (Footer)
-        self.footer_update_btn = QPushButton("🔄 Check for Updates")
+        self.footer_update_btn = QPushButton("🔄  Check for Updates")
         self.footer_update_btn.setToolTip("Check for latest version and new features")
         self.footer_update_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.footer_update_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                color: #bdc3c7;
-                border: none;
-                border-left: 4px solid transparent;
-                text-align: left;
-                padding: 15px 20px;
-                font-size: {int(self._ui_cfg.get("sidebar_footer_font_size", 15) or 15)}px;
-                border-radius: 0;
-            }}
-            QPushButton:hover {{
-                background-color: #34495e;
-                color: white;
-                border-left: 4px solid #3498db;
-            }}
-        """)
+        self.footer_update_btn.setStyleSheet(
+            self._sidebar_footer_btn_qss(int(self._ui_cfg.get("sidebar_footer_font_size", 15) or 15), False)
+        )
         self.footer_update_btn.clicked.connect(self._on_manual_update_check)
         nav_layout.addWidget(self.footer_update_btn)
 
         # Exit Button
-        self.exit_btn = QPushButton("🚪 Exit Application")
-        self.exit_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                color: #e74c3c;
-                border: none;
-                border-left: 4px solid transparent;
-                text-align: left;
-                padding: 15px 20px;
-                font-size: {int(self._ui_cfg.get("sidebar_exit_font_size", 16) or 16)}px;
-                font-weight: bold;
-                border-radius: 0;
-            }}
-            QPushButton:hover {{
-                background-color: #c0392b;
-                color: white;
-            }}
-        """)
+        self.exit_btn = QPushButton("⏻  Exit Application")
+        self.exit_btn.setStyleSheet(
+            self._sidebar_exit_btn_qss(int(self._ui_cfg.get("sidebar_exit_font_size", 16) or 16), False)
+        )
         self.exit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.exit_btn.clicked.connect(self.close)
         nav_layout.addWidget(self.exit_btn)
@@ -1511,6 +1587,52 @@ class MainWindow(QMainWindow):
                     # Restore group-based visibility when expanded
                     btn.setVisible(header.isChecked())
 
+    def _sidebar_footer_btn_qss(self, font_size: int, collapsed: bool) -> str:
+        """Shared style for the sidebar's 'Check for Updates' footer
+        button, used both at initial build and whenever
+        apply_sidebar_font_settings re-applies font/collapsed state."""
+        align = "center" if collapsed else "left"
+        padding = "14px 0px" if collapsed else "14px 20px"
+        return f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {_SB_TEXT};
+                border: none;
+                border-left: 3px solid transparent;
+                text-align: {align};
+                padding: {padding};
+                font-size: {font_size}px;
+                border-radius: 0;
+            }}
+            QPushButton:hover {{
+                background-color: {_SB_HOVER_BG};
+                color: {_SB_TEXT_BRIGHT};
+                border-left: 3px solid {_SB_ACCENT};
+            }}
+        """
+
+    def _sidebar_exit_btn_qss(self, font_size: int, collapsed: bool) -> str:
+        """Shared style for the sidebar's Exit button - see
+        _sidebar_footer_btn_qss for why this is a shared helper."""
+        align = "center" if collapsed else "left"
+        padding = "14px 0px" if collapsed else "14px 20px"
+        return f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {_SB_DANGER};
+                border: none;
+                text-align: {align};
+                padding: {padding};
+                font-size: {font_size}px;
+                font-weight: 600;
+                border-radius: 0;
+            }}
+            QPushButton:hover {{
+                background-color: {_SB_DANGER_HOVER_BG};
+                color: {_SB_TEXT_BRIGHT};
+            }}
+        """
+
     def apply_sidebar_font_settings(self, cfg: dict) -> None:
         self._ui_cfg = {**(getattr(self, "_ui_cfg", {}) or {}), **(cfg or {})}
         sidebar_font_size = max(8, min(24, int(self._ui_cfg.get("sidebar_font_size", 15) or 15)))
@@ -1522,7 +1644,7 @@ class MainWindow(QMainWindow):
 
         if hasattr(self, "nav_header_label"):
             self.nav_header_label.setStyleSheet(
-                f"color: white; font-size: {sidebar_header_font_size}px; font-weight: bold; border: none;"
+                f"color: {_SB_TEXT_BRIGHT}; font-size: {sidebar_header_font_size}px; font-weight: 700; letter-spacing: 0.5px; border: none;"
             )
 
         for header in getattr(self, "_group_headers", {}).values():
@@ -1539,85 +1661,29 @@ class MainWindow(QMainWindow):
             if self._is_sidebar_collapsed:
                 self.footer_update_btn.setText("🔄")
                 self.footer_update_btn.setToolTip("Check for Updates")
-                self.footer_update_btn.setStyleSheet(f"""
-                    QPushButton {{
-                        background-color: transparent;
-                        color: #bdc3c7;
-                        border: none;
-                        border-left: 4px solid transparent;
-                        text-align: center;
-                        padding: 15px 0px;
-                        font-size: {sidebar_collapsed_font_size}px;
-                        border-radius: 0;
-                    }}
-                    QPushButton:hover {{
-                        background-color: #34495e;
-                        color: white;
-                        border-left: 4px solid #3498db;
-                    }}
-                """)
+                self.footer_update_btn.setStyleSheet(
+                    self._sidebar_footer_btn_qss(sidebar_collapsed_font_size, True)
+                )
             else:
-                self.footer_update_btn.setText("🔄 Check for Updates")
+                self.footer_update_btn.setText("🔄  Check for Updates")
                 self.footer_update_btn.setToolTip("")
-                self.footer_update_btn.setStyleSheet(f"""
-                    QPushButton {{
-                        background-color: transparent;
-                        color: #bdc3c7;
-                        border: none;
-                        border-left: 4px solid transparent;
-                        text-align: left;
-                        padding: 15px 20px;
-                        font-size: {sidebar_footer_font_size}px;
-                        border-radius: 0;
-                    }}
-                    QPushButton:hover {{
-                        background-color: #34495e;
-                        color: white;
-                        border-left: 4px solid #3498db;
-                    }}
-                """)
+                self.footer_update_btn.setStyleSheet(
+                    self._sidebar_footer_btn_qss(sidebar_footer_font_size, False)
+                )
 
         if hasattr(self, "exit_btn"):
             if self._is_sidebar_collapsed:
-                self.exit_btn.setText("🚪")
+                self.exit_btn.setText("⏻")
                 self.exit_btn.setToolTip("Exit Application")
-                self.exit_btn.setStyleSheet(f"""
-                    QPushButton {{
-                        background-color: transparent;
-                        color: #e74c3c;
-                        border: none;
-                        border-left: 4px solid transparent;
-                        text-align: center;
-                        padding: 15px 0px;
-                        font-size: {sidebar_collapsed_font_size}px;
-                        font-weight: bold;
-                        border-radius: 0;
-                    }}
-                    QPushButton:hover {{
-                        background-color: #c0392b;
-                        color: white;
-                    }}
-                """)
+                self.exit_btn.setStyleSheet(
+                    self._sidebar_exit_btn_qss(sidebar_collapsed_font_size, True)
+                )
             else:
-                self.exit_btn.setText("🚪 Exit Application")
+                self.exit_btn.setText("⏻  Exit Application")
                 self.exit_btn.setToolTip("")
-                self.exit_btn.setStyleSheet(f"""
-                    QPushButton {{
-                        background-color: transparent;
-                        color: #e74c3c;
-                        border: none;
-                        border-left: 4px solid transparent;
-                        text-align: left;
-                        padding: 15px 20px;
-                        font-size: {sidebar_exit_font_size}px;
-                        font-weight: bold;
-                        border-radius: 0;
-                    }}
-                    QPushButton:hover {{
-                        background-color: #c0392b;
-                        color: white;
-                    }}
-                """)
+                self.exit_btn.setStyleSheet(
+                    self._sidebar_exit_btn_qss(sidebar_exit_font_size, False)
+                )
 
     def _select_page(self, key: str) -> None:
         if key not in self._pages:
@@ -3298,6 +3364,12 @@ class MainWindow(QMainWindow):
 
         self.invoice_scroll_area = PanScrollArea(page)
         self.invoice_scroll_area.setWidgetResizable(True)
+        # Caps how much minimum height the form fields can demand, so on a
+        # short/non-maximized window the scroll area is what shrinks (with
+        # its own scrollbar) instead of pushing the button bar below the
+        # window's visible bounds - see button_bar's Fixed size policy
+        # below, which is the other half of this fix.
+        self.invoice_scroll_area.setMinimumHeight(120)
         root_layout.addWidget(self.invoice_scroll_area, 1)
 
         container = QWidget()
@@ -3674,6 +3746,11 @@ class MainWindow(QMainWindow):
 
         # Bottom Button Bar
         button_bar = QWidget(page)
+        # Fixed (not Preferred) so this row keeps its natural height even
+        # when the window is short - the scroll area above it is what
+        # shrinks instead, so Reset Form / Submit to FBR / the status
+        # label stay visible without maximizing the window.
+        button_bar.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         button_layout = QHBoxLayout(button_bar)
         button_layout.setContentsMargins(0, 10, 0, 0)
         button_layout.setSpacing(15)
@@ -11518,6 +11595,13 @@ class MainWindow(QMainWindow):
         index = self.stack.indexOf(widget)
         if index != -1:
             self.stack.setCurrentIndex(index)
+            # _CurrentPageStackedWidget's sizeHint/minimumSizeHint now
+            # depend on whichever page is current - tell Qt's layout
+            # system to re-query them immediately so switching to a page
+            # with a taller minimum (re-)enforces that floor right away,
+            # instead of only taking effect on some later, unrelated
+            # relayout.
+            self.stack.updateGeometry()
         for page_key, btn in self._nav_buttons.items():
             btn.setChecked(page_key == key)
         
