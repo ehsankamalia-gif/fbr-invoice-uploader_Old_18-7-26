@@ -1,11 +1,11 @@
 {
-    "latest_version": "1.1.1",
+    "latest_version": "1.1.4",
     "major": 1,
     "minor": 1,
-    "patch": 1,
+    "patch": 4,
     "build": "stable",
     "api_version": 1,
     "db_version": 1,
-    "release_date": "2026-09-29",
-    "changelog": "Fixes a critical bug where installed copies connected to the wrong, empty database (leftover DB_NAME=honda_fbr from before this app was renamed) instead of the real fbr_invoice_uploader database, making existing customer/invoice/motorcycle data appear missing. Existing installs self-heal this automatically on next start."
+    "release_date": "2026-09-30",
+    "changelog": "Replaces the placeholder application icon with a proper, professional icon (invoice document with a verified checkmark), shown in the taskbar, title bar, and installer. Also moves the version display from the status bar into a styled badge in the sidebar."
 }

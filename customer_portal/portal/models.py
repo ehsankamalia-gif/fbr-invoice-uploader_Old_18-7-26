@@ -1,8 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import User
 
-from .managers import CompanyScopedManager
-
 
 # Codename/label pairs for the fine-grained access a Staff account can be
 # granted by an Admin. Registered as real Django permissions (see
@@ -32,7 +30,6 @@ STAFF_MODULES = [
     ('view_invoices', 'View submitted sales invoices'),
     ('create_invoices', 'Create new sales invoices and upload them to FBR'),
     ('manage_fbr_config', 'View & edit FBR configuration (POS ID, tokens, active environment)'),
-    ('manage_companies', 'View & edit company profiles, switch the active company'),
 ]
 
 
@@ -71,11 +68,7 @@ class UserProfile(models.Model):
 
 
 class Company(models.Model):
-    """A registered business entity. Multiple companies can share this
-    database; exactly one has is_active=True at a time (mirrors how
-    FBRConfiguration's SANDBOX/PRODUCTION is_active toggle already works).
-    Deliberately keeps Django's plain default manager - see
-    portal/managers.py's docstring for why it can't scope itself."""
+    """The single registered business entity this installation represents."""
     id = models.IntegerField(primary_key=True)
     name = models.CharField(max_length=150, unique=True)
     ntn = models.CharField(max_length=20, null=True, blank=True)
@@ -83,8 +76,6 @@ class Company(models.Model):
     address = models.CharField(max_length=255, null=True, blank=True)
     phone = models.CharField(max_length=20, null=True, blank=True)
     email = models.CharField(max_length=255, null=True, blank=True)
-    is_active = models.BooleanField(default=False)
-    is_deleted = models.BooleanField(default=False)
     created_at = models.DateTimeField(null=True)
 
     class Meta:
@@ -104,7 +95,6 @@ class Customer(models.Model):
     ]
 
     id = models.IntegerField(primary_key=True)
-    company_id = models.IntegerField(null=True)
     cnic = models.CharField(max_length=20, null=False, unique=True)
     name = models.CharField(max_length=100)
     father_name = models.CharField(max_length=100, null=True)
@@ -117,8 +107,6 @@ class Customer(models.Model):
     is_deleted = models.BooleanField(default=False)
     created_at = models.DateTimeField()
 
-    objects = CompanyScopedManager()
-
     class Meta:
         db_table = 'customers'
         managed = False
@@ -129,14 +117,11 @@ class Customer(models.Model):
 
 class ProductModel(models.Model):
     id = models.IntegerField(primary_key=True)
-    company_id = models.IntegerField(null=True)
     model_name = models.CharField(max_length=50, unique=True)
     make = models.CharField(max_length=50, default='Honda')
     engine_capacity = models.CharField(max_length=20, null=True)
     pct_code = models.CharField(max_length=20, null=True)
     item_code = models.CharField(max_length=50, null=True)
-
-    objects = CompanyScopedManager()
 
     class Meta:
         db_table = 'product_models'
@@ -155,7 +140,6 @@ class Motorcycle(models.Model):
     ]
 
     id = models.IntegerField(primary_key=True)
-    company_id = models.IntegerField(null=True)
     product_model = models.ForeignKey(ProductModel, on_delete=models.DO_NOTHING, db_column='product_model_id')
     vin = models.CharField(max_length=50, null=True, unique=True)
     chassis_number = models.CharField(max_length=50, unique=True)
@@ -167,8 +151,6 @@ class Motorcycle(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=IN_STOCK)
     purchase_date = models.DateTimeField()
 
-    objects = CompanyScopedManager()
-
     class Meta:
         db_table = 'motorcycles'
         managed = False
@@ -179,7 +161,6 @@ class Motorcycle(models.Model):
 
 class Price(models.Model):
     id = models.IntegerField(primary_key=True)
-    company_id = models.IntegerField(null=True)
     product_model = models.ForeignKey(ProductModel, on_delete=models.DO_NOTHING, db_column='product_model_id')
     base_price = models.FloatField()
     tax_amount = models.FloatField()
@@ -189,8 +170,6 @@ class Price(models.Model):
     effective_date = models.DateTimeField(null=True)
     expiration_date = models.DateTimeField(null=True)
     currency = models.CharField(max_length=10, default='Rs')
-
-    objects = CompanyScopedManager()
 
     class Meta:
         db_table = 'prices'
@@ -219,7 +198,6 @@ class Invoice(models.Model):
     ]
 
     id = models.IntegerField(primary_key=True)
-    company_id = models.IntegerField(null=True)
     invoice_number = models.CharField(max_length=50, unique=True)
     pos_id = models.CharField(max_length=20)
     usin = models.CharField(max_length=50)
@@ -244,8 +222,6 @@ class Invoice(models.Model):
     upload_priority = models.IntegerField(default=0)
     is_processing = models.BooleanField(default=False)
 
-    objects = CompanyScopedManager()
-
     class Meta:
         db_table = 'invoices'
         managed = False
@@ -256,7 +232,6 @@ class Invoice(models.Model):
 
 class InvoiceItem(models.Model):
     id = models.IntegerField(primary_key=True)
-    company_id = models.IntegerField(null=True)
     invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, db_column='invoice_id', related_name='items')
     motorcycle = models.ForeignKey(Motorcycle, on_delete=models.DO_NOTHING, db_column='motorcycle_id', null=True)
     item_code = models.CharField(max_length=50)
@@ -270,8 +245,6 @@ class InvoiceItem(models.Model):
     total_amount = models.FloatField()
     discount = models.FloatField(default=0.0)
 
-    objects = CompanyScopedManager()
-
     class Meta:
         db_table = 'invoice_items'
         managed = False
@@ -283,17 +256,9 @@ class InvoiceItem(models.Model):
 class FBRConfiguration(models.Model):
     """The active FBR environment (base URL, POS ID, USIN, auth token, tax
     rules) - editable from both the desktop app's Settings screen and the
-    portal's own FBR Configuration page. Each company has its own row per
-    environment (real DB constraint is a composite unique on
-    (company_id, environment), not on environment alone - `unique=True`
-    below is stale but harmless since this table is managed=False).
-    Deliberately keeps Django's plain default manager, not
-    CompanyScopedManager - every read site (fbr_client.py,
-    api_fbr_config_views.py) filters by company_id explicitly instead, to
-    keep the actual FBR-submission path minimal and easy to audit."""
+    portal's own FBR Configuration page. One row per environment."""
 
     id = models.IntegerField(primary_key=True)
-    company_id = models.IntegerField(null=True)
     environment = models.CharField(max_length=20, unique=True)
     is_active = models.BooleanField(default=False)
     api_base_url = models.CharField(max_length=255)
@@ -329,7 +294,6 @@ class FinanceCreditSale(models.Model):
     ]
 
     id = models.IntegerField(primary_key=True)
-    company_id = models.IntegerField(null=True)
     sale_id = models.CharField(max_length=50, unique=True)
     customer = models.ForeignKey(Customer, on_delete=models.DO_NOTHING, db_column='customer_id')
     customer_name = models.CharField(max_length=100)
@@ -351,8 +315,6 @@ class FinanceCreditSale(models.Model):
     notes = models.CharField(max_length=500, null=True)
     created_at = models.DateTimeField()
 
-    objects = CompanyScopedManager()
-
     class Meta:
         db_table = 'finance_credit_sales'
         managed = False
@@ -372,7 +334,6 @@ class FinanceInstallment(models.Model):
     ]
 
     id = models.IntegerField(primary_key=True)
-    company_id = models.IntegerField(null=True)
     payment_id = models.CharField(max_length=50, unique=True)
     sale = models.ForeignKey(FinanceCreditSale, on_delete=models.DO_NOTHING, db_column='sale_id')
     customer = models.ForeignKey(Customer, on_delete=models.DO_NOTHING, db_column='customer_id')
@@ -398,8 +359,6 @@ class FinanceInstallment(models.Model):
     paid_at = models.DateTimeField(null=True)
     created_at = models.DateTimeField()
 
-    objects = CompanyScopedManager()
-
     class Meta:
         db_table = 'finance_installments'
         managed = False
@@ -411,7 +370,6 @@ class FinanceInstallment(models.Model):
 
 class FinanceLedger(models.Model):
     id = models.IntegerField(primary_key=True)
-    company_id = models.IntegerField(null=True)
     ledger_id = models.CharField(max_length=50, unique=True)
     customer = models.ForeignKey(Customer, on_delete=models.DO_NOTHING, db_column='customer_id')
     sale = models.ForeignKey(FinanceCreditSale, on_delete=models.DO_NOTHING, db_column='sale_id', null=True)
@@ -422,8 +380,6 @@ class FinanceLedger(models.Model):
     balance = models.FloatField(default=0.0)
     entry_date = models.DateTimeField()
     created_at = models.DateTimeField()
-
-    objects = CompanyScopedManager()
 
     class Meta:
         db_table = 'finance_ledger'
@@ -461,7 +417,6 @@ class CreditSale(models.Model):
     ]
 
     id = models.IntegerField(primary_key=True)
-    company_id = models.IntegerField(null=True)
     sale_date = models.DateTimeField()
     customer = models.ForeignKey(Customer, on_delete=models.DO_NOTHING, db_column='buyer_id')
     buyer_type = models.CharField(max_length=20)
@@ -477,8 +432,6 @@ class CreditSale(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=ACTIVE)
     created_at = models.DateTimeField()
 
-    objects = CompanyScopedManager()
-
     class Meta:
         db_table = 'credit_sales'
         managed = False
@@ -489,15 +442,12 @@ class CreditSale(models.Model):
 
 class CreditSaleItem(models.Model):
     id = models.IntegerField(primary_key=True)
-    company_id = models.IntegerField(null=True)
     sale = models.ForeignKey(CreditSale, on_delete=models.DO_NOTHING, db_column='sale_id')
     chassis_number = models.CharField(max_length=50, unique=True)
     model = models.CharField(max_length=50, null=True)
     color = models.CharField(max_length=30, null=True)
     cash_price = models.FloatField()
     credit_price = models.FloatField()
-
-    objects = CompanyScopedManager()
 
     class Meta:
         db_table = 'credit_sale_items'
@@ -509,7 +459,6 @@ class CreditSaleItem(models.Model):
 
 class CreditPayment(models.Model):
     id = models.IntegerField(primary_key=True)
-    company_id = models.IntegerField(null=True)
     payment_date = models.DateTimeField()
     customer = models.ForeignKey(Customer, on_delete=models.DO_NOTHING, db_column='buyer_id')
     amount = models.FloatField()
@@ -519,8 +468,6 @@ class CreditPayment(models.Model):
     payment_mode = models.CharField(max_length=50, default='Cash')
     invoice_reference = models.CharField(max_length=50, null=True)
     created_at = models.DateTimeField()
-
-    objects = CompanyScopedManager()
 
     class Meta:
         db_table = 'credit_payments'
@@ -532,7 +479,6 @@ class CreditPayment(models.Model):
 
 class BuyerLedger(models.Model):
     id = models.IntegerField(primary_key=True)
-    company_id = models.IntegerField(null=True)
     date = models.DateTimeField()
     customer = models.ForeignKey(Customer, on_delete=models.DO_NOTHING, db_column='buyer_id')
     chassis_number = models.CharField(max_length=50, null=True)
@@ -543,8 +489,6 @@ class BuyerLedger(models.Model):
     reference_id = models.IntegerField(null=True)
     reference_type = models.CharField(max_length=20, null=True)
     created_at = models.DateTimeField()
-
-    objects = CompanyScopedManager()
 
     class Meta:
         db_table = 'buyer_ledger'
@@ -570,7 +514,6 @@ class SpareLedgerTransaction(models.Model):
     ]
 
     id = models.IntegerField(primary_key=True)
-    company_id = models.IntegerField(null=True)
     timestamp = models.DateTimeField()
     trans_type = models.CharField(max_length=10, choices=TRANS_TYPE_CHOICES)
     amount = models.FloatField()
@@ -579,8 +522,6 @@ class SpareLedgerTransaction(models.Model):
     cash_type = models.CharField(max_length=20, choices=CASH_TYPE_CHOICES, default=HARD_CASH)
     created_by_user_id = models.IntegerField(null=True)
     month_key = models.CharField(max_length=7, null=True)
-
-    objects = CompanyScopedManager()
 
     class Meta:
         db_table = 'spare_ledger_transactions'
@@ -598,7 +539,6 @@ class SpareLedgerMonthlyClose(models.Model):
     ]
 
     id = models.IntegerField(primary_key=True)
-    company_id = models.IntegerField(null=True)
     month_key = models.CharField(max_length=7, unique=True)
     closed_at = models.DateTimeField()
     opening_balance = models.FloatField(default=0.0)
@@ -607,8 +547,6 @@ class SpareLedgerMonthlyClose(models.Model):
     closing_balance = models.FloatField(default=0.0)
     carried_forward = models.FloatField(default=0.0)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=CLOSED)
-
-    objects = CompanyScopedManager()
 
     class Meta:
         db_table = 'spare_ledger_monthly_close'
@@ -621,20 +559,17 @@ class SpareLedgerMonthlyClose(models.Model):
 
 class CapturedData(models.Model):
     id = models.IntegerField(primary_key=True)
-    company_id = models.IntegerField(null=True)
     name = models.CharField(max_length=100, null=True)
     father = models.CharField(max_length=100, null=True)
     cnic = models.CharField(max_length=20, null=True)
     cell = models.CharField(max_length=20, null=True)
-    chassis_number = models.CharField(max_length=50, null=True)
+    chassis_number = models.CharField(max_length=50, null=True, unique=True)
     engine_number = models.CharField(max_length=50, null=True)
     model = models.CharField(max_length=50, null=True)
     color = models.CharField(max_length=30, null=True)
     address = models.CharField(max_length=255, null=True)
     is_deleted = models.BooleanField(default=False)
     created_at = models.DateTimeField()
-
-    objects = CompanyScopedManager()
 
     class Meta:
         db_table = 'captured_data'

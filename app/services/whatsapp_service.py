@@ -330,7 +330,7 @@ class WhatsAppService(QObject):
                 status="PENDING",
                 sent_count=0,
                 failed_count=0,
-                is_deleted=False
+                is_deleted=False,
             )
             db.add(new_campaign)
             db.flush() # Get ID
@@ -340,7 +340,7 @@ class WhatsAppService(QObject):
                 action="CREATE",
                 resource_type="CAMPAIGN",
                 resource_id=new_campaign.id,
-                details={"name": name, "recipients": len(recipients)}
+                details={"name": name, "recipients": len(recipients)},
             )
             db.add(audit)
 
@@ -371,7 +371,7 @@ class WhatsAppService(QObject):
                     retry_count=0,
                     max_retries=3,
                     is_read=False,
-                    response_received=False
+                    response_received=False,
                 )
                 db.add(new_msg)
             

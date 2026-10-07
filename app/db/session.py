@@ -197,8 +197,6 @@ def init_db(strict: bool = False):
             except Exception as e:
                 logger.error(f"Non-critical migration error: {e}")
             _assert_required_tables(engine, ["customers", "product_models", "motorcycles"])
-            from app.db import company_scope
-            company_scope.register()
             logger.info("Database initialized successfully.")
             
         except Exception as e:
@@ -391,7 +389,13 @@ def run_migrations():
                 (15, "Make finance fields nullable and add defaults", _migration_v15_comprehensive_finance_fix),
                 (16, "Add sequential processing fields to invoices", _migration_v16_add_sequential_upload_fields),
                 (17, "Make customer CNIC non-nullable", _migration_v17_make_cnic_non_nullable),
-                (18, "Convert global unique constraints to per-company composite (multi-company support)", _migration_v18_company_scoped_unique_constraints),
+                # v18-v23 (multi-company support: composite unique constraints,
+                # company_id backfills, per-company staff/report scoping) were
+                # fully reverted by v24 below and removed from this list -
+                # their migration_history rows remain on already-migrated
+                # databases as a historical record, but there is nothing left
+                # for their code to do, so the functions themselves were deleted.
+                (24, "Revert multi-company support entirely: drop company_id and restore original single-column unique constraints", _migration_v24_single_company_revert),
             ]
 
             for version, description, func in migrations:
@@ -850,110 +854,148 @@ def _migration_v17_make_cnic_non_nullable(conn) -> bool:
         return False
 
 
-def _migration_v18_company_scoped_unique_constraints(conn) -> bool:
-    """Converts unique constraints that predate multi-company support from
-    single-column (globally unique across every company) to composite
-    (company_id, column) - matching FBRConfiguration.environment /
-    ProductModel.model_name / Motorcycle.chassis_number|engine_number|vin's
-    __table_args__ declarations in models.py, which have said "composite"
-    for a while now.
+def _migration_v24_single_company_revert(conn) -> bool:
+    """Reverts multi-company support entirely, back to a single hardcoded
+    company. Companies other than the surviving one (id=2) and all of
+    their data were already deleted by hand before this migration was
+    written (a one-time, backed-up operation - not something this function
+    repeats). This migration does the schema half: for every table that
+    carries a company_id column, drops its FK constraint, drops any index
+    that includes company_id (composite unique ones are replaced with the
+    original single-column unique they superseded - see
+    _REVERTED_COMPANY_UNIQUE_CONSTRAINTS - and the one multi-column case,
+    customers.uq_company_business_cnic, with its own original
+    uq_business_cnic), then drops the column itself. Finally drops
+    companies.is_active/is_deleted, meaningless with exactly one company
+    that's never switched or soft-deleted.
 
-    Why this migration exists at all: on the machine this was first built
-    on, these composite indexes already existed in the live database from
-    unrelated prior work, so the model declarations above were simply
-    matching reality - no migration was ever needed THERE. But
-    verify_schema_integrity()'s self-heal only ever adds missing columns,
-    never touches indexes or constraints, so a database that was never
-    manually patched (e.g. a fresh checkout on another machine) keeps
-    whatever constraint it already had - typically a single-column UNIQUE
-    on environment/model_name/chassis_number/engine_number/vin left over
-    from before company_id existed at all. The result: saving a second
-    company's SANDBOX config, or importing inventory whose model name or
-    chassis number already exists under a different company, fails with a
-    duplicate-entry error - the exact "works on my machine" gap this
-    migration closes, by discovering and fixing whatever constraint is
-    actually there rather than assuming a name or prior state."""
+    Fully idempotent and self-discovering (mirrors the superseded v18's own
+    design) so it's correct whether run against a database that still has
+    the full multi-company schema, or a fresh install that never had it."""
     is_sqlite = "sqlite" in str(engine.url)
     if is_sqlite:
-        logger.info("SQLite: skipping composite-unique-constraint migration (dev-only backend, MySQL is the real target).")
+        logger.info("SQLite: skipping v24 single-company-revert migration (dev-only backend, MySQL is the real target).")
         return True
 
     try:
-        for table, column, composite_name in _COMPANY_SCOPED_UNIQUE_TARGETS:
-            _fix_single_column_unique_to_composite(conn, table, column, composite_name)
+        # 1. Revert composite unique constraints to their original single-column form.
+        for table, column, composite_name in _REVERTED_COMPANY_UNIQUE_CONSTRAINTS:
+            insp = inspect(engine)
+            if table not in insp.get_table_names():
+                continue
+            for idx in insp.get_indexes(table):
+                if idx["name"] == composite_name:
+                    conn.execute(text(f"ALTER TABLE {table} DROP INDEX {composite_name}"))
+                    conn.commit()
+                    logger.info(f"v24: dropped composite index {composite_name} on {table}.")
+            insp = inspect(engine)
+            already = any(
+                idx["unique"] and idx["column_names"] == [column]
+                for idx in insp.get_indexes(table)
+            )
+            if not already:
+                conn.execute(text(f"ALTER TABLE {table} ADD UNIQUE INDEX uq_{table}_{column} ({column})"))
+                conn.commit()
+                logger.info(f"v24: restored single-column unique on {table}.{column}.")
+
+        # 2. The one multi-column case: customers.uq_company_business_cnic -> uq_business_cnic.
+        insp = inspect(engine)
+        if "customers" in insp.get_table_names():
+            for idx in insp.get_indexes("customers"):
+                if idx["unique"] and idx["column_names"] == ["company_id", "business_name", "cnic"]:
+                    conn.execute(text(f"ALTER TABLE customers DROP INDEX {idx['name']}"))
+                    conn.commit()
+                    logger.info(f"v24: dropped {idx['name']} on customers(company_id, business_name, cnic).")
+            insp = inspect(engine)
+            already = any(
+                idx["unique"] and idx["column_names"] == ["business_name", "cnic"]
+                for idx in insp.get_indexes("customers")
+            )
+            if not already:
+                conn.execute(text("ALTER TABLE customers ADD UNIQUE INDEX uq_business_cnic (business_name, cnic)"))
+                conn.commit()
+                logger.info("v24: restored uq_business_cnic (business_name, cnic).")
+
+        # 3. Drop company_id from every table that still has it.
+        insp = inspect(engine)
+        for table in insp.get_table_names():
+            if table == "companies":
+                continue
+            cols = [c["name"] for c in insp.get_columns(table)]
+            if "company_id" not in cols:
+                continue
+
+            fk_rows = conn.execute(text(
+                "SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :t AND COLUMN_NAME = 'company_id' "
+                "AND REFERENCED_TABLE_NAME IS NOT NULL"
+            ), {"t": table}).fetchall()
+            for (fk_name,) in fk_rows:
+                try:
+                    conn.execute(text(f"ALTER TABLE {table} DROP FOREIGN KEY {fk_name}"))
+                    conn.commit()
+                    logger.info(f"v24: dropped FK {fk_name} on {table}.company_id.")
+                except Exception as e:
+                    logger.warning(f"v24: could not drop FK {fk_name} on {table}: {e}")
+
+            fresh_insp = inspect(engine)
+            for idx in fresh_insp.get_indexes(table):
+                if "company_id" in idx["column_names"]:
+                    try:
+                        conn.execute(text(f"ALTER TABLE {table} DROP INDEX {idx['name']}"))
+                        conn.commit()
+                        logger.info(f"v24: dropped leftover index {idx['name']} on {table} (included company_id).")
+                    except Exception as e:
+                        logger.warning(f"v24: could not drop index {idx['name']} on {table}: {e}")
+
+            try:
+                conn.execute(text(f"ALTER TABLE {table} DROP COLUMN company_id"))
+                conn.commit()
+                logger.info(f"v24: dropped company_id column from {table}.")
+            except Exception as e:
+                logger.error(f"v24: FAILED dropping company_id from {table}: {e}")
+
+        # 4. Drop companies.is_active / is_deleted.
+        insp = inspect(engine)
+        comp_cols = [c["name"] for c in insp.get_columns("companies")]
+        for col in ("is_active", "is_deleted"):
+            if col in comp_cols:
+                try:
+                    conn.execute(text(f"ALTER TABLE companies DROP COLUMN {col}"))
+                    conn.commit()
+                    logger.info(f"v24: dropped companies.{col}.")
+                except Exception as e:
+                    logger.error(f"v24: FAILED dropping companies.{col}: {e}")
+
         return True
     except Exception as e:
-        logger.error(f"Migration v18 failed: {e}", exc_info=True)
+        logger.error(f"Migration v24 failed: {e}", exc_info=True)
         return False
 
 
-# Shared by _migration_v18_company_scoped_unique_constraints (the normal
-# startup path) and ensure_company_scoped_unique_constraint (the on-demand
-# fallback below, for when the startup path didn't reach a given table for
-# any reason - an earlier versioned migration failing first on that
-# specific database, migration_history being in an unexpected state, etc.
-# Both paths must fix the exact same set of constraints the same way).
-_COMPANY_SCOPED_UNIQUE_TARGETS = [
+# The composite (company_id, column) unique constraints multi-company
+# support introduced, and the single-column constraint each one replaces -
+# _migration_v24_single_company_revert below undoes every one of these.
+_REVERTED_COMPANY_UNIQUE_CONSTRAINTS = [
     ("fbr_configurations", "environment", "uq_company_environment"),
     ("product_models", "model_name", "uq_company_model_name"),
     ("motorcycles", "chassis_number", "uq_company_chassis_number"),
     ("motorcycles", "engine_number", "uq_company_engine_number"),
     ("motorcycles", "vin", "uq_company_vin"),
+    ("customers", "cnic", "uq_company_customer_cnic"),
+    ("customers", "normalized_business_name", "uq_company_normalized_business_name"),
+    ("invoices", "invoice_number", "uq_company_invoice_number"),
+    ("advance_bookings", "booking_number", "uq_company_booking_number"),
+    ("captured_data", "chassis_number", "uq_company_captured_chassis"),
+    ("spare_ledger_monthly_close", "month_key", "uq_company_spare_month"),
+    ("credit_sale_items", "chassis_number", "uq_company_credit_chassis"),
+    ("finance_credit_sales", "sale_id", "uq_company_sale_id"),
+    ("finance_installments", "payment_id", "uq_company_payment_id"),
+    ("finance_ledger", "ledger_id", "uq_company_ledger_id"),
+    ("sms_campaigns", "name", "uq_company_sms_campaign_name"),
+    ("desktop_staff_accounts", "mobile_number", "uq_staff_company_mobile"),
+    ("report_templates", "name", "uq_company_report_template_name"),
 ]
-
-
-def _fix_single_column_unique_to_composite(conn, table: str, column: str, composite_name: str) -> bool:
-    """Converts table's legacy single-column UNIQUE(column) constraint -
-    global across every company - to a composite UNIQUE(company_id,
-    column), whatever the existing index happens to be named on this
-    particular database. Idempotent: a no-op if the composite index
-    already exists. Returns True if it actually changed anything."""
-    insp = inspect(engine)
-    existing_indexes = insp.get_indexes(table)
-
-    already_composite = any(
-        idx["unique"] and idx["column_names"] == ["company_id", column]
-        for idx in existing_indexes
-    )
-    if already_composite:
-        logger.info(f"{table}.{column}: composite unique index already present, skipping.")
-        return False
-
-    # Drop any UNIQUE index whose columns are exactly [column] alone (the
-    # pre-multi-company global constraint) - discovered by its actual
-    # reported column signature, not assumed by name, since different
-    # databases may have auto-named it differently.
-    for idx in existing_indexes:
-        if idx["unique"] and idx["column_names"] == [column]:
-            logger.warning(f"Dropping legacy global-unique index '{idx['name']}' on {table}.{column}.")
-            conn.execute(text(f"ALTER TABLE {table} DROP INDEX {idx['name']}"))
-
-    conn.execute(text(f"ALTER TABLE {table} ADD UNIQUE INDEX {composite_name} (company_id, {column})"))
-    conn.commit()
-    logger.info(f"Created composite unique index {composite_name} on {table}(company_id, {column}).")
-    return True
-
-
-def ensure_company_scoped_unique_constraint(table: str) -> bool:
-    """On-demand version of migration v18's fix, for exactly one table -
-    callable from anywhere (e.g. settings_service.save_environment's
-    just-in-time self-heal) as a fallback for when the normal startup
-    migration path didn't reach this table on this particular database,
-    for whatever reason. Safe to call anytime: idempotent, and a no-op on
-    SQLite or if the composite constraint is already correct. Returns True
-    if it changed anything (i.e. the caller's failed operation is now
-    worth retrying)."""
-    if "sqlite" in str(engine.url):
-        return False
-    target = next((t for t in _COMPANY_SCOPED_UNIQUE_TARGETS if t[0] == table), None)
-    if not target:
-        return False
-    try:
-        with engine.begin() as conn:
-            return _fix_single_column_unique_to_composite(conn, *target)
-    except Exception as e:
-        logger.error(f"On-demand constraint fix for {table} failed: {e}", exc_info=True)
-        return False
 
 
 def get_db():

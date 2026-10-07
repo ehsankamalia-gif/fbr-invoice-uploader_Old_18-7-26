@@ -24,3 +24,7 @@ android-sms-gateway
 reportlab
 python-pptx
 tzdata
+
+# Dev-only tooling - used solely by dev_hot_reload.py (never imported by
+# the application itself, so it has no effect on the packaged EXE build).
+watchdog

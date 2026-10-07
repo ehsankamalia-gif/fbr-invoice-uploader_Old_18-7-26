@@ -32,10 +32,18 @@ class InstallerLauncher:
                 # Fallback for other platforms (though user specified Windows)
                 subprocess.Popen([installer_path], start_new_session=True)
 
-            # Exit the current application immediately
-            # This is important so the installer can overwrite the files
+            # Exit the current application immediately so the installer can
+            # overwrite our files. This runs inside a Qt slot invoked via
+            # Qt's C++ event dispatch, not a plain Python call chain back to
+            # qt_main.py's app.exec() - sys.exit() only raises SystemExit,
+            # which PyQt6 catches and swallows for exceptions raised inside
+            # slots (it logs them and keeps the event loop running), so the
+            # old process never actually terminated even though the
+            # installer correctly overwrote the files on disk. os._exit()
+            # is an immediate, unconditional OS-level termination that
+            # nothing can intercept.
             logger.info("Exiting application for update...")
-            sys.exit(0)
+            os._exit(0)
             
         except Exception as e:
             logger.error(f"Failed to launch installer: {e}")

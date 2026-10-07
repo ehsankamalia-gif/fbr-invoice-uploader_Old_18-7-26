@@ -31,6 +31,7 @@ from app.db.models import (
     PrintTemplateLayout,
 )
 from app.services.invoice_service import invoice_service
+from app.services.settings_service import settings_service
 from reporting.lookup_utils import format_cnic, validate_lookup_inputs
 from reporting.invoice_detail_utils import invoice_to_detail_dict
 
@@ -65,8 +66,17 @@ def _reporting_root_dir() -> Path:
 
 
 def _get_role(role_header: Optional[str]) -> str:
-    role = (role_header or "").strip().lower()
-    return role or "sales"
+    """Ignores role_header - a caller-supplied X-User-Role was previously
+    trusted with zero verification, letting anyone claim "admin" just by
+    setting a header. The real role now comes from whoever is actually
+    logged into the desktop app (this server runs as a background thread
+    in that same process, sharing app.services.auth_session). role_header
+    stays an accepted parameter only so every existing endpoint signature
+    (which still declares and passes it) doesn't need editing."""
+    from app.services.auth_session import auth_session
+    if not auth_session.is_logged_in():
+        return "anonymous"
+    return "admin" if auth_session.is_admin() else (auth_session.current_role() or "staff").lower()
 
 
 def _require_auth(
@@ -74,6 +84,16 @@ def _require_auth(
     role: str,
     required_roles: Optional[List[str]] = None,
 ) -> None:
+    """Hard-requires an actual logged-in desktop session - this reporting
+    server starts only after login now (see app/qt_main.py), but still
+    checks directly here rather than trusting that ordering alone. The
+    REPORTING_ACCESS_TOKEN env var, if set, is an *additional* check on top
+    of this, e.g. for a future remote-access scenario - it was previously
+    the ONLY check, and a no-op whenever that env var wasn't set (i.e.
+    always, on this install)."""
+    from app.services.auth_session import auth_session
+    if not auth_session.is_logged_in():
+        raise HTTPException(status_code=401, detail="Unauthorized - no desktop session is logged in.")
     configured_key = (os.getenv("REPORTING_ACCESS_TOKEN") or "").strip()
     if configured_key and (api_key or "").strip() != configured_key:
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -2940,8 +2960,11 @@ def _startup() -> None:
 def _run_due_schedules() -> None:
     db = SessionLocal()
     try:
-        _load_or_create_default_template(db)
-        schedules = db.query(ReportSchedule).filter(ReportSchedule.enabled.is_(True)).all()
+        schedules = (
+            db.query(ReportSchedule)
+            .filter(ReportSchedule.enabled.is_(True))
+            .all()
+        )
         now = datetime.utcnow()
         for sch in schedules:
             last = sch.last_run_at
@@ -3000,7 +3023,11 @@ def _execute_schedule(db: Session, sch: ReportSchedule) -> None:
     db.refresh(run)
 
     try:
-        tmpl = db.query(ReportTemplate).filter(ReportTemplate.id == sch.template_id).first()
+        tmpl = (
+            db.query(ReportTemplate)
+            .filter(ReportTemplate.id == sch.template_id)
+            .first()
+        )
         tmpl = _ensure_template_has_widgets(db, tmpl)
 
         metrics = _compute_metrics(db, None, None, "ALL")
@@ -3314,7 +3341,10 @@ def create_template(
     if not name:
         raise HTTPException(status_code=400, detail="name required")
     definition = payload.get("definition") or {"version": 1, "widgets": []}
-    tmpl = ReportTemplate(name=name, description=payload.get("description"), definition=definition, is_active=True, created_by_role=role)
+    tmpl = ReportTemplate(
+        name=name, description=payload.get("description"), definition=definition,
+        is_active=True, created_by_role=role,
+    )
     db.add(tmpl)
     db.commit()
     db.refresh(tmpl)

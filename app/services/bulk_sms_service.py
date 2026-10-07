@@ -45,8 +45,8 @@ class BulkSMSWorker(threading.Thread):
                 if self.on_complete: self.on_complete(False, "Campaign not found.")
                 return
 
-            config = db.query(SMSConfiguration).first()
-            
+            config = db.query(SMSConfiguration).filter(SMSConfiguration.is_enabled == True).first()
+
             # Channel-specific enablement check
             channel = campaign.channel or "SMS"
             if not config or not config.is_enabled:
@@ -101,7 +101,7 @@ class BulkSMSWorker(threading.Thread):
 
                 # Get fresh message object
                 msg = db.query(SMSQueue).filter(SMSQueue.id == msg_id).first()
-                if not msg: 
+                if not msg:
                     logger.warning(f"Message ID {msg_id} not found in DB.")
                     continue
 
@@ -223,7 +223,7 @@ class BulkSMSService:
                 status="PENDING",
                 sent_count=0,
                 failed_count=0,
-                is_deleted=False
+                is_deleted=False,
             )
             db.add(campaign)
             db.flush()  # Get ID
@@ -235,7 +235,7 @@ class BulkSMSService:
                     action="CREATE",
                     resource_type="CAMPAIGN",
                     resource_id=campaign.id,
-                    details={"name": name, "recipients": len(data), "channel": channel}
+                    details={"name": name, "recipients": len(data), "channel": channel},
                 )
                 db.add(audit)
             except: pass # Optional log
@@ -290,7 +290,7 @@ class BulkSMSService:
                     phone_number=str(phone_number),
                     recipient_name=str(recipient_name),
                     message=message_text,
-                    status=SMSStatus.PENDING
+                    status=SMSStatus.PENDING,
                 )
                 db.add(sms)
             

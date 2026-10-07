@@ -304,15 +304,6 @@ def main() -> None:
             "The application will continue starting; check Settings > Database if data looks missing.",
         )
 
-    startup.set_status("Starting reporting…")
-    # Start server in background thread to avoid blocking splash screen
-    import threading
-    threading.Thread(
-        target=start_reporting_server,
-        daemon=True,
-        name="ReportingServerStartup"
-    ).start()
-
     startup.set_status("Loading user interface…")
     from app.qt_ui.main_window import MainWindow
     font_manager = _FontManager(app)
@@ -335,10 +326,46 @@ def main() -> None:
         )
         sys.exit(1)
 
-    startup.set_status("Finalizing…")
+    startup.set_status("Signing in…")
     app.processEvents()
-    window = MainWindow(db_status=db_status)
     startup.close()
+
+    from app.qt_ui.login_dialog import LoginDialog
+    from app.services.auth_session import auth_session
+    from app.services import staff_account_service
+
+    login = LoginDialog()
+
+    # With no Admin anywhere in the database, the normal login screen is a
+    # guaranteed dead end (there's nothing valid to type) - detected from
+    # actual DB state, not an installer/first-launch flag, so it also
+    # covers an existing database that was never finished being set up.
+    if not staff_account_service.has_any_admin():
+        from app.qt_ui.first_run_wizard import FirstRunWizard
+        wizard = FirstRunWizard()
+        if wizard.exec() != QDialog.DialogCode.Accepted or not wizard.created_account:
+            sys.exit(0)
+        login.mobile_input.setText(wizard.created_account["mobile_number"])
+        QMessageBox.information(
+            None, "Setup Complete",
+            "Setup completed successfully. Please log in with your Administrator account.",
+        )
+
+    if login.exec() != QDialog.DialogCode.Accepted or not auth_session.is_logged_in():
+        sys.exit(0)
+
+    # Only start the reporting portal (a local web server, browser-reachable
+    # at 127.0.0.1:9000) once someone has actually authenticated - starting
+    # it earlier (e.g. at splash-screen time) would make report data
+    # reachable from a browser before the login gate ever ran.
+    import threading
+    threading.Thread(
+        target=start_reporting_server,
+        daemon=True,
+        name="ReportingServerStartup"
+    ).start()
+
+    window = MainWindow(db_status=db_status)
     window.show()
     sys.exit(app.exec())
 

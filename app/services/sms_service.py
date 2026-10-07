@@ -380,7 +380,6 @@ class SMSService:
         """Processes the SMS queue using the configured gateway type."""
         db = SessionLocal()
         try:
-            # Get config
             config = db.query(SMSConfiguration).filter(SMSConfiguration.is_enabled == True).first()
             if not config:
                 return
@@ -470,7 +469,7 @@ class SMSService:
 
     def queue_invoice_sms(self, db, invoice):
         """Queues SMS for a new invoice."""
-        config = db.query(SMSConfiguration).first()
+        config = db.query(SMSConfiguration).filter(SMSConfiguration.is_enabled == True).first()
         if not config:
             return
 
@@ -498,14 +497,14 @@ class SMSService:
             phone_number=phone,
             message=message,
             invoice_id=invoice.id,
-            channel="SMS"
+            channel="SMS",
         )
         db.add(new_sms)
         db.commit()
 
     def queue_spare_ledger_sms(self, db, transaction):
         """Queues SMS for a new spare ledger transaction."""
-        config = db.query(SMSConfiguration).first()
+        config = db.query(SMSConfiguration).filter(SMSConfiguration.is_enabled == True).first()
         if not config:
             return
 
@@ -650,7 +649,7 @@ class SMSService:
         new_sms = SMSQueue(
             phone_number=owner_phone,
             message=message,
-            channel="SMS"
+            channel="SMS",
         )
         db.add(new_sms)
         db.flush()
@@ -754,7 +753,7 @@ class SMSService:
         payload = dict(
             phone_number=p,
             message=message,
-            channel="SMS"
+            channel="SMS",
         )
         if recipient_name:
             payload["recipient_name"] = str(recipient_name)[:100]
@@ -776,13 +775,20 @@ class SMSService:
         If portal_credentials is provided, an additional SMS with portal login details is sent.
         """
         try:
+            from app.db.models import Customer
+            try:
+                cust = db.query(Customer).filter(Customer.id == int(customer_id)).first()
+                customer_name = cust.name if cust else f"Customer #{customer_id}"
+            except Exception:
+                customer_name = f"Customer #{customer_id}"
+
             if not self._is_feature_enabled(db, "credit_sale_payment_sms_enabled"):
                 return
             phone = self._get_phone_for_customer(db, customer_id, fallback_phone)
             if not phone:
                 logger.warning(f"No phone for buyer/customer {customer_id} in credit sale {sale_id}")
                 return
-            
+
             # Send portal credentials SMS if this is a new portal account
             if portal_credentials:
                 try:
@@ -800,14 +806,8 @@ class SMSService:
 
             tmpl = self._resolve_template(
                 db, "credit_sale_template",
-                "Dear {customer}, credit sale of {model} (Chassis: {chassis}) is confirmed. Credit: Rs. {credit_price}. Advance: Rs. {advance}. Balance: Rs. {balance}."
+                "Dear {customer}, credit sale of {model} (Chassis: {chassis}) is confirmed. Credit: Rs. {credit_price}. Advance: Rs. {advance}. Balance: Rs. {balance}.",
             )
-            try:
-                from app.db.models import Customer
-                cust = db.query(Customer).filter(Customer.id == int(customer_id)).first()
-                customer_name = cust.name if cust else f"Customer #{customer_id}"
-            except Exception:
-                customer_name = f"Customer #{customer_id}"
 
             total_credit = 0.0
             if items:
@@ -875,6 +875,13 @@ class SMSService:
                                   penalty_amount: float, discount_amount: float, new_balance: float):
         """Queue SMS when a BuyerLedger PAYMENT (installment receive) is created."""
         try:
+            from app.db.models import Customer
+            try:
+                cust = db.query(Customer).filter(Customer.id == int(buyer_id)).first()
+                customer_name = cust.name if cust else f"Customer #{buyer_id}"
+            except Exception:
+                customer_name = f"Customer #{buyer_id}"
+
             if not self._is_feature_enabled(db, "credit_sale_payment_sms_enabled"):
                 return
             phone = self._get_phone_for_customer(db, buyer_id, None)
@@ -883,14 +890,8 @@ class SMSService:
                 return
             tmpl = self._resolve_template(
                 db, "credit_payment_template",
-                "Dear {customer}, installment of Rs. {amount} received. Penalty: Rs. {penalty}. Discount: Rs. {discount}. Remaining balance: Rs. {balance}."
+                "Dear {customer}, installment of Rs. {amount} received. Penalty: Rs. {penalty}. Discount: Rs. {discount}. Remaining balance: Rs. {balance}.",
             )
-            try:
-                from app.db.models import Customer
-                cust = db.query(Customer).filter(Customer.id == int(buyer_id)).first()
-                customer_name = cust.name if cust else f"Customer #{buyer_id}"
-            except Exception:
-                customer_name = f"Customer #{buyer_id}"
             msg = tmpl.format(
                 customer=customer_name,
                 amount=float(amount or 0.0),
@@ -916,7 +917,7 @@ class SMSService:
             if not phone:
                 logger.warning(f"No phone for finance customer {customer_id} in finance sale {getattr(sale, 'id', None)}")
                 return
-            
+
             # Send portal credentials SMS if this is a new portal account
             if portal_credentials:
                 try:
@@ -934,7 +935,7 @@ class SMSService:
 
             tmpl = self._resolve_template(
                 db, "finance_sale_template",
-                "Dear {customer}, finance account {sale_id} for {model} (Chassis: {chassis}) is confirmed. Finance: Rs. {credit_price}. Down: Rs. {down}. Balance: Rs. {balance}."
+                "Dear {customer}, finance account {sale_id} for {model} (Chassis: {chassis}) is confirmed. Finance: Rs. {credit_price}. Down: Rs. {down}. Balance: Rs. {balance}.",
             )
             try:
                 cust = db.query(Customer).filter(Customer.id == int(customer_id)).first()
@@ -966,7 +967,7 @@ class SMSService:
                 return
             tmpl = self._resolve_template(
                 db, "finance_installment_template",
-                "Dear {customer}, installment of Rs. {amount} received for {sale_id}. New balance: Rs. {balance}."
+                "Dear {customer}, installment of Rs. {amount} received for {sale_id}. New balance: Rs. {balance}.",
             )
             try:
                 cust = db.query(Customer).filter(Customer.id == int(customer_id)).first()

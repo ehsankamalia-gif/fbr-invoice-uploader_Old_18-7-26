@@ -43,6 +43,9 @@ import datetime as dt
 
 from app.services.settings_service import settings_service
 from app.services.backup_service import backup_service
+from app.services.auth_session import auth_session
+from app.services import staff_account_service
+from app.core.staff_modules import STAFF_MODULES
 from app.core.config import settings
 from app.core.logger import logger
 from app.qt_ui.whatsapp_widget import WhatsAppWidget
@@ -1945,76 +1948,13 @@ class FontCustomizationDialog(BaseSettingsDialog):
         except Exception as e:
             self._show_error("Error", f"Failed to save font settings: {e}")
 
-class DMSSettingsDialog(BaseSettingsDialog):
-    """Modal for DMS Portal Automation settings."""
-    def __init__(self, parent=None):
-        super().__init__("DMS Portal Automation Settings", parent)
-        self.setFixedWidth(500)
-        self._init_ui()
-        self._load_data()
-
-    def _init_ui(self):
-        layout = QGridLayout()
-        layout.setSpacing(15)
-        
-        layout.addWidget(QLabel("DMS Portal URL:"), 0, 0)
-        self.portal_url = QLineEdit()
-        self.portal_url.setPlaceholderText("https://dms.ahlportal.com/login")
-        layout.addWidget(self.portal_url, 0, 1)
-        
-        layout.addWidget(QLabel("DMS Username:"), 1, 0)
-        self.username = QLineEdit()
-        self.username.setPlaceholderText("Enter your DMS username")
-        layout.addWidget(self.username, 1, 1)
-        
-        layout.addWidget(QLabel("DMS Password:"), 2, 0)
-        self.password = QLineEdit()
-        self.password.setEchoMode(QLineEdit.EchoMode.Password)
-        self._add_password_toggle(self.password)
-        self.password.setPlaceholderText("Enter your DMS password")
-        layout.addWidget(self.password, 2, 1)
-        
-        help_text = QLabel("These credentials are used to automatically log in to the DMS portal for vehicle detail entry.")
-        help_text.setWordWrap(True)
-        help_text.setStyleSheet("color: #7f8c8d; font-size: 12px; font-weight: normal; margin-top: 10px;")
-        layout.addWidget(help_text, 3, 0, 1, 2)
-        
-        self.content_layout.addLayout(layout)
-
-    def _load_data(self):
-        cfg = settings_service.get_app_config()
-        self.portal_url.setText(cfg.get("dms_portal_url", "https://dms.ahlportal.com/login"))
-        self.username.setText(cfg.get("dms_username", ""))
-        self.password.setText(cfg.get("dms_password", ""))
-
-    def save_settings(self):
-        url = self.portal_url.text().strip()
-        user = self.username.text().strip()
-        pwd = self.password.text().strip()
-        
-        if not url:
-            self._show_error("Validation Error", "Portal URL is required.")
-            return
-
-        try:
-            settings_service.save_dms_config(url=url, user=user, password=pwd)
-            self._show_success("Saved", "DMS Portal settings updated successfully.")
-            self.accept()
-        except Exception as e:
-            self._show_error("Error", f"Failed to save DMS settings: {str(e)}")
-
-
 class CompanyManagementDialog(BaseSettingsDialog):
-    """Modal for managing company profiles. Lets the same install be used
-    by multiple companies sharing one database - only the active company's
-    records show up everywhere else in the app (see app/db/company_scope.py).
-    Exactly one company is active at a time, same interaction shape as
-    FBRSecurityDialog's SANDBOX/PRODUCTION switch."""
+    """Shows and edits the company profile - the screen behind
+    "Settings > Company Information"."""
+
     def __init__(self, parent=None):
-        super().__init__("Company Management", parent)
-        self.setMinimumWidth(760)
-        self.setMinimumHeight(620)
-        self._editing_id = None
+        super().__init__("Company Information", parent)
+        self.setMinimumWidth(480)
         self._init_ui()
         self._load_data()
 
@@ -2025,7 +1965,6 @@ class CompanyManagementDialog(BaseSettingsDialog):
 
         form_layout.addWidget(QLabel("Company Name:"), 0, 0)
         self.name_input = QLineEdit()
-        self.name_input.setPlaceholderText("e.g. EHSAN TRADERS")
         form_layout.addWidget(self.name_input, 0, 1)
 
         form_layout.addWidget(QLabel("Address:"), 1, 0)
@@ -2048,417 +1987,395 @@ class CompanyManagementDialog(BaseSettingsDialog):
         self.cnic_input = QLineEdit()
         form_layout.addWidget(self.cnic_input, 5, 1)
 
-        button_row = QHBoxLayout()
-        self.add_btn = QPushButton("Add Company")
-        self.add_btn.setStyleSheet("""
-            QPushButton { background-color: #3498db; color: white; border: none;
-                          padding: 10px 20px; font-weight: bold; border-radius: 4px; }
-            QPushButton:hover { background-color: #2980b9; }
-        """)
-        self.add_btn.clicked.connect(self._on_save_company)
-        button_row.addWidget(self.add_btn)
-
-        self.clear_btn = QPushButton("Clear Form")
-        self.clear_btn.clicked.connect(self._clear_form)
-        button_row.addWidget(self.clear_btn)
-        form_layout.addLayout(button_row, 6, 0, 1, 2)
-
         self.content_layout.addWidget(form_group)
 
-        self.table = QTableWidget()
-        self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels(["Name", "Address", "Phone", "Email", "Active"])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.table.itemSelectionChanged.connect(self._on_selection_changed)
-        self.content_layout.addWidget(self.table)
-
-        bottom_actions = QHBoxLayout()
-        self.activate_btn = QPushButton("Set Active")
-        self.activate_btn.setStyleSheet("background-color: #27ae60; color: white; padding: 8px; font-weight: bold; border-radius: 4px;")
-        self.activate_btn.setEnabled(False)
-        self.activate_btn.clicked.connect(self._on_activate_company)
-        bottom_actions.addWidget(self.activate_btn)
-
-        self.transfer_records_btn = QPushButton("Transfer Records...")
-        self.transfer_records_btn.setStyleSheet("background-color: #8e44ad; color: white; padding: 8px; font-weight: bold; border-radius: 4px;")
-        self.transfer_records_btn.setToolTip("Move a specific customer or never-sold motorcycle from one company to another.")
-        self.transfer_records_btn.clicked.connect(self._on_open_transfer_records)
-        bottom_actions.addWidget(self.transfer_records_btn)
-
-        self.claim_unassigned_btn = QPushButton("Claim Unassigned Data...")
-        self.claim_unassigned_btn.setStyleSheet("background-color: #d35400; color: white; padding: 8px; font-weight: bold; border-radius: 4px;")
-        self.claim_unassigned_btn.setToolTip("Assign any records with no company at all (e.g. from a restored old backup) to one company.")
-        self.claim_unassigned_btn.clicked.connect(self._on_open_claim_unassigned)
-        bottom_actions.addWidget(self.claim_unassigned_btn)
-        self.content_layout.addLayout(bottom_actions)
-
-        # This dialog saves each change immediately (Add/Update/Set Active),
-        # so the bottom bar is just a Close button, matching AddressShortcodeDialog.
-        self.save_btn.setText("Close")
-        self.save_btn.clicked.disconnect()
-        self.save_btn.clicked.connect(self.accept)
-
     def _load_data(self):
-        companies = settings_service.list_companies()
-        self._companies_by_row = companies
-        self.table.setRowCount(0)
-        for company in companies:
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            self.table.setItem(row, 0, QTableWidgetItem(company["name"]))
-            self.table.setItem(row, 1, QTableWidgetItem(company.get("address") or ""))
-            self.table.setItem(row, 2, QTableWidgetItem(company.get("phone") or ""))
-            self.table.setItem(row, 3, QTableWidgetItem(company.get("email") or ""))
-            self.table.setItem(row, 4, QTableWidgetItem("Yes" if company["is_active"] else ""))
-
-    def _on_selection_changed(self):
-        selected_items = self.table.selectedItems()
-        if not selected_items:
-            self.activate_btn.setEnabled(False)
+        company = settings_service.get_company()
+        if not company:
+            self.name_input.setEnabled(False)
+            self.save_btn.setEnabled(False)
             return
-        row = selected_items[0].row()
-        company = self._companies_by_row[row]
-        self._editing_id = company["id"]
-        self.name_input.setText(company["name"])
+        self.name_input.setText(company.get("name") or "")
         self.address_input.setText(company.get("address") or "")
         self.phone_input.setText(company.get("phone") or "")
         self.email_input.setText(company.get("email") or "")
         self.ntn_input.setText(company.get("ntn") or "")
         self.cnic_input.setText(company.get("cnic") or "")
-        self.add_btn.setText("Update Company")
-        self.activate_btn.setEnabled(not company["is_active"])
 
-    def _clear_form(self):
-        self._editing_id = None
-        self.name_input.clear()
-        self.address_input.clear()
-        self.phone_input.clear()
-        self.email_input.clear()
-        self.ntn_input.clear()
-        self.cnic_input.clear()
-        self.add_btn.setText("Add Company")
-        self.table.clearSelection()
-
-    def _on_save_company(self):
+    def save_settings(self):
         name = self.name_input.text().strip()
         if not name:
             self._show_error("Validation Error", "Company name is required.")
             return
         try:
-            if self._editing_id is not None:
-                settings_service.update_company(
-                    self._editing_id,
-                    name=name,
-                    address=self.address_input.text().strip(),
-                    phone=self.phone_input.text().strip(),
-                    email=self.email_input.text().strip(),
-                    ntn=self.ntn_input.text().strip(),
-                    cnic=self.cnic_input.text().strip(),
-                )
-                self._show_success("Success", f"Company '{name}' updated.")
-            else:
-                settings_service.create_company(
-                    name=name,
-                    address=self.address_input.text().strip(),
-                    phone=self.phone_input.text().strip(),
-                    email=self.email_input.text().strip(),
-                    ntn=self.ntn_input.text().strip(),
-                    cnic=self.cnic_input.text().strip(),
-                )
-                self._show_success("Success", f"Company '{name}' added.")
-            self._clear_form()
-            self._load_data()
+            settings_service.update_company(
+                name=name,
+                address=self.address_input.text().strip(),
+                phone=self.phone_input.text().strip(),
+                email=self.email_input.text().strip(),
+                ntn=self.ntn_input.text().strip(),
+                cnic=self.cnic_input.text().strip(),
+            )
+            self._show_success("Success", "Company information updated.")
+            self.accept()
         except Exception as e:
-            self._show_error("Error", f"Failed to save company: {e}")
-
-    def _on_activate_company(self):
-        if self._editing_id is None:
-            return
-        company_name = self.name_input.text().strip()
-        if QMessageBox.question(
-            self, "Confirm Switch",
-            f"Set \"{company_name}\" as the ACTIVE company? Only this company's "
-            "records will be shown everywhere in the app (and the customer portal) "
-            "until you switch again."
-        ) != QMessageBox.StandardButton.Yes:
-            return
-        try:
-            settings_service.set_active_company(self._editing_id)
-            self._show_success("Success", f"\"{company_name}\" is now the active company.")
-            self._clear_form()
-            self._load_data()
-        except Exception as e:
-            self._show_error("Error", f"Failed to set active company: {e}")
-
-    def _on_open_transfer_records(self):
-        dialog = TransferRecordsDialog(self)
-        dialog.exec()
-
-    def _on_open_claim_unassigned(self):
-        dialog = UnassignedDataDialog(self)
-        dialog.exec()
+            self._show_error("Error", f"Failed to save company information: {e}")
 
 
-class UnassignedDataDialog(BaseSettingsDialog):
-    """Safety net for records with NO company at all (company_id IS NULL) -
-    e.g. from a backup restored from before multi-company support existed,
-    a future code path that forgets to stamp company_id, or a raw-SQL
-    insert. Such rows are invisible under every company (NULL never
-    matches any company_id filter), so without this they'd be silently
-    unreachable from the app despite still existing in the database. Unlike
-    TransferRecordsDialog (which moves specific already-owned records
-    between two companies), this assigns EVERYTHING unassigned, across all
-    scoped tables, to one company in a single operation - these rows'
-    existing relationships to each other (e.g. an Invoice and the Customer
-    it references) must move together to stay consistent."""
+class ChangePasswordDialog(BaseSettingsDialog):
+    """Self-service password change for whoever is currently logged in -
+    Admin or Staff alike. Requires the current password (proves it's really
+    the account owner), unlike StaffManagementDialog's admin-initiated
+    reset of someone else's forgotten password."""
+
     def __init__(self, parent=None):
-        super().__init__("Claim Unassigned Data", parent)
-        self.setMinimumWidth(560)
+        super().__init__("Change Password", parent)
+        self.setMinimumWidth(440)
         self._init_ui()
-        self._reload()
 
     def _init_ui(self):
-        intro = QLabel(
-            "Scans every company-scoped table for records with no company assigned at all "
-            "(not the same as belonging to a different company) and lets you assign all of "
-            "them to one company in a single operation."
+        identity = QLabel(
+            f"{auth_session.current_full_name()} · {auth_session.current_mobile_number()}"
         )
-        intro.setWordWrap(True)
-        intro.setStyleSheet("color:#475569; font-size:12px;")
-        self.content_layout.addWidget(intro)
+        identity.setStyleSheet("color: #6c757d; font-weight: normal; font-size: 12px;")
+        self.content_layout.addWidget(identity)
 
-        self.table = QTableWidget()
-        self.table.setColumnCount(2)
-        self.table.setHorizontalHeaderLabels(["Table", "Unassigned Rows"])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.content_layout.addWidget(self.table)
+        form_layout = QGridLayout()
+        form_layout.setSpacing(12)
+        form_layout.setColumnStretch(1, 1)
 
-        assign_row = QHBoxLayout()
-        assign_row.addWidget(QLabel("Assign all to:"))
-        self.target_combo = QComboBox()
-        for c in settings_service.list_companies():
-            self.target_combo.addItem(c["name"], c["id"])
-        assign_row.addWidget(self.target_combo, 1)
-        self.content_layout.addLayout(assign_row)
+        form_layout.addWidget(QLabel("Current Password:"), 0, 0)
+        self.current_password_input = QLineEdit()
+        self.current_password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self._add_password_toggle(self.current_password_input)
+        form_layout.addWidget(self.current_password_input, 0, 1)
 
-        self.assign_btn = QPushButton("Assign All Unassigned Records")
-        self.assign_btn.setStyleSheet("background-color: #d35400; color: white; padding: 10px; font-weight: bold; border-radius: 4px;")
-        self.assign_btn.clicked.connect(self._on_assign)
-        self.content_layout.addWidget(self.assign_btn)
+        form_layout.addWidget(QLabel("New Password:"), 1, 0)
+        self.new_password_input = QLineEdit()
+        self.new_password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.new_password_input.setPlaceholderText("At least 6 characters")
+        self._add_password_toggle(self.new_password_input)
+        self.new_password_input.textChanged.connect(self._update_hint)
+        form_layout.addWidget(self.new_password_input, 1, 1)
 
-        self.save_btn.setText("Close")
-        self.save_btn.clicked.disconnect()
-        self.save_btn.clicked.connect(self.accept)
+        form_layout.addWidget(QLabel("Confirm New Password:"), 2, 0)
+        self.confirm_password_input = QLineEdit()
+        self.confirm_password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self._add_password_toggle(self.confirm_password_input)
+        self.confirm_password_input.textChanged.connect(self._update_hint)
+        form_layout.addWidget(self.confirm_password_input, 2, 1)
 
-    def _reload(self):
-        counts = settings_service.count_unassigned_records()
-        self._total = sum(counts.values())
-        self.table.setRowCount(0)
-        for table_name, count in sorted(counts.items()):
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            self.table.setItem(row, 0, QTableWidgetItem(table_name))
-            self.table.setItem(row, 1, QTableWidgetItem(str(count)))
-        self.assign_btn.setEnabled(self._total > 0)
-        self.assign_btn.setText(
-            f"Assign All {self._total} Unassigned Record(s)" if self._total else "No Unassigned Records Found"
-        )
+        self.content_layout.addLayout(form_layout)
 
-    def _on_assign(self):
-        target_id = self.target_combo.currentData()
-        target_name = self.target_combo.currentText()
-        if target_id is None:
-            return
-        if QMessageBox.question(
-            self, "Confirm Assignment",
-            f"Assign all {self._total} unassigned record(s), across every table, to \"{target_name}\"? "
-            "This cannot be undone from this dialog."
-        ) != QMessageBox.StandardButton.Yes:
-            return
-        try:
-            result = settings_service.assign_unassigned_records_to_company(target_id)
-            details = "\n".join(f"  {table}: {count}" for table, count in sorted(result.items())) or "  (none)"
-            self._show_success("Assignment Complete", f"Assigned to \"{target_name}\":\n\n{details}")
-            self._reload()
-        except Exception as e:
-            self._show_error("Error", f"Failed to assign unassigned records: {e}")
-
-
-class TransferRecordsDialog(BaseSettingsDialog):
-    """Moves a single already-created customer or never-sold motorcycle
-    from one company to another - for fixing records created under the
-    wrong company (e.g. during testing or a web import done while the
-    wrong company was active). Only records with zero dependent rows in
-    other company-scoped tables are offered, so a transfer can never
-    orphan invoice/ledger history in the source company - see
-    settings_service.list_transferable_*/transfer_* for the exact rules."""
-    def __init__(self, parent=None):
-        super().__init__("Transfer Records Between Companies", parent)
-        self.setMinimumWidth(760)
-        self.setMinimumHeight(560)
-        self._records = []
-        self._init_ui()
-        self._reload_companies()
-
-    def _init_ui(self):
-        top_row = QGridLayout()
-        top_row.setSpacing(12)
-
-        top_row.addWidget(QLabel("Record Type:"), 0, 0)
-        self.type_combo = QComboBox()
-        self.type_combo.addItem("Motorcycles (Inventory)", "motorcycle")
-        self.type_combo.addItem("Customers", "customer")
-        self.type_combo.currentIndexChanged.connect(self._reload_records)
-        top_row.addWidget(self.type_combo, 0, 1)
-
-        top_row.addWidget(QLabel("From Company:"), 1, 0)
-        self.source_combo = QComboBox()
-        self.source_combo.currentIndexChanged.connect(self._reload_records)
-        top_row.addWidget(self.source_combo, 1, 1)
-
-        top_row.addWidget(QLabel("To Company:"), 2, 0)
-        self.target_combo = QComboBox()
-        top_row.addWidget(self.target_combo, 2, 1)
-
-        self.content_layout.addLayout(top_row)
-
-        self.hint_label = QLabel("")
+        self.hint_label = QLabel(" ")
+        self.hint_label.setStyleSheet("color: #6c757d; font-weight: normal; font-size: 11px;")
         self.hint_label.setWordWrap(True)
-        self.hint_label.setStyleSheet("color:#7f8c8d; font-size:12px; font-weight:normal; margin-top:4px;")
         self.content_layout.addWidget(self.hint_label)
 
+        self.current_password_input.setFocus()
+        self.save_btn.setText("Change Password")
+
+    def _update_hint(self):
+        new_pw = self.new_password_input.text()
+        confirm_pw = self.confirm_password_input.text()
+        if not new_pw and not confirm_pw:
+            self.hint_label.setText(" ")
+            self.hint_label.setStyleSheet("color: #6c757d; font-weight: normal; font-size: 11px;")
+        elif len(new_pw) < staff_account_service.MIN_PASSWORD_LENGTH:
+            self.hint_label.setText(f"Password must be at least {staff_account_service.MIN_PASSWORD_LENGTH} characters.")
+            self.hint_label.setStyleSheet("color: #e67e22; font-weight: normal; font-size: 11px;")
+        elif confirm_pw and new_pw != confirm_pw:
+            self.hint_label.setText("Passwords do not match.")
+            self.hint_label.setStyleSheet("color: #e74c3c; font-weight: normal; font-size: 11px;")
+        else:
+            self.hint_label.setText("Looks good.")
+            self.hint_label.setStyleSheet("color: #27ae60; font-weight: normal; font-size: 11px;")
+
+    def save_settings(self):
+        current_pw = self.current_password_input.text()
+        new_pw = self.new_password_input.text()
+        confirm_pw = self.confirm_password_input.text()
+
+        if not current_pw or not new_pw or not confirm_pw:
+            self._show_error("Validation Error", "All fields are required.")
+            return
+        if new_pw != confirm_pw:
+            self._show_error("Validation Error", "New password and confirmation do not match.")
+            return
+
+        try:
+            staff_account_service.change_own_password(current_pw, new_pw)
+            self._show_success("Success", "Your password has been changed.")
+            self.accept()
+        except ValueError as ve:
+            self._show_error("Could Not Change Password", str(ve))
+        except Exception as e:
+            self._show_error("Error", f"Failed to change password: {e}")
+
+
+class AdminResetPasswordDialog(BaseSettingsDialog):
+    """Admin-initiated reset of ANOTHER account's forgotten password -
+    deliberately a separate, explicit dialog (opened via StaffManagementDialog's
+    "Reset Password" button) rather than a field buried inside the
+    permissions-edit form, so a reset is always a distinct, confirmed action
+    and never an accidental side-effect of saving permissions. Does not ask
+    for the old password - not knowing it is the entire reason this exists."""
+
+    def __init__(self, staff: Dict[str, Any], parent=None):
+        super().__init__("Reset Password", parent)
+        self.setMinimumWidth(420)
+        self._staff = staff
+        self._init_ui()
+
+    def _init_ui(self):
+        target = QLabel(f"Resetting password for:\n{self._staff['full_name']} · {self._staff['mobile_number']}")
+        target.setWordWrap(True)
+        target.setStyleSheet("color: #2c3e50; font-weight: bold; font-size: 13px;")
+        self.content_layout.addWidget(target)
+
+        note = QLabel("This immediately replaces their current password. Share the new password with them securely.")
+        note.setWordWrap(True)
+        note.setStyleSheet("color: #6c757d; font-weight: normal; font-size: 11px;")
+        self.content_layout.addWidget(note)
+
+        form_layout = QGridLayout()
+        form_layout.setSpacing(12)
+        form_layout.setColumnStretch(1, 1)
+
+        form_layout.addWidget(QLabel("New Password:"), 0, 0)
+        self.new_password_input = QLineEdit()
+        self.new_password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.new_password_input.setPlaceholderText("At least 6 characters")
+        self._add_password_toggle(self.new_password_input)
+        form_layout.addWidget(self.new_password_input, 0, 1)
+
+        form_layout.addWidget(QLabel("Confirm Password:"), 1, 0)
+        self.confirm_password_input = QLineEdit()
+        self.confirm_password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self._add_password_toggle(self.confirm_password_input)
+        form_layout.addWidget(self.confirm_password_input, 1, 1)
+
+        self.content_layout.addLayout(form_layout)
+
+        self.new_password_input.setFocus()
+        self.save_btn.setText("Reset Password")
+
+    def save_settings(self):
+        new_pw = self.new_password_input.text()
+        confirm_pw = self.confirm_password_input.text()
+
+        if not new_pw or not confirm_pw:
+            self._show_error("Validation Error", "Both password fields are required.")
+            return
+        if new_pw != confirm_pw:
+            self._show_error("Validation Error", "Passwords do not match.")
+            return
+
+        try:
+            staff_account_service.change_password(self._staff["id"], new_pw)
+            self._show_success("Success", f"Password reset for {self._staff['full_name']}.")
+            self.accept()
+        except ValueError as ve:
+            self._show_error("Could Not Reset Password", str(ve))
+        except Exception as e:
+            self._show_error("Error", f"Failed to reset password: {e}")
+
+
+class StaffManagementDialog(BaseSettingsDialog):
+    """Admin-only: create Staff accounts and grant/revoke their module
+    permissions. Only reachable by an Admin (see main_window.py's Settings
+    page, which hides this tile for Staff)."""
+
+    def __init__(self, parent=None):
+        super().__init__("Staff Accounts", parent)
+        self.setMinimumWidth(820)
+        self.setMinimumHeight(680)
+        self._editing_staff_id = None
+        self._module_checkboxes: dict[str, QCheckBox] = {}
+        self._init_ui()
+        self._load_data()
+
+    def _init_ui(self):
+        form_group = QFrame()
+        form_group.setStyleSheet("background-color: #fcfcfc; border: 1px solid #dee2e6; border-radius: 4px; padding: 10px;")
+        form_layout = QGridLayout(form_group)
+
+        form_layout.addWidget(QLabel("Full Name:"), 0, 0)
+        self.name_input = QLineEdit()
+        form_layout.addWidget(self.name_input, 0, 1)
+
+        form_layout.addWidget(QLabel("Mobile Number:"), 1, 0)
+        self.mobile_input = QLineEdit()
+        self.mobile_input.setPlaceholderText("e.g. 03001234567")
+        form_layout.addWidget(self.mobile_input, 1, 1)
+
+        self.password_label = QLabel("Password:")
+        form_layout.addWidget(self.password_label, 2, 0)
+        self.password_input = QLineEdit()
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_input.setPlaceholderText("At least 6 characters")
+        self._add_password_toggle(self.password_input)
+        form_layout.addWidget(self.password_input, 2, 1)
+
+        self.content_layout.addWidget(form_group)
+
+        perms_label = QLabel("MODULE PERMISSIONS")
+        perms_label.setObjectName("groupTitle")
+        self.content_layout.addWidget(perms_label)
+
+        perms_scroll = QScrollArea()
+        perms_scroll.setWidgetResizable(True)
+        perms_scroll.setMaximumHeight(180)
+        perms_container = QWidget()
+        perms_grid = QGridLayout(perms_container)
+        for i, (code, label) in enumerate(STAFF_MODULES):
+            checkbox = QCheckBox(label)
+            self._module_checkboxes[code] = checkbox
+            perms_grid.addWidget(checkbox, i // 3, i % 3)
+        perms_scroll.setWidget(perms_container)
+        self.content_layout.addWidget(perms_scroll)
+
+        button_row = QHBoxLayout()
+        self.save_staff_btn = QPushButton("Create Staff Account")
+        self.save_staff_btn.setStyleSheet("""
+            QPushButton { background-color: #3498db; color: white; border: none;
+                          padding: 10px 20px; font-weight: bold; border-radius: 4px; }
+            QPushButton:hover { background-color: #2980b9; }
+        """)
+        self.save_staff_btn.clicked.connect(self._on_save_staff)
+        button_row.addWidget(self.save_staff_btn)
+
+        self.clear_btn = QPushButton("Clear Form")
+        self.clear_btn.clicked.connect(self._clear_form)
+        button_row.addWidget(self.clear_btn)
+        self.content_layout.addLayout(button_row)
+
         self.table = QTableWidget()
+        self.table.setColumnCount(3)
+        self.table.setHorizontalHeaderLabels(["Name", "Mobile Number", "Status"])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.itemSelectionChanged.connect(self._on_selection_changed)
         self.content_layout.addWidget(self.table)
 
-        self.transfer_btn = QPushButton("Transfer Selected")
-        self.transfer_btn.setStyleSheet("background-color: #8e44ad; color: white; padding: 10px; font-weight: bold; border-radius: 4px;")
-        self.transfer_btn.clicked.connect(self._on_transfer_selected)
-        self.content_layout.addWidget(self.transfer_btn)
+        selected_actions_row = QHBoxLayout()
+
+        self.reset_password_btn = QPushButton("Reset Password")
+        self.reset_password_btn.setStyleSheet("background-color: #8e44ad; color: white; padding: 8px; font-weight: bold; border-radius: 4px;")
+        self.reset_password_btn.setEnabled(False)
+        self.reset_password_btn.clicked.connect(self._on_reset_password)
+        selected_actions_row.addWidget(self.reset_password_btn)
+
+        self.toggle_active_btn = QPushButton("Deactivate Selected")
+        self.toggle_active_btn.setStyleSheet("background-color: #e67e22; color: white; padding: 8px; font-weight: bold; border-radius: 4px;")
+        self.toggle_active_btn.setEnabled(False)
+        self.toggle_active_btn.clicked.connect(self._on_toggle_active)
+        selected_actions_row.addWidget(self.toggle_active_btn)
+
+        self.content_layout.addLayout(selected_actions_row)
 
         self.save_btn.setText("Close")
         self.save_btn.clicked.disconnect()
         self.save_btn.clicked.connect(self.accept)
 
-    def _reload_companies(self):
-        companies = settings_service.list_companies()
-        self._companies = companies
-        for combo in (self.source_combo, self.target_combo):
-            combo.blockSignals(True)
-            combo.clear()
-            for c in companies:
-                combo.addItem(c["name"], c["id"])
-            combo.blockSignals(False)
-        self._reload_records()
+    def _load_data(self):
+        self._staff = staff_account_service.list_staff()
+        self.table.setRowCount(0)
+        for staff in self._staff:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            self.table.setItem(row, 0, QTableWidgetItem(staff["full_name"]))
+            self.table.setItem(row, 1, QTableWidgetItem(staff["mobile_number"]))
+            self.table.setItem(row, 2, QTableWidgetItem("Active" if staff["is_active"] else "Inactive"))
 
-    def _current_record_type(self) -> str:
-        return self.type_combo.currentData()
-
-    def _reload_records(self):
-        source_id = self.source_combo.currentData()
-        if source_id is None:
-            self.table.setRowCount(0)
-            self.table.setColumnCount(0)
-            self._records = []
+    def _on_selection_changed(self):
+        selected_items = self.table.selectedItems()
+        if not selected_items:
+            self.toggle_active_btn.setEnabled(False)
             return
+        row = selected_items[0].row()
+        staff = self._staff[row]
+        self._editing_staff_id = staff["id"]
+        self.name_input.setText(staff["full_name"])
+        self.mobile_input.setText(staff["mobile_number"])
+        self.password_input.clear()
+        # Password is only collected here when creating a new account - once an
+        # account exists, resetting its password is its own explicit, confirmed
+        # action (see _on_reset_password) rather than a side-effect of saving
+        # permissions, so the field is hidden while editing an existing staff member.
+        self.password_label.setVisible(False)
+        self.password_input.setVisible(False)
+        self.save_staff_btn.setText("Update Permissions")
+        self.reset_password_btn.setEnabled(True)
+        self.toggle_active_btn.setEnabled(staff["role"] != "ADMIN")
+        self.toggle_active_btn.setText("Deactivate Selected" if staff["is_active"] else "Activate Selected")
 
-        record_type = self._current_record_type()
-        if record_type == "motorcycle":
-            self._records = settings_service.list_transferable_motorcycles(source_id)
-            headers = ["Chassis Number", "Engine Number", "Model", "Color", "Status", "Transferable?"]
-            self.table.setColumnCount(len(headers))
-            self.table.setHorizontalHeaderLabels(headers)
-            self.table.setRowCount(0)
-            for rec in self._records:
-                row = self.table.rowCount()
-                self.table.insertRow(row)
-                self.table.setItem(row, 0, QTableWidgetItem(rec["chassis_number"]))
-                self.table.setItem(row, 1, QTableWidgetItem(rec["engine_number"] or ""))
-                self.table.setItem(row, 2, QTableWidgetItem(rec["model"] or ""))
-                self.table.setItem(row, 3, QTableWidgetItem(rec["color"] or ""))
-                self.table.setItem(row, 4, QTableWidgetItem(rec["status"]))
-                self.table.setItem(row, 5, QTableWidgetItem("Yes" if rec["transferable"] else "No - already sold"))
-                if not rec["transferable"]:
-                    for col in range(len(headers)):
-                        item = self.table.item(row, col)
-                        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable & ~Qt.ItemFlag.ItemIsEnabled)
-        else:
-            self._records = settings_service.list_transferable_customers(source_id)
-            headers = ["Name", "CNIC", "Phone", "Type", "Transferable?"]
-            self.table.setColumnCount(len(headers))
-            self.table.setHorizontalHeaderLabels(headers)
-            self.table.setRowCount(0)
-            for rec in self._records:
-                row = self.table.rowCount()
-                self.table.insertRow(row)
-                self.table.setItem(row, 0, QTableWidgetItem(rec["name"]))
-                self.table.setItem(row, 1, QTableWidgetItem(rec["cnic"] or ""))
-                self.table.setItem(row, 2, QTableWidgetItem(rec["phone"] or ""))
-                self.table.setItem(row, 3, QTableWidgetItem(rec["type"]))
-                self.table.setItem(row, 4, QTableWidgetItem("Yes" if rec["transferable"] else "No - has invoice/ledger history"))
-                if not rec["transferable"]:
-                    for col in range(len(headers)):
-                        item = self.table.item(row, col)
-                        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable & ~Qt.ItemFlag.ItemIsEnabled)
+        granted = staff_account_service.get_permissions_for_staff(staff["id"])
+        for code, checkbox in self._module_checkboxes.items():
+            checkbox.setChecked(code in granted)
 
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        total = len(self._records)
-        transferable = sum(1 for r in self._records if r["transferable"])
-        self.hint_label.setText(
-            f"{transferable} of {total} record(s) are eligible to transfer. "
-            "Records already tied to an invoice, credit sale, or ledger entry are locked "
-            "(greyed out) to avoid breaking that history - move those manually if needed."
-        )
+    def _clear_form(self):
+        self._editing_staff_id = None
+        self.name_input.clear()
+        self.mobile_input.clear()
+        self.password_input.clear()
+        self.password_label.setVisible(True)
+        self.password_input.setVisible(True)
+        self.reset_password_btn.setEnabled(False)
+        for checkbox in self._module_checkboxes.values():
+            checkbox.setChecked(False)
+        self.save_staff_btn.setText("Create Staff Account")
+        self.table.clearSelection()
 
-    def _on_transfer_selected(self):
-        source_id = self.source_combo.currentData()
-        target_id = self.target_combo.currentData()
-        if source_id is None or target_id is None:
+    def _selected_permissions(self) -> set[str]:
+        return {code for code, checkbox in self._module_checkboxes.items() if checkbox.isChecked()}
+
+    def _on_save_staff(self):
+        permissions = self._selected_permissions()
+        try:
+            if self._editing_staff_id is not None:
+                staff_account_service.set_staff_permissions(self._editing_staff_id, permissions)
+                self._show_success("Success", "Staff permissions updated.")
+            else:
+                full_name = self.name_input.text().strip()
+                mobile = self.mobile_input.text().strip()
+                password = self.password_input.text()
+                if not full_name or not mobile or not password:
+                    self._show_error("Validation Error", "Full name, mobile number, and password are all required.")
+                    return
+                staff_account_service.create_staff_account(
+                    mobile_number=mobile,
+                    password=password,
+                    full_name=full_name,
+                    permissions=permissions,
+                    created_by_id=auth_session.current_staff_id(),
+                )
+                self._show_success("Success", f"Staff account for '{full_name}' created.")
+            self._clear_form()
+            self._load_data()
+        except Exception as e:
+            self._show_error("Error", f"Failed to save staff account: {e}")
+
+    def _on_toggle_active(self):
+        if self._editing_staff_id is None:
             return
-        if source_id == target_id:
-            self._show_error("Invalid Selection", "Source and target company must be different.")
+        staff = next((s for s in self._staff if s["id"] == self._editing_staff_id), None)
+        if not staff:
             return
+        try:
+            staff_account_service.set_staff_active(self._editing_staff_id, not staff["is_active"])
+            self._clear_form()
+            self._load_data()
+        except Exception as e:
+            self._show_error("Error", f"Failed to update account status: {e}")
 
-        selected_rows = sorted({idx.row() for idx in self.table.selectedIndexes()})
-        if not selected_rows:
-            self._show_error("Nothing Selected", "Select at least one transferable record first.")
+    def _on_reset_password(self):
+        if self._editing_staff_id is None:
             return
-
-        record_type = self._current_record_type()
-        target_name = self.target_combo.currentText()
-        if QMessageBox.question(
-            self, "Confirm Transfer",
-            f"Move {len(selected_rows)} {'motorcycle(s)' if record_type == 'motorcycle' else 'customer(s)'} "
-            f"to \"{target_name}\"? This cannot be undone from this dialog."
-        ) != QMessageBox.StandardButton.Yes:
+        staff = next((s for s in self._staff if s["id"] == self._editing_staff_id), None)
+        if not staff:
             return
+        dialog = AdminResetPasswordDialog(staff, self)
+        dialog.exec()
 
-        succeeded, failed = 0, []
-        for row in selected_rows:
-            rec = self._records[row]
-            if not rec["transferable"]:
-                continue
-            try:
-                if record_type == "motorcycle":
-                    settings_service.transfer_motorcycle(rec["id"], target_id)
-                else:
-                    settings_service.transfer_customer(rec["id"], target_id)
-                succeeded += 1
-            except Exception as e:
-                failed.append(f"{rec.get('chassis_number') or rec.get('name')}: {e}")
-
-        self._reload_records()
-        if failed:
-            self._show_error(
-                "Some Transfers Failed",
-                f"Transferred {succeeded} record(s). {len(failed)} failed:\n\n" + "\n".join(failed),
-            )
-        else:
-            self._show_success("Transfer Complete", f"Successfully transferred {succeeded} record(s) to \"{target_name}\".")

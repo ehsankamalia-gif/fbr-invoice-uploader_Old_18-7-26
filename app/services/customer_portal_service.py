@@ -96,7 +96,7 @@ class CustomerPortalService:
             now = dt.datetime.now()
             db.execute(
                 text("""
-                    INSERT INTO customer_portal_auth 
+                    INSERT INTO customer_portal_auth
                     (customer_id, phone_number, password_hash, is_active, created_at, updated_at)
                     VALUES (:customer_id, :phone_number, :password_hash, 1, :created_at, :updated_at)
                 """),

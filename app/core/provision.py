@@ -22,11 +22,12 @@ from app.core.paths import (
 logger = logging.getLogger("provision")
 
 # Files copied into the writable data folder on first run, if missing there.
+# These hold genuine user customization (captured-form settings, prices,
+# feature flags), so an update must never silently overwrite them.
 SEED_FILES = (
     "capture_config.json",
     "prices.json",
     "feature_flags.json",
-    "version.json",
 )
 
 
@@ -79,6 +80,33 @@ def _seed_env_file(target_dir: Path) -> None:
     logger.warning("No bundled .env or .env.example found; created an empty .env")
 
 
+def _sync_version_file(target_dir: Path) -> None:
+    """Always refreshes the per-user version.json from the bundle.
+
+    Unlike the SEED_FILES (genuine user data that must survive an update
+    untouched), version.json's only job is to say which build is actually
+    installed - VersionManager.get_current_version() (and the footer/updater
+    that read it) both resolve to this per-user copy, not the bundled one.
+    Treating it as "seed once, then leave alone" like the other files meant
+    it only ever got written on the very first-ever install: every later
+    update correctly replaced the bundled copy but left this one frozen at
+    whatever version that first install happened to be, so the app kept
+    reporting - and the updater kept "detecting" - the original version
+    forever, no matter how many times it was actually updated.
+    """
+    target = target_dir / "version.json"
+    source = resource_dir() / "version.json"
+    if not source.exists():
+        return
+    try:
+        if target.exists() and target.read_bytes() == source.read_bytes():
+            return
+        shutil.copyfile(source, target)
+        logger.info("Synced version.json from bundle (%s)", source)
+    except Exception as exc:
+        logger.error("Could not sync version.json: %s", exc)
+
+
 def _seed_data_files(target_dir: Path) -> None:
     for name in SEED_FILES:
         target = target_dir / name
@@ -103,5 +131,6 @@ def ensure_first_run_setup() -> None:
 
         _seed_env_file(target_dir)
         _seed_data_files(target_dir)
+        _sync_version_file(target_dir)
     except Exception as exc:
         logger.error("First-run setup failed: %s", exc)

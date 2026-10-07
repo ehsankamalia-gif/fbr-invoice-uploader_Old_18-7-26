@@ -319,7 +319,6 @@ class WebImportDialog(QDialog):
                         model_name=model_name,
                         make="Honda",
                         engine_capacity="70cc" if "70" in model_name else "125cc",
-                        company_id=settings_service.get_active_company_id(),
                     )
                     db.add(product_model)
                     db.flush()
@@ -333,7 +332,6 @@ class WebImportDialog(QDialog):
                     cost_price=cost,
                     sale_price=sale,
                     status="IN_STOCK",
-                    company_id=settings_service.get_active_company_id(),
                 )
                 db.add(new_bike)
                 imported += 1

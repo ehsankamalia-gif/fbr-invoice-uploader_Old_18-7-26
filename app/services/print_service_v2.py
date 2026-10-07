@@ -14,7 +14,7 @@ from PyQt6.QtCore import Qt, QUrl, QObject, QCoreApplication, QTimer, pyqtSlot
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 
 from app.core.logger import logger
-from app.core.paths import data_dir
+from app.core.paths import data_dir, resource_path
 from app.services.settings_service import settings_service
 
 QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
@@ -412,30 +412,31 @@ class PrintServiceV2:
     """
     
     def __init__(self):
-        # Setup Jinja2 environment for HTML templates
-        self.template_dir = os.path.join(os.getcwd(), "app", "static", "templates")
-        if not os.path.exists(self.template_dir):
-            os.makedirs(self.template_dir, exist_ok=True)
-            
+        # Setup Jinja2 environment for HTML templates. This is a read-only
+        # bundled resource, not writable app state - resource_path() resolves
+        # to the PyInstaller _MEIPASS bundle dir when frozen (where --add-data
+        # actually places app/static) instead of os.getcwd(), which pointed at
+        # the install directory (e.g. C:\Program Files\EhsanTraderFBR) for a
+        # shortcut-launched installed app. That directory doesn't contain this
+        # path directly (PyInstaller nests bundled data under _internal/), so
+        # os.path.exists() was false and the old code tried to os.makedirs()
+        # a new folder under Program Files - which a non-admin process can't
+        # write to, crashing every installed launch with PermissionError.
+        self.template_dir = str(resource_path("app", "static", "templates"))
         self.jinja_env = Environment(loader=FileSystemLoader(self.template_dir))
         self.active_view: Optional[object] = None
 
     def _get_business_info(self) -> Dict[str, str]:
-        """Fetches the active company's profile for template population -
-        Company (name/address/phone/ntn) is the single source of truth for
-        company identity, so switching the active company changes what
-        prints on every invoice, ledger statement, and receipt
-        automatically. Previously this read from the FBR settings dict,
-        which only ever actually had a business_name field - address/
-        phone/ntn always silently fell back to hardcoded defaults, no
-        matter which company was active, since those keys never existed
-        there at all."""
-        company = settings_service.get_active_company() or {}
+        """Fetches the company's profile for template population - Company
+        (name/address/phone/ntn) is the single source of truth for company
+        identity, printed on every invoice, ledger statement, and receipt."""
+        company = settings_service.get_company() or {}
         return {
             "business_name": company.get("name") or "Ehsan Trader",
             "business_address": company.get("address") or "Kamalia, Pakistan",
             "business_phone": company.get("phone") or "0302-8691288",
             "business_ntn": company.get("ntn") or "1234597-8",
+            "business_email": company.get("email") or "",
         }
 
     def render_ledger_statement(self, ledger_data: Dict[str, Any]) -> str:
@@ -3019,6 +3020,200 @@ class PrintServiceV2:
             </div>
           </body>
         </html>
+        """
+        return html
+
+    def render_quotation(self, quotation_data: Dict[str, Any]) -> str:
+        business = self._get_business_info()
+
+        def esc(v: object) -> str:
+            s = str(v if v is not None else "")
+            return (
+                s.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace('"', "&quot;")
+                .replace("'", "&#39;")
+            )
+
+        def fmt_date(v: object) -> str:
+            if isinstance(v, dt.datetime):
+                return v.strftime("%d-%m-%Y")
+            return str(v or "")
+
+        quotation_number = esc(quotation_data.get("quotation_number", ""))
+        created_at = fmt_date(quotation_data.get("created_at"))
+        valid_until_raw = quotation_data.get("valid_until")
+        valid_until = fmt_date(valid_until_raw) if valid_until_raw else "N/A"
+
+        customer_name = esc(quotation_data.get("customer_name", ""))
+        customer_phone = esc(quotation_data.get("customer_phone", ""))
+        customer_address = esc(quotation_data.get("customer_address", ""))
+
+        items = quotation_data.get("items") if isinstance(quotation_data.get("items"), list) else []
+        rows_html = ""
+        for i, item in enumerate(items, start=1):
+            qty = float(item.get("quantity") or 0)
+            unit_price = float(item.get("unit_price") or 0)
+            line_total = float(item.get("line_total") or 0)
+            rows_html += f"""
+            <tr>
+                <td style="text-align: center;">{i}</td>
+                <td>{esc(item.get('motorcycle_model', ''))}</td>
+                <td>{esc(item.get('color', ''))}</td>
+                <td style="text-align: right;">{qty:,.0f}</td>
+                <td style="text-align: right;">{unit_price:,.0f}</td>
+                <td style="text-align: right; font-weight: bold;">{line_total:,.0f}</td>
+            </tr>
+            """
+
+        accessory_items = quotation_data.get("accessory_items") if isinstance(quotation_data.get("accessory_items"), list) else []
+        accessory_rows_html = ""
+        for i, item in enumerate(accessory_items, start=1):
+            qty = float(item.get("quantity") or 0)
+            unit_price = float(item.get("unit_price") or 0)
+            line_total = float(item.get("line_total") or 0)
+            accessory_rows_html += f"""
+            <tr>
+                <td style="text-align: center;">{i}</td>
+                <td>{esc(item.get('item_name', ''))}</td>
+                <td style="text-align: right;">{qty:,.0f}</td>
+                <td style="text-align: right;">{unit_price:,.0f}</td>
+                <td style="text-align: right; font-weight: bold;">{line_total:,.0f}</td>
+            </tr>
+            """
+        accessories_section_html = ""
+        if accessory_items:
+            accessories_section_html = f"""
+    <div class="section-title">Accessories / Add-ons</div>
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 30px; text-align: center;">#</th>
+                <th>Item</th>
+                <th style="width: 60px; text-align: right;">Qty</th>
+                <th style="width: 110px; text-align: right;">Unit Price (Rs.)</th>
+                <th style="width: 110px; text-align: right;">Line Total (Rs.)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {accessory_rows_html}
+        </tbody>
+    </table>
+            """
+
+        subtotal = float(quotation_data.get("subtotal") or 0)
+        accessories_subtotal = float(quotation_data.get("accessories_subtotal") or 0)
+        motorcycles_subtotal = subtotal - accessories_subtotal
+        discount_amount = float(quotation_data.get("discount_amount") or 0)
+        total_amount = float(quotation_data.get("total_amount") or 0)
+        notes = esc(quotation_data.get("notes", ""))
+
+        notes_html = f'<div class="notes">{notes}</div>' if notes else ""
+
+        company_meta_parts = [f"NTN: {esc(business.get('business_ntn', ''))}"]
+        if business.get("business_email"):
+            company_meta_parts.append(f"Email: {esc(business['business_email'])}")
+        company_meta_line = " | ".join(company_meta_parts)
+
+        html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8"/>
+    <style>
+        @page {{ size: A4 portrait; margin: 12mm; }}
+        body {{ font-family: Arial, sans-serif; padding: 0; color: #333; }}
+        .header {{ text-align: center; border-bottom: 2px solid #2c3e50; padding-bottom: 10px; margin-bottom: 20px; }}
+        .business-name {{ font-size: 24px; font-weight: bold; color: #2c3e50; }}
+        .report-title {{ font-size: 18px; margin-top: 5px; text-transform: uppercase; letter-spacing: 1px; }}
+
+        .section-title {{ font-size: 14px; font-weight: bold; color: #2c3e50; margin-top: 24px; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }}
+        .meta-row {{ display: flex; justify-content: space-between; margin-bottom: 20px; font-size: 13px; }}
+        .customer-info {{ width: 60%; border: 1px solid #ddd; padding: 10px; border-radius: 5px; background: #f9f9f9; }}
+        .quote-meta {{ width: 35%; border: 1px solid #ddd; padding: 10px; border-radius: 5px; background: #f9f9f9; }}
+        .info-label {{ font-weight: bold; color: #7f8c8d; }}
+
+        table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
+        th {{ background-color: #2c3e50; color: white; padding: 10px; text-align: left; font-size: 13px; }}
+        td {{ border-bottom: 1px solid #ddd; padding: 8px; font-size: 12px; vertical-align: top; }}
+        tr:nth-child(even) {{ background-color: #f2f2f2; }}
+
+        .summary {{ margin-top: 20px; text-align: right; }}
+        .summary-box {{ display: inline-block; border: 2px solid #2c3e50; padding: 10px; border-radius: 5px; min-width: 260px; }}
+        .summary-item {{ font-size: 14px; margin: 5px 0; display: flex; justify-content: space-between; gap: 20px; }}
+        .grand-total {{ font-size: 18px; font-weight: bold; color: #e74c3c; border-top: 1px solid #ddd; padding-top: 5px; }}
+
+        .notes {{ margin-top: 20px; font-size: 12px; color: #555; }}
+        .validity {{ margin-top: 10px; font-size: 12px; font-weight: bold; }}
+        .signature {{ margin-top: 60px; display: flex; justify-content: space-between; }}
+        .sig-line {{ border-top: 1px solid #111; width: 220px; text-align: center; font-size: 11px; padding-top: 4px; }}
+        .disclaimer {{ margin-top: 30px; font-size: 10px; color: #95a5a6; text-align: center; }}
+
+        @media print {{
+            body {{ padding: 0; }}
+        }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="business-name">{esc(business['business_name'])}</div>
+        <div>{esc(business['business_address'])} | {esc(business['business_phone'])}</div>
+        <div>{company_meta_line}</div>
+        <div class="report-title">Quotation</div>
+    </div>
+
+    <div class="meta-row">
+        <div class="customer-info">
+            <div><span class="info-label">Customer:</span> {customer_name}</div>
+            <div><span class="info-label">Phone:</span> {customer_phone or 'N/A'}</div>
+            <div><span class="info-label">Address:</span> {customer_address or 'N/A'}</div>
+        </div>
+        <div class="quote-meta">
+            <div><span class="info-label">Quotation #:</span> {quotation_number}</div>
+            <div><span class="info-label">Date:</span> {esc(created_at)}</div>
+            <div><span class="info-label">Valid Until:</span> {esc(valid_until)}</div>
+        </div>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 30px; text-align: center;">#</th>
+                <th>Model</th>
+                <th>Available Colors</th>
+                <th style="width: 60px; text-align: right;">Qty</th>
+                <th style="width: 110px; text-align: right;">Unit Price (Rs.)</th>
+                <th style="width: 110px; text-align: right;">Line Total (Rs.)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {rows_html}
+        </tbody>
+    </table>
+
+    {accessories_section_html}
+
+    <div class="summary">
+        <div class="summary-box">
+            <div class="summary-item"><span>Motorcycles Subtotal</span><span>Rs. {motorcycles_subtotal:,.0f}</span></div>
+            <div class="summary-item"><span>Accessories Subtotal</span><span>Rs. {accessories_subtotal:,.0f}</span></div>
+            <div class="summary-item"><span>Discount</span><span>Rs. {discount_amount:,.0f}</span></div>
+            <div class="summary-item grand-total"><span>Total</span><span>Rs. {total_amount:,.0f}</span></div>
+        </div>
+    </div>
+
+    {notes_html}
+    <div class="validity">This quotation is valid until {esc(valid_until)}.</div>
+
+    <div class="signature">
+        <div class="sig-line">Customer Signature</div>
+        <div class="sig-line">Authorized Signature</div>
+    </div>
+
+    <div class="disclaimer">This is a price quotation, not a tax invoice. Prices are subject to change without prior notice.</div>
+</body>
+</html>
         """
         return html
 

@@ -165,8 +165,6 @@ class SettingsService:
         self._active_settings_cache_loaded_at: float = 0.0
         self._active_environment_cache: Optional[str] = None
         self._active_environment_cache_loaded_at: float = 0.0
-        self._active_company_id_cache: Optional[int] = None
-        self._active_company_id_cache_loaded_at: float = 0.0
         self._observers: Dict[str, Callable[[Dict[str, Any]], None]] = {}
         self._revision: int = 0
 
@@ -203,8 +201,6 @@ class SettingsService:
             self._active_settings_cache_loaded_at = 0.0
             self._active_environment_cache = None
             self._active_environment_cache_loaded_at = 0.0
-            self._active_company_id_cache = None
-            self._active_company_id_cache_loaded_at = 0.0
 
     def _bump_revision(self) -> int:
         with self._lock:
@@ -284,11 +280,11 @@ class SettingsService:
         }
         self._write_env(payload)
 
-    def _get_environment_from_db(self, env: str, company_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    def _get_environment_from_db(self, env: str) -> Optional[Dict[str, Any]]:
         env = env.upper()
         db = SessionLocal()
         try:
-            config = db.query(FBRConfiguration).filter_by(environment=env, company_id=company_id).first()
+            config = db.query(FBRConfiguration).filter_by(environment=env).first()
             if not config:
                 return None
             return {
@@ -380,22 +376,6 @@ class SettingsService:
                 )
                 db.add(sms_cfg)
 
-            # Initialize DMS settings from module .env if present
-            app_cfg = db.query(AppConfiguration).first()
-            if app_cfg and not app_cfg.dms_username:
-                try:
-                    dms_env = Path(__file__).resolve().parent.parent.parent / "dms_automation" / ".env"
-                    if dms_env.exists():
-                        for line in dms_env.read_text().splitlines():
-                            if "=" in line:
-                                k, v = line.strip().split("=", 1)
-                                if k == "DMS_PORTAL_URL": app_cfg.dms_portal_url = v
-                                elif k == "DMS_USERNAME": app_cfg.dms_username = v
-                                elif k == "DMS_PASSWORD": app_cfg.dms_password = v
-                        logger.info("Initialized DMS database settings from module .env")
-                except Exception as e:
-                    logger.warning(f"Failed to migrate DMS settings from .env to DB: {e}")
-            
             db.commit()
         except Exception as e:
             logger.error(f"Failed to initialize default settings: {e}")
@@ -425,11 +405,11 @@ class SettingsService:
 
     def save_environment(self, env: str, base_url: str, pos_id: str, usin: str, token: str, tax_rate: str, pct_code: str,
                          invoice_type: str, discount: str, item_code: str, item_name: str, secret_key: str = "", business_name: str = "Ehsan Trader",
-                         pos_fee: str = "1.0", _retry: bool = False):
+                         pos_fee: str = "1.0"):
         env = env.upper()
         if env not in ("SANDBOX", "PRODUCTION"):
             raise ValueError("Environment must be SANDBOX or PRODUCTION")
-        
+
         float(tax_rate)
         float(discount)
         try:
@@ -437,14 +417,13 @@ class SettingsService:
         except (ValueError, TypeError):
             pos_fee = "1.0"
 
-        active_company_id = self.get_active_company_id()
-        before_db = self._get_environment_from_db(env, company_id=active_company_id) or {}
+        before_db = self._get_environment_from_db(env) or {}
         db = SessionLocal()
         saved_to_db = False
         try:
-            config = db.query(FBRConfiguration).filter_by(environment=env, company_id=active_company_id).first()
+            config = db.query(FBRConfiguration).filter_by(environment=env).first()
             if not config:
-                config = FBRConfiguration(environment=env, api_base_url=base_url, company_id=active_company_id)
+                config = FBRConfiguration(environment=env, api_base_url=base_url)
                 db.add(config)
 
             config.api_base_url = base_url
@@ -468,27 +447,6 @@ class SettingsService:
             saved_to_db = True
         except SQLAlchemyError as e:
             db.rollback()
-            # Self-heal: a database that never got migration v18 applied -
-            # for any reason outside our control once this is deployed
-            # elsewhere (an earlier versioned migration failing first on
-            # that specific database, migration_history being in an
-            # unexpected state, etc.) - still has the pre-multi-company
-            # single-column UNIQUE(environment) constraint, so saving a
-            # second company's config collides here. Fix the constraint on
-            # the spot and retry once, rather than leaving the user stuck
-            # until a fresh migration run happens to succeed some other way.
-            if not _retry and "Duplicate entry" in str(e) and "environment" in str(e):
-                db.close()
-                from app.db.session import ensure_company_scoped_unique_constraint
-                if ensure_company_scoped_unique_constraint("fbr_configurations"):
-                    logger.warning("Legacy fbr_configurations constraint fixed on demand - retrying save.")
-                    return self.save_environment(
-                        env=env, base_url=base_url, pos_id=pos_id, usin=usin, token=token,
-                        tax_rate=tax_rate, pct_code=pct_code, invoice_type=invoice_type,
-                        discount=discount, item_code=item_code, item_name=item_name,
-                        secret_key=secret_key, business_name=business_name, pos_fee=pos_fee,
-                        _retry=True,
-                    )
             logger.error(f"DB persistence failed while saving FBR settings for {env}: {e}")
             raise RuntimeError(f"Failed to save {env} settings to the database: {e}") from e
         finally:
@@ -511,7 +469,7 @@ class SettingsService:
             business_name=business_name,
         )
 
-        after_db = self._get_environment_from_db(env, company_id=active_company_id) if saved_to_db else None
+        after_db = self._get_environment_from_db(env) if saved_to_db else None
         after_effective = after_db or self._read_fbr_settings_from_env(env)
         changed_keys = [k for k in after_effective.keys() if before_db.get(k) != after_effective.get(k)]
 
@@ -584,12 +542,11 @@ class SettingsService:
         if env not in ("SANDBOX", "PRODUCTION"):
             raise ValueError("Environment must be SANDBOX or PRODUCTION")
 
-        active_company_id = self.get_active_company_id()
         before_env = self.get_active_environment()
         db = SessionLocal()
         try:
-            db.query(FBRConfiguration).filter_by(company_id=active_company_id).update({"is_active": False})
-            config = db.query(FBRConfiguration).filter_by(environment=env, company_id=active_company_id).first()
+            db.query(FBRConfiguration).update({"is_active": False})
+            config = db.query(FBRConfiguration).filter_by(environment=env).first()
             if config:
                 config.is_active = True
                 db.commit()
@@ -598,9 +555,9 @@ class SettingsService:
                 # to activate PRODUCTION must never leave the working
                 # SANDBOX config silently deactivated as a side effect.
                 db.rollback()
-                logger.warning(f"Configuration for {env} (company_id={active_company_id}) not found.")
+                logger.warning(f"Configuration for {env} not found.")
                 raise ValueError(
-                    f"No {env} configuration exists yet for the active company. "
+                    f"No {env} configuration exists yet. "
                     f"Save the {env} settings first (enter POS ID/Auth Token and click Save) before activating it."
                 )
         except SQLAlchemyError as e:
@@ -629,10 +586,9 @@ class SettingsService:
             if self._active_environment_cache and (time.time() - self._active_environment_cache_loaded_at) < 5:
                 return self._active_environment_cache
 
-        company_id = self.get_active_company_id()
         db = SessionLocal()
         try:
-            config = db.query(FBRConfiguration).filter_by(is_active=True, company_id=company_id).first()
+            config = db.query(FBRConfiguration).filter_by(is_active=True).first()
             env = config.environment if config else "SANDBOX"
             with self._lock:
                 self._active_environment_cache = env
@@ -648,44 +604,11 @@ class SettingsService:
         finally:
             db.close()
 
-    # --- Multi-company support -------------------------------------------
-    # Mirrors get_active_environment/set_active_environment exactly: a
-    # single global "active" row (companies.is_active), not a per-user/
-    # per-session concept. app/db/company_scope.py reads get_active_company_id()
-    # to transparently filter every query for company-scoped models.
-
-    def get_active_company_id(self) -> Optional[int]:
-        with self._lock:
-            if self._active_company_id_cache is not None and (time.time() - self._active_company_id_cache_loaded_at) < 5:
-                return self._active_company_id_cache
-
+    def get_company(self) -> Optional[Dict[str, Any]]:
+        """Returns this installation's one company's info."""
         db = SessionLocal()
         try:
-            # skip_company_filter: resolving the active company is exactly
-            # the query app/db/company_scope.py's do_orm_execute listener
-            # calls this same method to answer - without this escape hatch
-            # it would recurse into itself infinitely.
-            company = (
-                db.query(Company)
-                .execution_options(skip_company_filter=True)
-                .filter_by(is_active=True, is_deleted=False)
-                .first()
-            )
-            company_id = company.id if company else None
-            with self._lock:
-                self._active_company_id_cache = company_id
-                self._active_company_id_cache_loaded_at = time.time()
-            return company_id
-        except Exception as e:
-            logger.warning(f"Failed to resolve active company: {e}")
-            return None
-        finally:
-            db.close()
-
-    def get_active_company(self) -> Optional[Dict[str, Any]]:
-        db = SessionLocal()
-        try:
-            company = db.query(Company).filter_by(is_active=True, is_deleted=False).first()
+            company = db.query(Company).first()
             if not company:
                 return None
             return {
@@ -696,434 +619,42 @@ class SettingsService:
         finally:
             db.close()
 
-    def list_companies(self) -> list:
-        db = SessionLocal()
-        try:
-            companies = db.query(Company).filter_by(is_deleted=False).order_by(Company.name).all()
-            return [
-                {
-                    "id": c.id, "name": c.name, "ntn": c.ntn, "cnic": c.cnic,
-                    "address": c.address, "phone": c.phone, "email": c.email,
-                    "is_active": c.is_active,
-                }
-                for c in companies
-            ]
-        finally:
-            db.close()
-
-    def create_company(self, name: str, address: str = "", phone: str = "",
-                        email: str = "", ntn: str = "", cnic: str = "") -> Dict[str, Any]:
-        if not name or not name.strip():
-            raise ValueError("Company name is required.")
-        db = SessionLocal()
-        try:
-            company = Company(
-                name=name.strip(), address=address or None, phone=phone or None,
-                email=email or None, ntn=ntn or None, cnic=cnic or None,
-                is_active=False, is_deleted=False,
-            )
-            db.add(company)
-            db.commit()
-            db.refresh(company)
-            logger.info(f"Created company '{company.name}' (id={company.id}).")
-            return {"id": company.id, "name": company.name}
-        except SQLAlchemyError as e:
-            db.rollback()
-            logger.error(f"Failed to create company: {e}")
-            raise
-        finally:
-            db.close()
-
-    def update_company(self, company_id: int, **fields) -> None:
+    def update_company(self, **fields) -> None:
         allowed = {"name", "address", "phone", "email", "ntn", "cnic"}
         db = SessionLocal()
         try:
-            company = db.query(Company).filter_by(id=company_id).first()
+            company = db.query(Company).first()
             if not company:
-                raise ValueError(f"Company {company_id} not found.")
+                raise ValueError("No company configured.")
             for key, value in fields.items():
                 if key in allowed:
                     setattr(company, key, value)
             db.commit()
-            logger.info(f"Updated company id={company_id}.")
+            logger.info("Updated company info.")
         except SQLAlchemyError as e:
             db.rollback()
-            logger.error(f"Failed to update company {company_id}: {e}")
+            logger.error(f"Failed to update company: {e}")
             raise
         finally:
             db.close()
 
-    def set_active_company(self, company_id: int) -> None:
-        before_id = self.get_active_company_id()
+    def _load_fbr_settings_from_db(self, env: Optional[str] = None) -> Optional[dict]:
+        """Loads the full FBR settings dict - either the currently-active
+        environment (env=None), or a specific environment if given. Returns
+        None if there's no matching FBRConfiguration row at all (not even a
+        fallback SANDBOX one)."""
         db = SessionLocal()
         try:
-            company = db.query(Company).filter_by(id=company_id, is_deleted=False).first()
-            if not company:
-                raise ValueError(f"Company {company_id} not found.")
-            db.query(Company).update({"is_active": False})
-            company.is_active = True
-            db.commit()
-        except SQLAlchemyError as e:
-            db.rollback()
-            logger.error(f"DB persistence failed while setting active company to {company_id}: {e}")
-            raise
-        finally:
-            db.close()
-
-        self._invalidate_cache()
-        active_company = self.get_active_company()
-        logger.info(f"Active company changed: {before_id} -> {company_id}")
-        revision = self._bump_revision()
-        self._notify({
-            "type": "active_company_changed",
-            "before_company_id": before_id,
-            "company_id": company_id,
-            "company": active_company,
-            "revision": revision,
-            "ts": time.time(),
-        })
-
-    # --- Cross-company record transfer ---------------------------------
-    # Lets an admin move a specific, already-created record (e.g. inventory
-    # or a customer imported under the wrong company) to a different
-    # company after the fact. Every query here explicitly passes
-    # skip_company_filter=True since, by design, this tool must be able to
-    # browse and act on ANY company's data regardless of which one is
-    # currently active - that escape hatch is otherwise reserved for
-    # resolving the active company itself (see app/db/company_scope.py).
-    #
-    # Only records with zero dependent rows in other company-scoped tables
-    # are exposed as transferable: moving a sold motorcycle or a customer
-    # with invoice/ledger history would either leave those dependents
-    # behind (orphaned, silently invisible under the new company) or drag
-    # along unrelated history alongside them. Rather than build a full
-    # cascading multi-table move (high risk, easy to get subtly wrong),
-    # this keeps the operation to units that can move cleanly on their own.
-
-    def list_transferable_motorcycles(self, company_id: int) -> list:
-        """Motorcycles in `company_id`, each flagged with whether it's safe
-        to transfer (zero InvoiceItem/CreditSaleItem references - i.e.
-        never sold)."""
-        from app.db.models import Motorcycle, InvoiceItem, CreditSaleItem
-        db = SessionLocal()
-        try:
-            motos = (
-                db.query(Motorcycle)
-                .filter_by(company_id=company_id)
-                # joinedload keeps the ProductModel fetch inside this SAME
-                # statement/execution, so it inherits skip_company_filter
-                # too - a separate lazy-load later would NOT, and would get
-                # filtered by whichever company happens to be active rather
-                # than the row's own company, silently blanking out .model
-                # whenever browsing a company other than the active one.
-                .options(joinedload(Motorcycle.product_model))
-                .execution_options(skip_company_filter=True)
-                .order_by(Motorcycle.chassis_number)
-                .all()
-            )
-            result = []
-            for m in motos:
-                has_invoice_item = (
-                    db.query(InvoiceItem.id)
-                    .filter_by(motorcycle_id=m.id)
-                    .execution_options(skip_company_filter=True)
-                    .first()
-                    is not None
-                )
-                has_credit_item = (
-                    db.query(CreditSaleItem.id)
-                    .filter_by(chassis_number=m.chassis_number)
-                    .execution_options(skip_company_filter=True)
-                    .first()
-                    is not None
-                )
-                result.append({
-                    "id": m.id,
-                    "chassis_number": m.chassis_number,
-                    "engine_number": m.engine_number,
-                    "model": m.model,
-                    "color": m.color,
-                    "status": m.status,
-                    "transferable": not (has_invoice_item or has_credit_item),
-                })
-            return result
-        finally:
-            db.close()
-
-    def list_transferable_customers(self, company_id: int) -> list:
-        """Customers in `company_id`, each flagged with whether it's safe
-        to transfer (zero Invoice/CreditSale/CreditPayment/BuyerLedger/
-        FinanceCreditSale/FinanceInstallment references)."""
-        from app.db.models import (
-            Customer, Invoice, CreditSale, CreditPayment, BuyerLedger,
-            FinanceCreditSale, FinanceInstallment,
-        )
-        db = SessionLocal()
-        try:
-            customers = (
-                db.query(Customer)
-                .filter_by(company_id=company_id)
-                .execution_options(skip_company_filter=True)
-                .order_by(Customer.name)
-                .all()
-            )
-            dependent_checks = (
-                (Invoice, "customer_id"),
-                (CreditSale, "buyer_id"),
-                (CreditPayment, "buyer_id"),
-                (BuyerLedger, "buyer_id"),
-                (FinanceCreditSale, "customer_id"),
-                (FinanceInstallment, "customer_id"),
-            )
-            result = []
-            for c in customers:
-                has_dependent = False
-                for model, fk_field in dependent_checks:
-                    exists = (
-                        db.query(model.id)
-                        .filter_by(**{fk_field: c.id})
-                        .execution_options(skip_company_filter=True)
-                        .first()
-                        is not None
-                    )
-                    if exists:
-                        has_dependent = True
-                        break
-                result.append({
-                    "id": c.id,
-                    "name": c.name,
-                    "cnic": c.cnic,
-                    "phone": c.phone,
-                    "type": c.type,
-                    "transferable": not has_dependent,
-                })
-            return result
-        finally:
-            db.close()
-
-    def transfer_motorcycle(self, motorcycle_id: int, target_company_id: int) -> None:
-        """Moves a single, never-sold motorcycle to another company,
-        auto-creating a matching ProductModel row in the target company if
-        one doesn't already exist there (each company has its own model
-        catalog - see ProductModel.model_name). Re-validates eligibility
-        at commit time, not just whatever the UI last displayed."""
-        from app.db.models import Motorcycle, InvoiceItem, CreditSaleItem, ProductModel
-        db = SessionLocal()
-        try:
-            moto = (
-                db.query(Motorcycle)
-                .filter_by(id=motorcycle_id)
-                .execution_options(skip_company_filter=True)
-                .first()
-            )
-            if not moto:
-                raise ValueError(f"Motorcycle {motorcycle_id} not found.")
-            if moto.company_id == target_company_id:
-                raise ValueError("Motorcycle is already assigned to that company.")
-
-            has_invoice_item = (
-                db.query(InvoiceItem.id)
-                .filter_by(motorcycle_id=moto.id)
-                .execution_options(skip_company_filter=True)
-                .first()
-                is not None
-            )
-            has_credit_item = (
-                db.query(CreditSaleItem.id)
-                .filter_by(chassis_number=moto.chassis_number)
-                .execution_options(skip_company_filter=True)
-                .first()
-                is not None
-            )
-            if has_invoice_item or has_credit_item:
-                raise ValueError(
-                    f"Motorcycle {moto.chassis_number} has already been sold/invoiced "
-                    "and cannot be transferred - moving it would break the existing invoice's records."
-                )
-
-            source_model = (
-                db.query(ProductModel)
-                .filter_by(id=moto.product_model_id)
-                .execution_options(skip_company_filter=True)
-                .first()
-            )
-            target_model = (
-                db.query(ProductModel)
-                .filter_by(company_id=target_company_id, model_name=source_model.model_name)
-                .execution_options(skip_company_filter=True)
-                .first()
-            )
-            if not target_model:
-                target_model = ProductModel(
-                    company_id=target_company_id,
-                    model_name=source_model.model_name,
-                    make=source_model.make,
-                    engine_capacity=source_model.engine_capacity,
-                    pct_code=source_model.pct_code,
-                    item_code=source_model.item_code,
-                )
-                db.add(target_model)
-                db.flush()
-
-            moto.company_id = target_company_id
-            moto.product_model_id = target_model.id
-            db.commit()
-            logger.info(f"Transferred motorcycle {moto.chassis_number} (id={motorcycle_id}) to company {target_company_id}.")
-        except SQLAlchemyError as e:
-            db.rollback()
-            logger.error(f"Failed to transfer motorcycle {motorcycle_id}: {e}")
-            raise
-        finally:
-            db.close()
-        self._invalidate_cache()
-        self._bump_revision()
-
-    def transfer_customer(self, customer_id: int, target_company_id: int) -> None:
-        """Moves a single customer with no invoice/sale/ledger history to
-        another company. Re-validates eligibility at commit time."""
-        from app.db.models import (
-            Customer, Invoice, CreditSale, CreditPayment, BuyerLedger,
-            FinanceCreditSale, FinanceInstallment,
-        )
-        db = SessionLocal()
-        try:
-            customer = (
-                db.query(Customer)
-                .filter_by(id=customer_id)
-                .execution_options(skip_company_filter=True)
-                .first()
-            )
-            if not customer:
-                raise ValueError(f"Customer {customer_id} not found.")
-            if customer.company_id == target_company_id:
-                raise ValueError("Customer is already assigned to that company.")
-
-            dependent_checks = (
-                (Invoice, "customer_id"),
-                (CreditSale, "buyer_id"),
-                (CreditPayment, "buyer_id"),
-                (BuyerLedger, "buyer_id"),
-                (FinanceCreditSale, "customer_id"),
-                (FinanceInstallment, "customer_id"),
-            )
-            for model, fk_field in dependent_checks:
-                exists = (
-                    db.query(model.id)
-                    .filter_by(**{fk_field: customer.id})
-                    .execution_options(skip_company_filter=True)
-                    .first()
-                    is not None
-                )
-                if exists:
-                    raise ValueError(
-                        f"Customer {customer.name} has existing {model.__tablename__} records "
-                        "and cannot be transferred - moving them would orphan that history."
-                    )
-
-            customer.company_id = target_company_id
-            db.commit()
-            logger.info(f"Transferred customer {customer.name} (id={customer_id}) to company {target_company_id}.")
-        except SQLAlchemyError as e:
-            db.rollback()
-            logger.error(f"Failed to transfer customer {customer_id}: {e}")
-            raise
-        finally:
-            db.close()
-        self._invalidate_cache()
-        self._bump_revision()
-
-    # --- Unassigned (company_id IS NULL) record recovery -----------------
-    # Safety net for data that predates multi-company support entirely, or
-    # otherwise ended up with no company at all - e.g. a restored backup
-    # taken before the company_id column existed, a future code path that
-    # forgets to stamp company_id, or a raw-SQL insert that bypasses the
-    # ORM. Such rows are invisible under EVERY company (with_loader_criteria
-    # filters by company_id = <active>, and NULL never equals anything, not
-    # even another NULL) - silently "lost" from the app's perspective even
-    # though the data still physically exists. This assigns ALL unassigned
-    # rows, across every scoped table, to one chosen company in a single
-    # operation - not per-table or per-record - since these rows' existing
-    # relationships to each other (e.g. an Invoice and the Customer it
-    # references) must move together to stay consistent.
-
-    # Same table list as app/db/company_scope.py's SCOPED_MODELS.
-    _UNASSIGNED_SCAN_MODELS = (
-        "Customer", "Motorcycle", "ProductModel", "Price", "Invoice", "InvoiceItem",
-        "FinanceCreditSale", "FinanceInstallment", "FinanceLedger", "CreditSale",
-        "CreditSaleItem", "CreditPayment", "BuyerLedger", "SpareLedgerTransaction",
-        "SpareLedgerMonthlyClose", "CapturedData", "AdvanceBooking",
-    )
-
-    def count_unassigned_records(self) -> Dict[str, int]:
-        """Per-table counts of rows with company_id IS NULL. Only tables
-        with at least one such row are included."""
-        import app.db.models as models_module
-        db = SessionLocal()
-        try:
-            counts = {}
-            for name in self._UNASSIGNED_SCAN_MODELS:
-                model = getattr(models_module, name)
-                count = (
-                    db.query(model)
-                    .filter(model.company_id.is_(None))
-                    .execution_options(skip_company_filter=True)
-                    .count()
-                )
-                if count:
-                    counts[model.__tablename__] = count
-            return counts
-        finally:
-            db.close()
-
-    def assign_unassigned_records_to_company(self, target_company_id: int) -> Dict[str, int]:
-        """Assigns every currently-unassigned row, across all scoped
-        tables, to `target_company_id` in one transaction. Returns
-        per-table counts of how many rows were actually updated."""
-        import app.db.models as models_module
-        db = SessionLocal()
-        try:
-            company = db.query(Company).filter_by(id=target_company_id, is_deleted=False).execution_options(skip_company_filter=True).first()
-            if not company:
-                raise ValueError(f"Company {target_company_id} not found.")
-
-            updated = {}
-            for name in self._UNASSIGNED_SCAN_MODELS:
-                model = getattr(models_module, name)
-                # Query.update() issues an UPDATE, not a SELECT, so it is
-                # never touched by the do_orm_execute listener in the first
-                # place (see app/db/company_scope.py: `if not
-                # execute_state.is_select: return`) - no skip_company_filter
-                # needed here, only on the earlier SELECT-based count.
-                count = (
-                    db.query(model)
-                    .filter(model.company_id.is_(None))
-                    .update({"company_id": target_company_id}, synchronize_session=False)
-                )
-                if count:
-                    updated[model.__tablename__] = count
-            db.commit()
-            logger.info(f"Assigned unassigned records to company {target_company_id}: {updated}")
-        except SQLAlchemyError as e:
-            db.rollback()
-            logger.error(f"Failed to assign unassigned records to company {target_company_id}: {e}")
-            raise
-        finally:
-            db.close()
-        self._invalidate_cache()
-        self._bump_revision()
-        return updated
-
-    def get_environment(self, env: str) -> dict:
-        env = env.upper()
-        company_id = self.get_active_company_id()
-        db = SessionLocal()
-        try:
-            config = db.query(FBRConfiguration).filter_by(environment=env, company_id=company_id).first()
+            if env:
+                config = db.query(FBRConfiguration).filter_by(environment=env.upper()).first()
+            else:
+                config = db.query(FBRConfiguration).filter_by(is_active=True).first()
+                if not config:
+                    config = db.query(FBRConfiguration).filter_by(environment="SANDBOX").first()
             if not config:
-                return self._read_fbr_settings_from_env(env)
-            
+                return None
             return {
-                "env": env,
+                "env": config.environment,
                 "base_url": config.api_base_url,
                 "pos_id": config.pos_id,
                 "usin": config.usin,
@@ -1138,54 +669,69 @@ class SettingsService:
                 "item_name": config.item_name,
                 "business_name": config.business_name or "Ehsan Trader",
             }
+        finally:
+            db.close()
+
+    def _any_fbr_configuration_exists(self) -> bool:
+        """True if ANY company anywhere has an FBRConfiguration row. Used to
+        distinguish genuine first-run bootstrap (nothing configured
+        anywhere - .env fallback is reasonable) from "this specific company
+        just isn't configured yet, but others are" (must never borrow
+        another company's .env-cached credentials)."""
+        db = SessionLocal()
+        try:
+            return db.query(FBRConfiguration.id).first() is not None
+        finally:
+            db.close()
+
+    def _blank_fbr_settings(self, env: str) -> dict:
+        """Empty settings shape for "this company genuinely isn't
+        configured yet" - shown as blank fields to fill in, never another
+        company's leaked .env values. Distinct from the true bootstrap
+        fallback (_read_fbr_settings_from_env), which only applies when NO
+        company anywhere has ever been configured."""
+        return {
+            "env": env.upper(), "base_url": "", "pos_id": "", "usin": "",
+            "token": "", "secret_key": "", "tax_rate": "18.0",
+            "pct_code": "8711.2010", "invoice_type": "Standard",
+            "discount": "0.0", "pos_fee": "1.0", "item_code": "",
+            "item_name": "", "business_name": "Ehsan Trader",
+            "configured": False,
+        }
+
+    def get_environment(self, env: str) -> dict:
+        env = env.upper()
+        try:
+            result = self._load_fbr_settings_from_db(env=env)
+            if result is not None:
+                return result
+            if self._any_fbr_configuration_exists():
+                return self._blank_fbr_settings(env)
+            return self._read_fbr_settings_from_env(env)
         except Exception as e:
             logger.warning(f"Falling back to env-based settings for {env} due to DB error: {e}")
             return self._read_fbr_settings_from_env(env)
-        finally:
-            db.close()
-    
+
     def get_active_settings(self) -> dict:
         """Get the full configuration for the currently active environment."""
         with self._lock:
             if self._active_settings_cache and (time.time() - self._active_settings_cache_loaded_at) < 5:
                 return dict(self._active_settings_cache)
 
-        company_id = self.get_active_company_id()
         try:
-            db = SessionLocal()
-            try:
-                config = db.query(FBRConfiguration).filter_by(is_active=True, company_id=company_id).first()
-                if not config:
-                    config = db.query(FBRConfiguration).filter_by(environment="SANDBOX", company_id=company_id).first()
-
-                if not config:
-                    fallback = self._read_fbr_settings_from_env(self.get_active_environment())
-                    with self._lock:
-                        self._active_settings_cache = dict(fallback)
-                        self._active_settings_cache_loaded_at = time.time()
-                    return fallback
-
-                result = {
-                    "env": config.environment,
-                    "base_url": config.api_base_url,
-                    "pos_id": config.pos_id,
-                    "usin": config.usin,
-                    "token": config.auth_token,
-                    "secret_key": config.secret_key,
-                    "tax_rate": str(config.tax_rate),
-                    "pct_code": config.pct_code,
-                    "invoice_type": config.invoice_type,
-                    "discount": str(config.discount),
-                    "item_code": config.item_code,
-                    "item_name": config.item_name,
-                    "business_name": config.business_name or "Ehsan Trader",
-                }
-                with self._lock:
-                    self._active_settings_cache = dict(result)
-                    self._active_settings_cache_loaded_at = time.time()
-                return result
-            finally:
-                db.close()
+            result = self._load_fbr_settings_from_db()
+            if result is None:
+                # Distinguish "not configured yet" (blank fields to fill in)
+                # from true first-run bootstrap (nothing configured anywhere
+                # yet - the .env fallback is reasonable).
+                if self._any_fbr_configuration_exists():
+                    result = self._blank_fbr_settings(self.get_active_environment())
+                else:
+                    result = self._read_fbr_settings_from_env(self.get_active_environment())
+            with self._lock:
+                self._active_settings_cache = dict(result)
+                self._active_settings_cache_loaded_at = time.time()
+            return result
         except Exception as e:
             logger.error(f"Failed to get active settings: {e}")
             fallback = self._read_fbr_settings_from_env(self.get_active_environment())
@@ -1275,9 +821,6 @@ class SettingsService:
                 "sidebar_footer_font_size": int(getattr(config, "sidebar_footer_font_size", 15) or 15),
                 "sidebar_exit_font_size": int(getattr(config, "sidebar_exit_font_size", 16) or 16),
                 "sidebar_collapsed_font_size": int(getattr(config, "sidebar_collapsed_font_size", 18) or 18),
-                "dms_portal_url": str(getattr(config, "dms_portal_url", "https://dms.ahlportal.com/login") or ""),
-                "dms_username": str(getattr(config, "dms_username", "") or ""),
-                "dms_password": str(getattr(config, "dms_password", "") or ""),
                 "invoice_font_family": str(getattr(config, "invoice_font_family", "Arial, sans-serif") or "Arial, sans-serif"),
                 "invoice_font_field_size_pt": int(getattr(config, "invoice_font_field_size_pt", 11) or 11),
                 "invoice_font_label_size_pt": int(getattr(config, "invoice_font_label_size_pt", 9) or 9),
@@ -1307,9 +850,6 @@ class SettingsService:
                 "sidebar_footer_font_size": 15,
                 "sidebar_exit_font_size": 16,
                 "sidebar_collapsed_font_size": 18,
-                "dms_portal_url": "https://dms.ahlportal.com/login",
-                "dms_username": "",
-                "dms_password": "",
                 "invoice_font_family": "Arial, sans-serif",
                 "invoice_font_field_size_pt": 11,
                 "invoice_font_label_size_pt": 9,
@@ -1395,30 +935,29 @@ class SettingsService:
             db.close()
 
     def get_invoice_logo(self) -> Dict[str, Any]:
-        """Return the active company's default invoice logo (each company
-        has its own - see Company.logo_data_url/logo_name).
+        """Return the company's default invoice logo (see
+        Company.logo_data_url/logo_name).
 
         Returns dict with keys:
             data_url: str (base64 data URL or "")
             name: str (original filename or "")
         """
-        company_id = self.get_active_company_id()
         db = SessionLocal()
         try:
-            company = db.query(Company).filter_by(id=company_id).first()
+            company = db.query(Company).first()
             if not company:
                 return {"data_url": "", "name": ""}
             data_url = str(getattr(company, "logo_data_url", None) or "")
             name = str(getattr(company, "logo_name", None) or "")
             return {"data_url": data_url, "name": name}
         except Exception as e:
-            logger.error(f"Error getting invoice logo for company {company_id}: {e}")
+            logger.error(f"Error getting invoice logo: {e}")
             return {"data_url": "", "name": ""}
         finally:
             db.close()
 
     def set_invoice_logo(self, data_url: str, name: str = "") -> None:
-        """Save (or clear) the active company's default invoice logo.
+        """Save (or clear) the company's default invoice logo.
 
         Pass empty strings to clear/remove the saved logo.
         Raises on failure so callers can alert the user.
@@ -1430,14 +969,11 @@ class SettingsService:
         from app.db.models import PrintTemplateLayout
         data_url = str(data_url or "").strip()
         name = str(name or "").strip()
-        company_id = self.get_active_company_id()
-        if not company_id:
-            raise RuntimeError("No active company - cannot save invoice logo.")
         db = SessionLocal()
         try:
-            company = db.query(Company).filter_by(id=company_id).first()
+            company = db.query(Company).first()
             if not company:
-                raise RuntimeError(f"Active company {company_id} not found.")
+                raise RuntimeError("No company configured.")
             # NOTE: No more per-attribute try/except swallow!
             # Failures here MUST surface so the user knows their logo was NOT saved.
             has_logo_col = any(c["name"] == "logo_data_url" for c in inspect(engine).get_columns("companies"))
@@ -1477,7 +1013,7 @@ class SettingsService:
             logger.info(f"Updated invoice logo (name={name!r}, size={len(data_url)} chars)")
         except Exception as e:
             db.rollback()
-            logger.error(f"Error saving invoice logo for company {company_id}: {e}")
+            logger.error(f"Error saving invoice logo: {e}")
             raise
         finally:
             db.close()
@@ -1650,7 +1186,7 @@ class SettingsService:
             if not config:
                 config = SMSConfiguration()
                 db.add(config)
-            
+
             # Use setattr for each valid attribute in the model
             for key, value in kwargs.items():
                 if hasattr(config, key):
@@ -1664,58 +1200,6 @@ class SettingsService:
             db.rollback()
             logger.error(f"CRITICAL: Error saving SMS/WhatsApp configuration: {e}", exc_info=True)
             raise RuntimeError(f"Failed to save settings: {str(e)}")
-        finally:
-            db.close()
-
-    def save_dms_config(self, url: str, user: str, password: str):
-        """Update DMS configuration in database and sync with module .env file."""
-        db = SessionLocal()
-        try:
-            config = db.query(AppConfiguration).first()
-            if not config:
-                config = AppConfiguration()
-                db.add(config)
-            
-            config.dms_portal_url = url
-            config.dms_username = user
-            config.dms_password = password
-            db.commit()
-
-            # Sync with dms_automation/.env
-            try:
-                dms_env_path = Path(__file__).resolve().parent.parent.parent / "dms_automation" / ".env"
-                if dms_env_path.exists():
-                    lines = []
-                    with open(dms_env_path, 'r') as f:
-                        for line in f:
-                            if '=' in line:
-                                k, v = line.strip().split('=', 1)
-                                if k == "DMS_PORTAL_URL":
-                                    lines.append(f"DMS_PORTAL_URL={url}")
-                                elif k == "DMS_USERNAME":
-                                    lines.append(f"DMS_USERNAME={user}")
-                                elif k == "DMS_PASSWORD":
-                                    lines.append(f"DMS_PASSWORD={password}")
-                                else:
-                                    lines.append(line.strip())
-                            else:
-                                lines.append(line.strip())
-                    
-                    with open(dms_env_path, 'w') as f:
-                        f.write("\n".join(lines) + "\n")
-                    logger.info("Synced DMS settings to dms_automation/.env")
-            except Exception as env_err:
-                logger.error(f"Failed to sync DMS settings to .env file: {env_err}")
-
-            self._invalidate_cache()
-            self._bump_revision()
-            self._notify({"type": "dms_settings_updated", "url": url, "username": user})
-            
-            logger.info(f"Updated DMS config: user={user}")
-        except Exception as e:
-            db.rollback()
-            logger.error(f"Error saving DMS config: {e}")
-            raise
         finally:
             db.close()
 

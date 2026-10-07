@@ -31,12 +31,11 @@ class CustomerType(str, enum.Enum):
 
 
 class Company(Base):
-    """A registered business entity. Multiple companies can share this
-    database; exactly one has is_active=True at a time (mirrors how
-    FBRConfiguration's SANDBOX/PRODUCTION is_active toggle already works).
-    Every company-scoped model below carries a company_id column, and
-    app/db/company_scope.py globally filters all reads/writes to whichever
-    company is currently active."""
+    """The single registered business entity this installation represents.
+    Holds its name/address/NTN/CNIC/contact info and invoice-print branding
+    - the application's one source of truth for "the company," read
+    wherever company info is needed (printed documents, FBR submission,
+    reports)."""
     __tablename__ = "companies"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -46,8 +45,6 @@ class Company(Base):
     address = Column(String(255), nullable=True)
     phone = Column(String(20), nullable=True)
     email = Column(String(255), nullable=True)
-    is_active = Column(Boolean, default=False)
-    is_deleted = Column(Boolean, default=False)
     created_at = Column(DateTime, default=dt.datetime.utcnow)
 
     # Invoice Print Template: this company's own default logo (base64 data
@@ -64,12 +61,11 @@ class Customer(Base):
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
-    cnic = Column(String(20), nullable=False, unique=True, index=True)
+    cnic = Column(String(20), nullable=False, index=True, unique=True)
     name = Column(String(100), nullable=False)
     father_name = Column(String(100), nullable=True)
     business_name = Column(String(100), nullable=True)
-    normalized_business_name = Column(String(100), nullable=True, unique=True, index=True) # Enforce strict uniqueness
+    normalized_business_name = Column(String(100), nullable=True, index=True, unique=True)
     ntn = Column(String(20), nullable=True)
     phone = Column(String(20), nullable=True)
     address = Column(String(255), nullable=True)
@@ -82,20 +78,9 @@ class Customer(Base):
 
 class ProductModel(Base):
     __tablename__ = "product_models"
-    __table_args__ = (
-        # Per-company, not globally unique - real Honda model names like
-        # "CG125S" are shared vocabulary across every dealer, so multiple
-        # companies each need their own row for the same model name.
-        # Matches the DB's real uq_company_model_name index; a plain
-        # unique=True on model_name would be wrong now that company_id
-        # exists and could make the schema self-healer attempt an
-        # incompatible constraint.
-        Index('uq_company_model_name', 'company_id', 'model_name', unique=True),
-    )
 
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
-    model_name = Column(String(50), nullable=False)
+    model_name = Column(String(50), nullable=False, unique=True)
     make = Column(String(50), default="Honda")
     engine_capacity = Column(String(20), nullable=True)
 
@@ -110,8 +95,7 @@ class Invoice(Base):
     __tablename__ = "invoices"
 
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
-    invoice_number = Column(String(50), unique=True, index=True, nullable=False)
+    invoice_number = Column(String(50), index=True, nullable=False, unique=True)
     pos_id = Column(String(20), nullable=False)
     usin = Column(String(50), nullable=False) # Updated to be Unique in context, but FBR allows multiple? USIN is unique POS ID basically.
     datetime = Column(DateTime, default=pk_now)
@@ -149,7 +133,6 @@ class InvoiceItem(Base):
     __tablename__ = "invoice_items"
 
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=False)
     
     motorcycle_id = Column(Integer, ForeignKey("motorcycles.id"), nullable=True)
@@ -174,8 +157,7 @@ class AdvanceBooking(Base):
     __tablename__ = "advance_bookings"
 
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
-    booking_number = Column(String(50), unique=True, index=True, nullable=False)
+    booking_number = Column(String(50), index=True, nullable=False, unique=True)
     created_at = Column(DateTime, default=pk_now, index=True)
 
     customer_name = Column(String(100), nullable=False)
@@ -219,18 +201,91 @@ class AdvanceBookingAudit(Base):
     created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
     note = Column(String(255), nullable=True)
 
+
+class Quotation(Base):
+    """A standalone sales quotation. Completely independent of Invoice/
+    AdvanceBooking - line items snapshot their model/color/price at save
+    time (see QuotationItem) rather than foreign-keying into ProductModel/
+    Price, so a later Price Table change never rewrites a historical
+    quotation."""
+    __tablename__ = "quotations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    quotation_number = Column(String(50), index=True, nullable=False, unique=True)
+    created_at = Column(DateTime, default=pk_now, index=True)
+    updated_at = Column(DateTime, default=pk_now, nullable=True)
+
+    customer_name = Column(String(100), nullable=False)
+    customer_phone = Column(String(20), nullable=True)
+    customer_address = Column(String(255), nullable=True)
+
+    subtotal = Column(Float, nullable=False, default=0.0)  # motorcycles + accessories combined
+    accessories_subtotal = Column(Float, nullable=False, default=0.0)
+    discount_amount = Column(Float, nullable=False, default=0.0)
+    total_amount = Column(Float, nullable=False, default=0.0)
+
+    valid_until = Column(DateTime, nullable=True)
+    notes = Column(String(500), nullable=True)
+
+    status = Column(String(20), default="PENDING", index=True)  # PENDING | CANCELLED
+    created_by = Column(String(100), nullable=True)
+
+    items = relationship("QuotationItem", back_populates="quotation", cascade="all, delete-orphan")
+    accessory_items = relationship("QuotationAccessoryItem", back_populates="quotation", cascade="all, delete-orphan")
+
+
+class QuotationItem(Base):
+    __tablename__ = "quotation_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    quotation_id = Column(Integer, ForeignKey("quotations.id"), nullable=False)
+    quotation = relationship("Quotation", back_populates="items")
+
+    line_no = Column(Integer, nullable=False, default=1)
+    motorcycle_model = Column(String(50), nullable=False)  # plain snapshot, not FK'd to ProductModel
+    color = Column(String(255), nullable=True)  # all colors available for this model, comma-separated (display only, not a single selection)
+    quantity = Column(Float, nullable=False, default=1.0)
+    unit_price = Column(Float, nullable=False)
+    line_total = Column(Float, nullable=False)
+
+
+class QuotationAccessoryItem(Base):
+    """Add-on items (helmet, safeguard, etc.) manually priced by staff -
+    deliberately no catalog/price table of its own, unlike motorcycle line
+    items, per explicit instruction."""
+    __tablename__ = "quotation_accessory_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    quotation_id = Column(Integer, ForeignKey("quotations.id"), nullable=False)
+    quotation = relationship("Quotation", back_populates="accessory_items")
+
+    line_no = Column(Integer, nullable=False, default=1)
+    item_name = Column(String(100), nullable=False)
+    quantity = Column(Float, nullable=False, default=1.0)
+    unit_price = Column(Float, nullable=False)
+    line_total = Column(Float, nullable=False)
+
+
+class QuotationCounter(Base):
+    __tablename__ = "quotation_counters"
+
+    id = Column(Integer, primary_key=True, index=True)
+    counter_key = Column(String(30), unique=True, index=True, nullable=False, default="GLOBAL")
+    last_seq = Column(Integer, default=0, nullable=False)
+    updated_at = Column(DateTime, default=dt.datetime.utcnow)
+
+
 class CapturedData(Base):
     __tablename__ = "captured_data"
 
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     name = Column(String(100), nullable=True)
     father = Column(String(100), nullable=True)
     cnic = Column(String(20), nullable=True)
     cell = Column(String(20), nullable=True)
     address = Column(String(255), nullable=True)
-    
-    chassis_number = Column(String(50), unique=True, index=True, nullable=False)
+
+    chassis_number = Column(String(50), index=True, nullable=False, unique=True)
     engine_number = Column(String(50), nullable=True)
     color = Column(String(30), nullable=True)
     model = Column(String(50), nullable=True)
@@ -240,24 +295,15 @@ class CapturedData(Base):
 
 class Motorcycle(Base):
     __tablename__ = "motorcycles"
-    __table_args__ = (
-        # Per-company, not globally unique - each company's inventory is
-        # meant to be fully independent (see ProductModel.model_name for
-        # the same reasoning). Matches the DB's real uq_company_* indexes.
-        Index('uq_company_chassis_number', 'company_id', 'chassis_number', unique=True),
-        Index('uq_company_engine_number', 'company_id', 'engine_number', unique=True),
-        Index('uq_company_vin', 'company_id', 'vin', unique=True),
-    )
 
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
 
     product_model_id = Column(Integer, ForeignKey("product_models.id"), nullable=False)
     product_model = relationship("ProductModel", back_populates="motorcycles")
 
-    vin = Column(String(50), nullable=True)
-    chassis_number = Column(String(50), nullable=False)
-    engine_number = Column(String(50), nullable=False)
+    vin = Column(String(50), nullable=True, unique=True)
+    chassis_number = Column(String(50), nullable=False, unique=True)
+    engine_number = Column(String(50), nullable=False, unique=True)
     
     year = Column(Integer, nullable=False)
     color = Column(String(30), nullable=True)
@@ -283,7 +329,6 @@ class Price(Base):
     __tablename__ = "prices"
 
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
 
     product_model_id = Column(Integer, ForeignKey("product_models.id"), nullable=False)
     product_model = relationship("ProductModel", back_populates="prices")
@@ -356,21 +401,63 @@ class User(Base):
     role = Column(String(20), default="sales")
     is_active = Column(Boolean, default=True)
 
-class FBRConfiguration(Base):
-    __tablename__ = "fbr_configurations"
+
+class StaffAccount(Base):
+    """A logged-in desktop operator - Admin or Staff."""
+    __tablename__ = "desktop_staff_accounts"
+
+    ADMIN = "ADMIN"
+    STAFF = "STAFF"
+
+    id = Column(Integer, primary_key=True, index=True)
+    mobile_number = Column(String(20), nullable=False, index=True, unique=True)
+    password_hash = Column(String(255), nullable=False)
+    full_name = Column(String(150), nullable=False)
+    role = Column(String(10), nullable=False, default=STAFF)
+    is_active = Column(Boolean, default=True)
+    created_by_id = Column(Integer, ForeignKey("desktop_staff_accounts.id"), nullable=True)
+    created_at = Column(DateTime, default=pk_now)
+    updated_at = Column(DateTime, default=pk_now, onupdate=pk_now)
+
+
+class StaffPermission(Base):
+    """One granted module codename for a Staff account (see
+    app/core/staff_modules.py for the fixed list of codenames). Admin
+    accounts bypass this table entirely (full access) - only Staff rows are
+    ever looked up here."""
+    __tablename__ = "desktop_staff_permissions"
     __table_args__ = (
-        # The live DB enforces uniqueness per (company, environment), not
-        # environment alone - multiple companies each get their own
-        # SANDBOX/PRODUCTION row. Matches the DB's real uq_company_environment
-        # index; declaring plain unique=True on environment here would be
-        # wrong now that company_id exists and could cause the schema
-        # self-healer to attempt an incompatible constraint.
-        Index('uq_company_environment', 'company_id', 'environment', unique=True),
+        Index("uq_staff_account_module", "staff_account_id", "module_code", unique=True),
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
-    environment = Column(String(20), nullable=False)
+    staff_account_id = Column(Integer, ForeignKey("desktop_staff_accounts.id"), nullable=False, index=True)
+    module_code = Column(String(50), nullable=False)
+
+
+class PasswordResetOTP(Base):
+    """A one-time code for the login screen's "Forgot Password" flow, keyed
+    by mobile_number. verified_at and consumed_at are separate, sequential
+    steps (not a single "used" flag) so a verified-but-not-yet-spent code
+    can't be reused indefinitely - see app/services/staff_account_service.py's
+    OTP functions for the request -> verify -> reset lifecycle this supports."""
+    __tablename__ = "password_reset_otps"
+
+    id = Column(Integer, primary_key=True, index=True)
+    mobile_number = Column(String(20), nullable=False, index=True)
+    otp_hash = Column(String(255), nullable=False)
+    attempts = Column(Integer, default=0)
+    expires_at = Column(DateTime, nullable=False)
+    verified_at = Column(DateTime, nullable=True)
+    consumed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=pk_now)
+
+
+class FBRConfiguration(Base):
+    __tablename__ = "fbr_configurations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    environment = Column(String(20), nullable=False, unique=True)
     is_active = Column(Boolean, default=False)
     
     api_base_url = Column(String(255), nullable=False)
@@ -408,7 +495,6 @@ class SpareLedgerTransaction(Base):
     __tablename__ = "spare_ledger_transactions"
 
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     timestamp = Column(DateTime, default=dt.datetime.utcnow, index=True)
     trans_type = Column(String(10), nullable=False)
     amount = Column(Float, nullable=False)
@@ -422,8 +508,7 @@ class SpareLedgerMonthlyClose(Base):
     __tablename__ = "spare_ledger_monthly_close"
 
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
-    month_key = Column(String(7), unique=True, nullable=False)  # YYYY-MM representing cycle ending on 5th
+    month_key = Column(String(7), nullable=False, unique=True)  # YYYY-MM representing cycle ending on 5th
     closed_at = Column(DateTime, nullable=False)
     opening_balance = Column(Float, default=0.0)
     total_credits = Column(Float, default=0.0)
@@ -559,7 +644,7 @@ class SMSConfiguration(Base):
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, nullable=True) # Optional link to user table if it exists
     action = Column(String(50), nullable=False) # DELETE, RETRY, START, etc.
@@ -589,11 +674,6 @@ class AppConfiguration(Base):
     sidebar_footer_font_size = Column(Integer, default=15)
     sidebar_exit_font_size = Column(Integer, default=16)
     sidebar_collapsed_font_size = Column(Integer, default=18)
-    
-    # DMS Portal Automation Settings
-    dms_portal_url = Column(String(255), default="https://dms.ahlportal.com/login")
-    dms_username = Column(String(100), nullable=True)
-    dms_password = Column(String(100), nullable=True)
 
     # Invoice Print Template: user-supplied default logo (persisted as base64 data URL)
     invoice_logo_data_url = Column(Text, nullable=True)
@@ -692,7 +772,6 @@ class CreditSale(Base):
     __tablename__ = "credit_sales"
 
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     sale_date = Column(DateTime, default=dt.datetime.utcnow, index=True)
     buyer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
     buyer_type = Column(String(20), nullable=False) # Customer or Dealer
@@ -715,10 +794,9 @@ class CreditSaleItem(Base):
     __tablename__ = "credit_sale_items"
 
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     sale_id = Column(Integer, ForeignKey("credit_sales.id"), nullable=False)
-    
-    chassis_number = Column(String(50), unique=True, nullable=False, index=True)
+
+    chassis_number = Column(String(50), nullable=False, index=True, unique=True)
     model = Column(String(50), nullable=True)
     color = Column(String(30), nullable=True)
     cash_price = Column(Float, nullable=False)
@@ -730,7 +808,6 @@ class CreditPayment(Base):
     __tablename__ = "credit_payments"
 
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     payment_date = Column(DateTime, default=dt.datetime.utcnow, index=True)
     buyer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
     amount = Column(Float, nullable=False) # Base payment amount
@@ -747,7 +824,6 @@ class BuyerLedger(Base):
     __tablename__ = "buyer_ledger"
 
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     date = Column(DateTime, default=dt.datetime.utcnow, index=True)
     buyer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
     chassis_number = Column(String(50), nullable=True, index=True)
@@ -823,8 +899,7 @@ class FinanceCreditSale(Base):
     __tablename__ = "finance_credit_sales"
 
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
-    sale_id = Column(String(50), unique=True, index=True, nullable=False)
+    sale_id = Column(String(50), index=True, nullable=False, unique=True)
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
     customer_name = Column(String(100), nullable=False)
     chassis_no = Column(String(50), nullable=False, index=True)
@@ -851,8 +926,7 @@ class FinanceInstallment(Base):
     __tablename__ = "finance_installments"
 
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
-    payment_id = Column(String(50), unique=True, index=True, nullable=False)
+    payment_id = Column(String(50), index=True, nullable=False, unique=True)
     sale_id = Column(Integer, ForeignKey("finance_credit_sales.id"), nullable=False, index=True)
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
     paid_amount = Column(Float, nullable=False)
@@ -884,8 +958,7 @@ class FinanceLedger(Base):
     __tablename__ = "finance_ledger"
 
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
-    ledger_id = Column(String(50), unique=True, index=True, nullable=False)
+    ledger_id = Column(String(50), index=True, nullable=False, unique=True)
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
     sale_id = Column(Integer, ForeignKey("finance_credit_sales.id"), nullable=True, index=True)
     entry_type = Column(String(20), nullable=False)
@@ -898,65 +971,4 @@ class FinanceLedger(Base):
 
     customer = relationship("Customer")
     sale = relationship("FinanceCreditSale")
-
-
-class ExciseRecordStatus(str, enum.Enum):
-    PENDING = "PENDING"
-    SUBMITTED = "SUBMITTED"
-    APPROVED = "APPROVED"
-    REJECTED = "REJECTED"
-
-
-class ExciseRecord(Base):
-    __tablename__ = "excise_records"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    record_number = Column(String(50), unique=True, index=True, nullable=False)
-    
-    # Vehicle details
-    chassis_number = Column(String(50), unique=True, index=True, nullable=False)
-    engine_number = Column(String(50), unique=True, index=True, nullable=False)
-    motorcycle_model = Column(String(50), nullable=True)
-    maker_make = Column(String(100), nullable=True)
-    color = Column(String(30), nullable=True)
-    year_of_manufacture = Column(Integer, nullable=True)
-    
-    # Customer details
-    customer_name = Column(String(100), nullable=False)
-    customer_father_name = Column(String(100), nullable=True)
-    customer_cnic = Column(String(20), index=True, nullable=True)
-    customer_phone = Column(String(20), nullable=True)
-    customer_address = Column(String(255), nullable=True)
-    
-    # Excise details
-    registration_number = Column(String(50), nullable=True, index=True)
-    tax_amount = Column(Float, nullable=True)
-    fine_amount = Column(Float, default=0.0)
-    total_amount = Column(Float, nullable=True)
-    amount = Column(Float, nullable=True)
-    
-    # Financial details (from Excel)
-    income = Column(Float, nullable=True)
-    profit = Column(Float, nullable=True)
-    income2 = Column(Float, nullable=True)
-    expenditure = Column(Float, nullable=True)
-    
-    # Dates and other details
-    tcs_receiving_date = Column(DateTime, nullable=True)
-    excise_submitting_date = Column(DateTime, nullable=True)
-    dealer_address = Column(String(255), nullable=True)
-    issue_authority = Column(String(100), nullable=True)
-    receiver = Column(String(100), nullable=True)
-    file_card = Column(String(500), nullable=True)
-    modified_pc = Column(String(100), nullable=True)
-    
-    status = Column(String(20), default=ExciseRecordStatus.PENDING, index=True)
-    remarks = Column(String(500), nullable=True)
-    
-    created_at = Column(DateTime, default=pk_now)
-    updated_at = Column(DateTime, default=pk_now, onupdate=pk_now)
-    is_deleted = Column(Boolean, default=False, index=True)
-    
-    # For attachments
-    attachments = Column(JSON, nullable=True)
 

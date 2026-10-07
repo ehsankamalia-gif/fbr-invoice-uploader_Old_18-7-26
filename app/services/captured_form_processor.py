@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
 from app.db.models import CapturedData
 from app.core.logger import logger
-from app.services.settings_service import settings_service
 
 class CapturedFormProcessor:
     def __init__(self, config: Dict[str, Any]):
@@ -104,7 +103,6 @@ class CapturedFormProcessor:
                                 color=(mapped_data.get("color") or "").upper(),
                                 model=(mapped_data.get("model_name") or "").upper(),
                                 created_at=datetime.utcnow(),
-                                company_id=settings_service.get_active_company_id(),
                             )
                             db.add(new_record)
                         

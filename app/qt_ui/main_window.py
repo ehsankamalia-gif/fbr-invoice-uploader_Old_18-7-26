@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, Callable
+from typing import Dict, List, Callable, Optional
 from dataclasses import dataclass
 
 import io
@@ -66,6 +66,7 @@ from PyQt6.QtWidgets import (
     QSplitter,
 )
 
+from sqlalchemy import or_
 from sqlalchemy.orm import joinedload, Session
 
 from app.core import config
@@ -92,6 +93,7 @@ from app.services.api_server_manager import get_api_server_status, start_api_ser
 from app.services.dealer_service import dealer_service
 from app.services.customer_service import customer_service
 from app.services.advance_booking_service import advance_booking_service
+from app.services.quotation_service import quotation_service
 from app.services.form_capture_service import form_capture_service
 from app.services.backup_service import backup_service
 from app.services.print_service_v2 import print_service_v2
@@ -107,17 +109,18 @@ from app.qt_ui.settings_modals import (
     AddressShortcodeDialog,
     UrduFontDialog,
     FontCustomizationDialog,
-    DMSSettingsDialog,
-    CompanyManagementDialog
+    CompanyManagementDialog,
+    StaffManagementDialog,
+    ChangePasswordDialog
 )
 from app.qt_ui.auto_scroll_manager import AutoScrollManager
 from app.core.signals import booking_signals
 from app.core.logger import logger
 from app.core.version_manager import VersionManager
+from app.services.auth_session import auth_session
+from app.core.staff_modules import STAFF_MODULE_CODES
 from app.updater.updater_manager import UpdaterManager
 from app.qt_ui.whatsapp_campaign_widget import WhatsAppCampaignWidget
-from app.qt_ui.dms_automation_page import DMSAutomationPage
-from app.excise import ExciseRecordPage
 
 
 @dataclass
@@ -894,7 +897,6 @@ class MainWindow(QMainWindow):
         self._init_updater()
 
         self._init_ui()
-        self._init_version_footer()
 
         self._settings_subscription_token = settings_service.subscribe(self._on_settings_event)
         self._active_fbr_settings_snapshot = settings_service.get_active_settings()
@@ -918,7 +920,7 @@ class MainWindow(QMainWindow):
     def _apply_settings_event(self, event: dict) -> None:
         try:
             event_type = event.get("type")
-            if event_type not in ("fbr_settings_saved", "fbr_active_environment_changed", "active_company_changed"):
+            if event_type not in ("fbr_settings_saved", "fbr_active_environment_changed"):
                 return
 
             revision = int(event.get("revision") or 0)
@@ -928,11 +930,6 @@ class MainWindow(QMainWindow):
                 return
             if revision:
                 self._last_settings_revision = revision
-
-            if event_type == "active_company_changed":
-                self._update_app_branding(self._get_active_branding_name())
-                logger.info(f"Settings event applied: type={event_type} revision={revision}")
-                return
 
             new_active_settings = settings_service.get_active_settings()
             old_active_settings = getattr(self, "_active_fbr_settings_snapshot", {}) or {}
@@ -1079,16 +1076,6 @@ class MainWindow(QMainWindow):
         
         # Professional Auto-Backup on Startup (if it hasn't been done in the last 24h)
         self._perform_startup_backup()
-
-    def _init_version_footer(self) -> None:
-        """Shows the installed software version in the status bar - part of
-        the main window's chrome, not any individual page, so it stays
-        visible across every interface/page without needing to be added to
-        each one separately."""
-        version_label = QLabel(VersionManager.get_version_string())
-        version_label.setStyleSheet("color: #95a5a6; font-size: 11px; padding: 0 12px;")
-        version_label.setToolTip("Installed application version")
-        self.statusBar().addPermanentWidget(version_label)
 
     def _perform_startup_backup(self):
         """Background backup on startup to ensure data safety."""
@@ -1262,14 +1249,13 @@ class MainWindow(QMainWindow):
         self._add_page("customers", self._create_customers_page(), "Customers")
         self._add_page("dealers", self._create_dealers_page(), "Dealers")
         self._add_page("advance_booking", self._create_advance_booking_page(), "Advance Booking")
+        self._add_page("quotation", self._create_quotation_page(), "Quotation")
         self._add_page("credit_ledger", self._create_credit_ledger_page(), "Credit Ledger System")
         self._add_page("spare_ledger", self._create_spare_ledger_page(), "Spare Ledger")
         self._add_page("sms", self._create_sms_page(), "SMS Module")
         self._add_page("whatsapp", self._create_whatsapp_page(), "Whatsapp Module")
         self._add_page("settings", self._create_settings_page(), "Settings")
         self._add_page("welcome", self._create_welcome_page(), "Welcome")
-        self._add_page("dms_automation", self._create_dms_automation_page(), "DMS Automation")
-        self._add_page("excise", self._create_excise_page(), "Excise Records")
         self._add_page("portal_accounts", self._create_portal_accounts_page(), "Portal Accounts")
 
         nav_layout.addSpacing(10)
@@ -1283,6 +1269,7 @@ class MainWindow(QMainWindow):
             "customers": "👥",
             "dealers": "🏢",
             "advance_booking": "📅",
+            "quotation": "📋",
             "credit_ledger": "🧾",
             "spare_ledger": "📒",
             "sms": "💬",
@@ -1291,17 +1278,14 @@ class MainWindow(QMainWindow):
             "welcome": "👋",
             "captured_data": "📁",
             "print_document": "🖨️",
-            "dms_automation": "🤖",
-            "excise": "📋",
             "portal_accounts": "🔑",
         }
 
         self.menu_groups = {
             "GENERAL": ["dashboard", "welcome"],
-            "SALES": ["invoice", "reports", "advance_booking", "print_document", "excise"],
+            "SALES": ["invoice", "reports", "advance_booking", "quotation", "print_document"],
             "INVENTORY": ["inventory", "prices", "spare_ledger", "captured_data"],
             "DIRECTORY": ["customers", "dealers"],
-            "AUTOMATION": ["dms_automation"],
             "PORTAL": ["portal_accounts", "credit_ledger"],
             "SYSTEM": ["sms", "whatsapp", "settings"]
         }
@@ -1329,6 +1313,12 @@ class MainWindow(QMainWindow):
             self._group_buttons[group_name] = []
 
             for key in keys:
+                # Company-specific module access: a logged-in Staff account
+                # only sees nav entries for modules its Admin has granted
+                # (app/core/staff_modules.py). Admins and anything not in
+                # that fixed module list (e.g. "welcome") are unaffected.
+                if auth_session.is_logged_in() and key in STAFF_MODULE_CODES and not auth_session.has_permission(key):
+                    continue
                 title = self._pages[key].windowTitle()
                 icon = self.nav_icons.get(key, "🔹")
                 button = NavigationButton(
@@ -1347,6 +1337,61 @@ class MainWindow(QMainWindow):
                 self._group_buttons[group_name].append(button)
 
         nav_layout.addStretch(1)
+
+        # Logged-in-as card - shows the current desktop session's identity
+        # (account, role) and lets them log out without exiting the app,
+        # right above the version badge it visually groups with.
+        if auth_session.is_logged_in():
+            session_card = QFrame()
+            session_card.setStyleSheet("""
+                QFrame { background-color: rgba(255, 255, 255, 0.05); border-top: 1px solid rgba(255, 255, 255, 0.1); }
+            """)
+            session_layout = QVBoxLayout(session_card)
+            session_layout.setContentsMargins(16, 10, 16, 6)
+            session_layout.setSpacing(2)
+
+            role_text = "Admin" if auth_session.is_admin() else "Staff"
+            identity_label = QLabel(f"{auth_session.current_full_name()} · {role_text}")
+            identity_label.setStyleSheet("color: white; font-size: 12px; font-weight: 600;")
+            identity_label.setWordWrap(True)
+            session_layout.addWidget(identity_label)
+
+            self.logout_btn = QPushButton("🔓 Log Out")
+            self.logout_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.logout_btn.setStyleSheet("""
+                QPushButton { background-color: transparent; color: #e67e22; border: none;
+                              text-align: left; padding: 6px 0 0 0; font-size: 12px; font-weight: 600; }
+                QPushButton:hover { color: #f39c12; }
+            """)
+            self.logout_btn.clicked.connect(self._on_logout_clicked)
+            session_layout.addWidget(self.logout_btn)
+
+            nav_layout.addWidget(session_card)
+
+        # Version Badge - replaces the old plain status-bar text label with a
+        # small pill badge in the sidebar, right above the update/exit
+        # actions it's most relevant to.
+        version_row = QHBoxLayout()
+        version_row.setContentsMargins(16, 0, 16, 12)
+        version_row.addStretch(1)
+        self.sidebar_version_label = QLabel(f"●  {VersionManager.get_version_string()}")
+        self.sidebar_version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.sidebar_version_label.setToolTip("Installed application version")
+        self.sidebar_version_label.setStyleSheet("""
+            QLabel {
+                color: #7fd97f;
+                background-color: rgba(255, 255, 255, 0.06);
+                border: 1px solid rgba(255, 255, 255, 0.14);
+                border-radius: 11px;
+                padding: 5px 16px;
+                font-size: 11px;
+                font-weight: 600;
+                letter-spacing: 0.5px;
+            }
+        """)
+        version_row.addWidget(self.sidebar_version_label)
+        version_row.addStretch(1)
+        nav_layout.addLayout(version_row)
 
         # Update Button (Footer)
         self.footer_update_btn = QPushButton("🔄 Check for Updates")
@@ -1863,6 +1908,7 @@ class MainWindow(QMainWindow):
                     SalesRow(
                         date_value=inv.datetime,
                         invoice_number=inv.invoice_number or "",
+                        fbr_invoice_number=inv.fbr_invoice_number or "",
                         buyer=buyer,
                         chassis=", ".join(chassis_list),
                         engine=", ".join(engine_list),
@@ -1962,7 +2008,24 @@ class MainWindow(QMainWindow):
             }
         """)
         self.print_search_input.returnPressed.connect(self._on_print_search_clicked)
-        
+
+        # Autocomplete: only chassis numbers with an FBR-uploaded invoice,
+        # matching the exact same filter _on_print_search_clicked uses to
+        # actually search - so nothing shown here can come back "Not Found".
+        self._print_search_completer_model = QStringListModel(self)
+        self.print_search_completer = QCompleter(self._print_search_completer_model, self)
+        self.print_search_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.print_search_completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        self.print_search_completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self.print_search_completer.setMaxVisibleItems(10)
+        self.print_search_input.setCompleter(self.print_search_completer)
+        self.print_search_input.textEdited.connect(self._on_print_search_input_changed)
+
+        self._print_search_completer_timer = QTimer(self)
+        self._print_search_completer_timer.setSingleShot(True)
+        self._print_search_completer_timer.setInterval(200)
+        self._print_search_completer_timer.timeout.connect(self._perform_print_search_chassis_search)
+
         search_btn = QPushButton("🔍 Search Invoice")
         search_btn.setObjectName("primaryButton")
         search_btn.setMinimumHeight(45)
@@ -2161,6 +2224,48 @@ class MainWindow(QMainWindow):
         scroll_area.setWidget(content_widget)
         return scroll_area
 
+    def _on_print_search_input_changed(self, text: str) -> None:
+        chassis = text.strip()
+        if not chassis:
+            self._print_search_completer_model.setStringList([])
+            return
+        self._print_search_query = chassis
+        self._print_search_completer_timer.start()
+
+    def _perform_print_search_chassis_search(self) -> None:
+        query_text = getattr(self, "_print_search_query", "").strip()
+        if not query_text:
+            self._print_search_completer_model.setStringList([])
+            return
+
+        db = SessionLocal()
+        try:
+            # Same join + filter as _on_print_search_clicked's actual search,
+            # so every suggestion here is guaranteed to be findable.
+            results = (
+                db.query(Motorcycle.chassis_number)
+                .join(InvoiceItem, InvoiceItem.motorcycle_id == Motorcycle.id)
+                .join(Invoice, Invoice.id == InvoiceItem.invoice_id)
+                .filter(
+                    Invoice.fbr_invoice_number.isnot(None),
+                    Motorcycle.chassis_number.ilike(f"%{query_text}%"),
+                )
+                .distinct()
+                .limit(10)
+                .all()
+            )
+            suggestions = [r[0] for r in results if r[0]]
+            self._print_search_completer_model.setStringList(suggestions)
+            if suggestions:
+                popup = self.print_search_completer.popup()
+                if popup is not None:
+                    popup.setMinimumWidth(self.print_search_input.width())
+                self.print_search_completer.complete()
+        except Exception as e:
+            logger.error(f"Print search chassis autocomplete error: {e}")
+        finally:
+            db.close()
+
     def _on_print_search_clicked(self) -> None:
         """Handles searching for an invoice by chassis number for printing."""
         chassis = self.print_search_input.text().strip().upper()
@@ -2288,113 +2393,38 @@ class MainWindow(QMainWindow):
         page = QWidget(self)
         layout = QVBoxLayout(page)
         layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(15)
-
-        header = QLabel("Reporting Portal")
-        header.setStyleSheet("font-size: 22px; font-weight: bold; color: #2c3e50;")
-        layout.addWidget(header)
-
-        subtitle = QLabel("Open interactive dashboards in your browser (recommended for best performance and compatibility).")
-        subtitle.setStyleSheet("color: #7f8c8d;")
-        subtitle.setWordWrap(True)
-        layout.addWidget(subtitle)
-
-        btn_row = QHBoxLayout()
-        open_dash = QPushButton("Open Dashboard")
-        open_builder = QPushButton("Template Builder")
-        open_sched = QPushButton("Schedules")
-
-        open_dash.setObjectName("primaryButton")
-        open_builder.setObjectName("resetButton")
-        open_sched.setObjectName("resetButton")
-
-        def open_url(url: str) -> None:
-            try:
-                from PyQt6.QtGui import QDesktopServices
-                from PyQt6.QtCore import QUrl
-                import socket
-                import time
-
-                if url.startswith("http://127.0.0.1:9000"):
-                    def _is_open() -> bool:
-                        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        try:
-                            s.settimeout(0.2)
-                            return s.connect_ex(("127.0.0.1", 9000)) == 0
-                        finally:
-                            s.close()
-
-                    if not _is_open():
-                        from reporting.server import (
-                            start_reporting_server,
-                            get_last_startup_error,
-                        )
-
-                        ok, detail = start_reporting_server()
-
-                        deadline = time.time() + 15.0
-                        while time.time() < deadline and not _is_open():
-                            time.sleep(0.1)
-
-                        if not _is_open():
-                            stored_err = get_last_startup_error()
-                            shown_detail = (
-                                stored_err
-                                if stored_err
-                                else (detail if not ok else "Reporting server did not become ready within 15 seconds. Check logs/reporting_portal.stderr.log.")
-                            )
-                            self._show_error(
-                                "Reporting Server",
-                                "Reporting server is not running on http://127.0.0.1:9000.\n\n"
-                                f"Details: {shown_detail}\n\n"
-                                "If you are using the EXE build, rebuild it with FastAPI/Uvicorn included.\n"
-                                "If you are running from source, install dependencies from requirements.txt.\n"
-                                "You can also run the app from a console (python.exe instead of pythonw.exe) to see full startup logs.",
-                            )
-                            return
-
-                QDesktopServices.openUrl(QUrl(url))
-            except Exception as e:
-                self._show_error("Browser Error", str(e))
-
-        open_dash.clicked.connect(lambda: open_url("http://127.0.0.1:9000/dashboard"))
-        open_builder.clicked.connect(lambda: open_url("http://127.0.0.1:9000/builder"))
-        open_sched.clicked.connect(lambda: open_url("http://127.0.0.1:9000/schedules"))
-
-        btn_row.addWidget(open_dash)
-        btn_row.addWidget(open_builder)
-        btn_row.addWidget(open_sched)
-        btn_row.addStretch(1)
-        layout.addLayout(btn_row)
-
-        note = QLabel("If the portal does not open, ensure the Reporting Server is running on http://127.0.0.1:9000.")
-        note.setStyleSheet("color: #95a5a6; font-size: 11px;")
-        note.setWordWrap(True)
-        layout.addWidget(note)
-
-        layout.addStretch(1)
-        return page
-
-        page = QWidget(self)
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(25)
+        layout.setSpacing(20)
 
         # Global Page Style
         page.setStyleSheet("""
             QWidget {
-                background-color: #f8f9fa;
+                background-color: #f4f6fa;
+            }
+            QFrame#headerBanner {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #3a4a9f, stop:1 #5a6fd8);
+                border-radius: 16px;
             }
             QLabel#pageHeader {
-                font-size: 26px;
+                font-size: 24px;
                 font-weight: bold;
-                color: #2c3e50;
-                margin-bottom: 5px;
+                color: white;
+                background: transparent;
+            }
+            QLabel#pageIcon {
+                background-color: rgba(255, 255, 255, 0.18);
+                border-radius: 22px;
+                font-size: 22px;
+                qproperty-alignment: AlignCenter;
             }
             QFrame#filterCard {
                 background-color: white;
-                border: 1px solid #e0e0e0;
-                border-radius: 12px;
+                border: 1px solid #e8eaf0;
+                border-radius: 14px;
+            }
+            QFrame#statCard {
+                border: none;
+                border-radius: 14px;
             }
             QLabel.filterLabel {
                 color: #7f8c8d;
@@ -2403,66 +2433,71 @@ class MainWindow(QMainWindow):
                 text-transform: uppercase;
                 letter-spacing: 1px;
             }
-            QLineEdit, QComboBox {
+            QLineEdit, QComboBox, QDateEdit {
                 padding: 10px 15px;
                 border: 1px solid #dee2e6;
                 border-radius: 8px;
                 background-color: #ffffff;
                 font-size: 13px;
-                min-width: 150px;
+                min-width: 140px;
             }
-            QLineEdit:hover, QComboBox:hover {
+            QLineEdit:hover, QComboBox:hover, QDateEdit:hover {
                 border: 1px solid #bdc3c7;
             }
-            QLineEdit:focus, QComboBox:focus {
-                border: 2px solid #3498db;
+            QLineEdit:focus, QComboBox:focus, QDateEdit:focus {
+                border: 2px solid #5a6fd8;
                 background-color: #ffffff;
             }
             QPushButton#primaryButton {
-                background-color: #3498db;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #3a4a9f, stop:1 #5a6fd8);
                 color: white;
                 border: none;
                 border-radius: 8px;
                 font-weight: bold;
-                padding: 12px 24px;
+                padding: 10px 20px;
                 font-size: 13px;
             }
             QPushButton#primaryButton:hover {
-                background-color: #2980b9;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #333f87, stop:1 #4c5fc0);
             }
             QPushButton#resetButton {
                 background-color: white;
-                color: #2c3e50;
-                border: 1px solid #dee2e6;
+                color: #3a4a9f;
+                border: 1px solid #dde2f3;
                 border-radius: 8px;
                 font-weight: bold;
-                padding: 12px 24px;
+                padding: 10px 20px;
                 font-size: 13px;
             }
             QPushButton#resetButton:hover {
-                background-color: #f8f9fa;
-                border: 1px solid #bdc3c7;
+                background-color: #eef0fb;
+                border: 1px solid #c7cdf0;
             }
             QTableView {
                 background-color: white;
-                border: 1px solid #e0e0e0;
-                border-radius: 12px;
-                gridline-color: #f1f1f1;
+                border: 1px solid #e8eaf0;
+                border-radius: 14px;
+                gridline-color: #f1f2f6;
                 outline: 0;
                 font-size: 13px;
-                selection-background-color: #e3f2fd;
-                selection-color: #1976d2;
-                alternate-background-color: #fafafa;
+                selection-background-color: #e3e8fd;
+                selection-color: #3a4a9f;
+                alternate-background-color: #f9fafc;
+            }
+            QTableView::item {
+                padding: 4px 2px;
             }
             QHeaderView::section {
-                background-color: #f8f9fa;
-                color: #5a6268;
+                background-color: #eef1fb;
+                color: #4a5578;
                 padding: 15px;
                 font-weight: bold;
                 text-transform: uppercase;
                 font-size: 11px;
                 border: none;
-                border-bottom: 2px solid #e9ecef;
+                border-bottom: 2px solid #dde2f3;
             }
             QScrollBar:vertical {
                 border: none;
@@ -2481,100 +2516,225 @@ class MainWindow(QMainWindow):
             }
         """)
 
-        # Header Section
-        header_widget = QWidget()
-        header_layout = QHBoxLayout(header_widget)
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        
+        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+        from PyQt6.QtGui import QColor
+
+        def _soft_shadow(widget: QWidget, blur: int = 24, y_offset: int = 6, alpha: int = 28) -> None:
+            shadow = QGraphicsDropShadowEffect(widget)
+            shadow.setBlurRadius(blur)
+            shadow.setXOffset(0)
+            shadow.setYOffset(y_offset)
+            shadow.setColor(QColor(30, 40, 90, alpha))
+            widget.setGraphicsEffect(shadow)
+
+        # Header Banner
+        header_banner = QFrame()
+        header_banner.setObjectName("headerBanner")
+        header_layout = QHBoxLayout(header_banner)
+        header_layout.setContentsMargins(26, 22, 26, 22)
+        header_layout.setSpacing(16)
+
+        icon_badge = QLabel("\U0001F4CA")  # 📊
+        icon_badge.setObjectName("pageIcon")
+        icon_badge.setFixedSize(44, 44)
+        header_layout.addWidget(icon_badge, 0, Qt.AlignmentFlag.AlignVCenter)
+
         header_v_box = QVBoxLayout()
+        header_v_box.setSpacing(2)
         header = QLabel("Sales & FBR Submission Report")
         header.setObjectName("pageHeader")
         header_v_box.addWidget(header)
-        
-        header_subtitle = QLabel("Comprehensive view of all submitted invoices and their FBR sync status.")
-        header_subtitle.setStyleSheet("color: #7f8c8d; font-size: 13px;")
-        header_v_box.addWidget(header_subtitle)
-        
+
+        self.report_company_label = QLabel("")
+        self.report_company_label.setStyleSheet("color: rgba(255,255,255,0.85); font-size: 13px; font-weight: 500; background: transparent;")
+        header_v_box.addWidget(self.report_company_label)
+
         header_layout.addLayout(header_v_box)
         header_layout.addStretch(1)
-        
+
         self.report_total_count_label = QLabel("Total Records: 0")
         self.report_total_count_label.setStyleSheet("""
-            color: #1976d2; 
-            font-weight: bold; 
-            font-size: 12px; 
-            background: #e3f2fd; 
-            padding: 10px 25px; 
-            border: 1px solid #bbdefb;
-            border-radius: 20px;
+            color: #3a4a9f;
+            font-weight: bold;
+            font-size: 12px;
+            background: white;
+            padding: 10px 22px;
+            border-radius: 18px;
         """)
         header_layout.addWidget(self.report_total_count_label, 0, Qt.AlignmentFlag.AlignVCenter)
-        
-        layout.addWidget(header_widget)
+
+        _soft_shadow(header_banner, blur=28, y_offset=8, alpha=45)
+        layout.addWidget(header_banner)
+
+        # Summary Cards - each with its own accent color/icon so the page
+        # reads at a glance, not just as a wall of numbers.
+        cards_row = QHBoxLayout()
+        cards_row.setSpacing(15)
+        self._report_stat_cards: Dict[str, QLabel] = {}
+        card_specs = [
+            ("total_invoices", "Total Invoices", "\U0001F9FE", "#3a4a9f", "#eef0fb"),   # 🧾 indigo
+            ("total_amount", "Total Amount (Rs.)", "\U0001F4B0", "#7b3fd4", "#f3edfb"),  # 💰 violet
+            ("avg_amount", "Avg. Invoice (Rs.)", "\U0001F4C8", "#0f9b8e", "#e6f7f5"),    # 📈 teal
+            ("synced", "Synced", "✅", "#27ae60", "#e9f8ef"),                        # ✅ green
+            ("pending", "Pending", "⏳", "#e8932a", "#fdf3e3"),                       # ⏳ amber
+            ("failed", "Failed", "❌", "#e05252", "#fcebea"),                         # ❌ red
+        ]
+        for key, title, icon, accent, tint in card_specs:
+            card = QFrame()
+            card.setObjectName("statCard")
+            card.setStyleSheet(f"""
+                QFrame#statCard {{
+                    background-color: {tint};
+                    border-left: 4px solid {accent};
+                }}
+            """)
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(16, 14, 16, 14)
+            card_layout.setSpacing(6)
+
+            top_row = QHBoxLayout()
+            top_row.setSpacing(8)
+            icon_lbl = QLabel(icon)
+            icon_lbl.setStyleSheet("font-size: 16px; border: none; background: transparent;")
+            top_row.addWidget(icon_lbl)
+            title_lbl = QLabel(title.upper())
+            title_lbl.setStyleSheet(f"color: {accent}; font-size: 10px; font-weight: bold; letter-spacing: 1px; border: none; background: transparent;")
+            top_row.addWidget(title_lbl)
+            top_row.addStretch(1)
+            card_layout.addLayout(top_row)
+
+            value_lbl = QLabel("0")
+            value_lbl.setStyleSheet("color: #212736; font-size: 22px; font-weight: 800; border: none; background: transparent;")
+            card_layout.addWidget(value_lbl)
+
+            _soft_shadow(card, blur=18, y_offset=4, alpha=22)
+            cards_row.addWidget(card)
+            self._report_stat_cards[key] = value_lbl
+        layout.addLayout(cards_row)
 
         # Filter Card
         filter_card = QFrame()
         filter_card.setObjectName("filterCard")
-        filter_layout = QHBoxLayout(filter_card)
-        filter_layout.setContentsMargins(25, 20, 25, 20)
-        filter_layout.setSpacing(25)
+        filter_main = QVBoxLayout(filter_card)
+        filter_main.setContentsMargins(25, 20, 25, 20)
+        filter_main.setSpacing(14)
 
-        # Search Group
-        search_box = QVBoxLayout()
-        search_box.setSpacing(8)
-        search_lbl = QLabel("Search Keywords")
-        search_lbl.setProperty("class", "filterLabel")
-        search_box.addWidget(search_lbl)
+        filter_row = QHBoxLayout()
+        filter_row.setSpacing(20)
+
+        def _labeled(label_text: str, widget: QWidget) -> QVBoxLayout:
+            box = QVBoxLayout()
+            box.setSpacing(8)
+            lbl = QLabel(label_text)
+            lbl.setProperty("class", "filterLabel")
+            box.addWidget(lbl)
+            box.addWidget(widget)
+            return box
+
         self.sales_search_input = QLineEdit()
         self.sales_search_input.setPlaceholderText("Invoice, Buyer, Chassis...")
-        self.sales_search_input.setFixedWidth(280)
-        self.sales_search_input.textChanged.connect(self._reload_sales)
-        search_box.addWidget(self.sales_search_input)
-        filter_layout.addLayout(search_box)
+        self.sales_search_input.setFixedWidth(220)
+        self.sales_search_input.textChanged.connect(self._on_sales_filters_changed)
+        filter_row.addLayout(_labeled("Search Keywords", self.sales_search_input))
 
-        # Status Group
-        status_box = QVBoxLayout()
-        status_box.setSpacing(8)
-        status_lbl = QLabel("Submission Status")
-        status_lbl.setProperty("class", "filterLabel")
-        status_box.addWidget(status_lbl)
         self.sales_status_combo = QComboBox()
         self.sales_status_combo.addItems(["All Statuses", "Synced", "Pending", "Failed"])
-        self.sales_status_combo.currentTextChanged.connect(self._reload_sales)
-        status_box.addWidget(self.sales_status_combo)
-        filter_layout.addLayout(status_box)
+        self.sales_status_combo.currentTextChanged.connect(self._on_sales_filters_changed)
+        filter_row.addLayout(_labeled("Submission Status", self.sales_status_combo))
 
-        # Period Group
-        period_box = QVBoxLayout()
-        period_box.setSpacing(8)
-        period_lbl = QLabel("Time Period")
-        period_lbl.setProperty("class", "filterLabel")
-        period_box.addWidget(period_lbl)
         self.sales_period_combo = QComboBox()
-        self.sales_period_combo.addItems(["All Time", "Today", "This Month"])
-        self.sales_period_combo.currentTextChanged.connect(self._reload_sales)
-        period_box.addWidget(self.sales_period_combo)
-        filter_layout.addLayout(period_box)
+        self.sales_period_combo.addItems(["All Time", "Today", "This Week", "This Month", "This Year", "Custom Range"])
+        self.sales_period_combo.currentTextChanged.connect(self._on_sales_period_changed)
+        filter_row.addLayout(_labeled("Time Period", self.sales_period_combo))
 
-        filter_layout.addStretch(1)
-        
-        refresh_btn = QPushButton("↻ Refresh Data")
+        self.sales_from_date = ClearableDateEdit()
+        self.sales_from_date.setCalendarPopup(True)
+        self.sales_from_date.setDate(QDate.currentDate().addMonths(-1))
+        self.sales_from_date.dateChanged.connect(self._on_sales_filters_changed)
+        self.sales_to_date = ClearableDateEdit()
+        self.sales_to_date.setCalendarPopup(True)
+        self.sales_to_date.setDate(QDate.currentDate())
+        self.sales_to_date.dateChanged.connect(self._on_sales_filters_changed)
+
+        self.sales_custom_range_widget = QWidget()
+        custom_range_row = QHBoxLayout(self.sales_custom_range_widget)
+        custom_range_row.setContentsMargins(0, 0, 0, 0)
+        custom_range_row.setSpacing(20)
+        custom_range_row.addLayout(_labeled("From Date", self.sales_from_date))
+        custom_range_row.addLayout(_labeled("To Date", self.sales_to_date))
+        self.sales_custom_range_widget.setVisible(False)
+        filter_row.addWidget(self.sales_custom_range_widget)
+
+        filter_row.addStretch(1)
+        filter_main.addLayout(filter_row)
+
+        action_row = QHBoxLayout()
+        action_row.setSpacing(10)
+
+        refresh_btn = QPushButton("↻ Refresh")
         refresh_btn.setObjectName("resetButton")
         refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         refresh_btn.clicked.connect(self._reload_sales)
-        filter_layout.addWidget(refresh_btn, 0, Qt.AlignmentFlag.AlignBottom)
-        
+        action_row.addWidget(refresh_btn)
+
+        clear_btn = QPushButton("Clear Filters")
+        clear_btn.setObjectName("resetButton")
+        clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        clear_btn.clicked.connect(self._on_sales_clear_filters)
+        action_row.addWidget(clear_btn)
+
+        columns_btn = QPushButton("Columns")
+        columns_btn.setObjectName("resetButton")
+        columns_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        columns_btn.clicked.connect(self._on_sales_columns_menu)
+        action_row.addWidget(columns_btn)
+
+        action_row.addStretch(1)
+
+        export_csv_btn = QPushButton("Export CSV")
+        export_csv_btn.setObjectName("resetButton")
+        export_csv_btn.clicked.connect(lambda: self._on_sales_export("csv"))
+        action_row.addWidget(export_csv_btn)
+
+        export_xlsx_btn = QPushButton("Export Excel")
+        export_xlsx_btn.setObjectName("resetButton")
+        export_xlsx_btn.clicked.connect(lambda: self._on_sales_export("xlsx"))
+        action_row.addWidget(export_xlsx_btn)
+
+        export_pdf_btn = QPushButton("Export PDF")
+        export_pdf_btn.setObjectName("resetButton")
+        export_pdf_btn.clicked.connect(lambda: self._on_sales_export("pdf"))
+        action_row.addWidget(export_pdf_btn)
+
+        print_btn = QPushButton("Print")
+        print_btn.setObjectName("primaryButton")
+        print_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        print_btn.clicked.connect(self._on_sales_print)
+        action_row.addWidget(print_btn)
+
+        filter_main.addLayout(action_row)
+        _soft_shadow(filter_card, blur=20, y_offset=4, alpha=18)
         layout.addWidget(filter_card)
 
         # Table Section
         table_container = QFrame()
-        table_container.setStyleSheet("background-color: white; border: 1px solid #e0e0e0; border-radius: 12px;")
+        table_container.setStyleSheet("background-color: white; border: 1px solid #e8eaf0; border-radius: 14px;")
+        _soft_shadow(table_container, blur=22, y_offset=5, alpha=18)
         table_layout = QVBoxLayout(table_container)
         table_layout.setContentsMargins(1, 1, 1, 1)
 
         self.sales_table_view = QTableView()
         self.sales_table_model = SalesTableModel()
-        self.sales_table_view.setModel(self.sales_table_model)
+
+        from PyQt6.QtCore import QSortFilterProxyModel
+        self.sales_proxy_model = QSortFilterProxyModel()
+        self.sales_proxy_model.setSourceModel(self.sales_table_model)
+        self.sales_proxy_model.setSortRole(Qt.ItemDataRole.EditRole)
+        self.sales_table_view.setModel(self.sales_proxy_model)
+        self.sales_table_view.setSortingEnabled(True)
+        self.sales_table_view.horizontalHeader().setSortIndicatorShown(True)
+        self.sales_table_view.horizontalHeader().setSectionsMovable(True)
+
         self.sales_table_view.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.sales_table_view.setAlternatingRowColors(True)
         self.sales_table_view.horizontalHeader().setStretchLastSection(True)
@@ -2587,23 +2747,50 @@ class MainWindow(QMainWindow):
         # Install Auto Scroll Manager
         self.sales_table_auto_scroll = AutoScrollManager(self)
         self.sales_table_auto_scroll.install_on_widget(self.sales_table_view)
-        
+
         # Adjust column widths
         self.sales_table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.sales_table_view.horizontalHeader().resizeSection(0, 140) # Date
         self.sales_table_view.horizontalHeader().resizeSection(1, 120) # Invoice
-        self.sales_table_view.horizontalHeader().resizeSection(2, 200) # Buyer
-        self.sales_table_view.horizontalHeader().resizeSection(3, 150) # Chassis
-        self.sales_table_view.horizontalHeader().resizeSection(4, 150) # Engine
-        self.sales_table_view.horizontalHeader().resizeSection(5, 120) # Total
-        
+        self.sales_table_view.horizontalHeader().resizeSection(2, 140) # FBR Invoice #
+        self.sales_table_view.horizontalHeader().resizeSection(3, 200) # Buyer
+        self.sales_table_view.horizontalHeader().resizeSection(4, 150) # Chassis
+        self.sales_table_view.horizontalHeader().resizeSection(5, 150) # Engine
+        self.sales_table_view.horizontalHeader().resizeSection(6, 120) # Total
+
         table_layout.addWidget(self.sales_table_view)
         layout.addWidget(table_container, 1)
 
-        self._reload_sales()
+        # Pagination row
+        page_row = QHBoxLayout()
+        page_row.setSpacing(10)
 
-        return page
+        page_row.addWidget(QLabel("Rows per page:"))
+        self.sales_page_size_combo = QComboBox()
+        self.sales_page_size_combo.addItems(["50", "100", "200", "500"])
+        self.sales_page_size_combo.setCurrentText("100")
+        self.sales_page_size_combo.currentTextChanged.connect(self._on_sales_page_size_changed)
+        page_row.addWidget(self.sales_page_size_combo)
 
+        page_row.addStretch(1)
+
+        self.sales_prev_btn = QPushButton("‹ Prev")
+        self.sales_prev_btn.setObjectName("resetButton")
+        self.sales_prev_btn.clicked.connect(self._on_sales_page_prev)
+        page_row.addWidget(self.sales_prev_btn)
+
+        self.sales_page_label = QLabel("Page 1 of 1")
+        self.sales_page_label.setStyleSheet("color: #7f8c8d; font-weight: bold;")
+        page_row.addWidget(self.sales_page_label)
+
+        self.sales_next_btn = QPushButton("Next ›")
+        self.sales_next_btn.setObjectName("resetButton")
+        self.sales_next_btn.clicked.connect(self._on_sales_page_next)
+        page_row.addWidget(self.sales_next_btn)
+
+        layout.addLayout(page_row)
+
+        self._sales_current_page = 0
         self._reload_sales()
 
         return page
@@ -2611,7 +2798,8 @@ class MainWindow(QMainWindow):
     def _on_sales_row_double_clicked(self, index: QModelIndex) -> None:
         if not index.isValid():
             return
-        row_data = self.sales_table_model._rows[index.row()]
+        source_index = self.sales_proxy_model.mapToSource(index) if hasattr(self, "sales_proxy_model") else index
+        row_data = self.sales_table_model._rows[source_index.row()]
         self._open_invoice_detail_dialog(row_data)
 
     def _open_invoice_detail_dialog(self, row_data: SalesRow) -> None:
@@ -3791,9 +3979,21 @@ class MainWindow(QMainWindow):
             ("Address Shortcodes", "⌨️", "Manage address shortcuts for faster data entry.", self._open_address_shortcodes),
             ("Urdu Font", "ا", "Enable Urdu Noori Nastaleeq font for Urdu text entry.", self._open_urdu_font_settings),
             ("Font Customization", "🔤", "Customize fonts and sizes for UI and sidebar (accessibility).", self._open_font_customization),
-            ("DMS Portal Automation", "🤖", "Configure DMS portal credentials and site URL for automation.", self._open_dms_settings),
-            ("Companies", "🏬", "Manage company profiles and switch which company's records are active.", self._open_company_management),
         ]
+
+        # My Account (change own password) is available to every logged-in
+        # user - Admin and Staff alike - unlike Company Information/Staff
+        # Accounts below, which are Admin-only.
+        if auth_session.is_logged_in():
+            categories.append(("My Account", "🔑", "Change your own login password.", self._open_change_password))
+
+        # Company Management and Staff Accounts are implicit Admin-only
+        # capabilities - never grantable to Staff via STAFF_MODULES, and
+        # hidden here regardless of whether a Staff account has been given
+        # the general "settings" module permission.
+        if auth_session.is_admin() or not auth_session.is_logged_in():
+            categories.append(("Company Information", "🏬", "View and edit your company's own profile.", self._open_company_management))
+            categories.append(("Staff Accounts", "🧑‍💼", "Create Staff accounts and manage their module permissions.", self._open_staff_management))
 
         for i, (title, icon, desc, callback) in enumerate(categories):
             card = QFrame()
@@ -4157,15 +4357,6 @@ class MainWindow(QMainWindow):
             self._refresh_api_server_status()
             QMessageBox.critical(self, "API Server", f"Failed to stop the API server:\n{e}")
 
-    def _create_dms_automation_page(self) -> QWidget:
-        return DMSAutomationPage(self)
-
-    def _create_excise_page(self) -> QWidget:
-        # Create database session for excise page
-        from app.db.session import SessionLocal
-        db_session = SessionLocal()
-        return ExciseRecordPage(db_session)
-
     def _create_portal_accounts_page(self) -> QWidget:
         from app.qt_ui.portal_account_page import PortalAccountPage
         return PortalAccountPage(self)
@@ -4208,24 +4399,44 @@ class MainWindow(QMainWindow):
         dialog = FontCustomizationDialog(self)
         dialog.exec()
 
-    def _open_dms_settings(self):
-        dialog = DMSSettingsDialog(self)
-        dialog.exec()
-
     def _open_company_management(self):
         dialog = CompanyManagementDialog(self)
         dialog.exec()
         self._update_app_branding(self._get_active_branding_name())
 
+    def _open_staff_management(self):
+        dialog = StaffManagementDialog(self)
+        dialog.exec()
+
+    def _open_change_password(self):
+        dialog = ChangePasswordDialog(self)
+        dialog.exec()
+
+    def _on_logout_clicked(self):
+        if QMessageBox.question(
+            self, "Log Out",
+            f"Log out of {auth_session.current_full_name()}'s account?"
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        # Simplest robust way to return to a clean login screen: restart the
+        # whole process rather than tearing down this window's many
+        # background threads/timers in place. auth_session is in-memory
+        # only, so the new process starts logged out, exactly as on a fresh
+        # launch.
+        import sys
+        from PyQt6.QtCore import QProcess
+        QProcess.startDetached(sys.executable, sys.argv)
+        QApplication.instance().quit()
+
     def _get_active_branding_name(self) -> str:
-        """The active Company's name drives the window title/sidebar
-        branding. Falls back to the FBR "Business Name" setting (Business
-        Preferences) only if no company is configured/active yet, e.g. a
-        fresh install."""
+        """The Company's name drives the window title/sidebar branding.
+        Falls back to the FBR "Business Name" setting (Business
+        Preferences) only if no company is configured yet, e.g. a fresh
+        install."""
         try:
-            company = settings_service.get_active_company()
+            company = settings_service.get_company()
         except Exception as e:
-            logger.warning(f"Failed to resolve active company for branding: {e}")
+            logger.warning(f"Failed to resolve company for branding: {e}")
             company = None
         if company and company.get("name"):
             return company["name"]
@@ -6041,18 +6252,24 @@ class MainWindow(QMainWindow):
         # Action Buttons (New)
         action_bar = QHBoxLayout()
         action_bar.setSpacing(15)
-        
+
+        add_btn = QPushButton("➕ Add Motorcycle")
+        add_btn.setStyleSheet("background-color: #2ecc71; color: white; border: none; font-weight: bold; padding: 10px 20px; border-radius: 8px;")
+        add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        add_btn.clicked.connect(self._on_add_inventory_clicked)
+
         edit_btn = QPushButton("✎ Edit Record")
         edit_btn.setObjectName("resetButton")
         edit_btn.setStyleSheet("background-color: #3498db; color: white; border: none; font-weight: bold; padding: 10px 20px; border-radius: 8px;")
         edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         edit_btn.clicked.connect(self._on_edit_inventory_clicked)
-        
+
         delete_btn = QPushButton("🗑 Delete Record")
         delete_btn.setStyleSheet("background-color: #e74c3c; color: white; border: none; font-weight: bold; padding: 10px 20px; border-radius: 8px;")
         delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         delete_btn.clicked.connect(self._on_delete_inventory_clicked)
-        
+
+        action_bar.addWidget(add_btn)
         action_bar.addStretch(1)
         action_bar.addWidget(edit_btn)
         action_bar.addWidget(delete_btn)
@@ -6732,7 +6949,6 @@ class MainWindow(QMainWindow):
                     total_price=b + t + l,
                     optional_features={"color": colors_str, "colors": colors_str},
                     effective_date=now,
-                    company_id=settings_service.get_active_company_id(),
                 )
                 db.add(new_price)
                 db.commit()
@@ -7297,6 +7513,7 @@ class MainWindow(QMainWindow):
             self.invoice_buyer_father_input.clear()
             self.invoice_buyer_phone_input.clear()
             self.invoice_buyer_address_input.clear()
+            self.invoice_buyer_ntn_input.clear()
             return
 
         # Auto-fill is per distinct CNIC. Without this the lookup, the four setText
@@ -7320,7 +7537,10 @@ class MainWindow(QMainWindow):
                 self.invoice_buyer_phone_input.setText(customer.phone)
             if customer.address:
                 self.invoice_buyer_address_input.setText(customer.address)
-            
+            self.invoice_buyer_ntn_input.blockSignals(True)
+            self.invoice_buyer_ntn_input.setText(customer.ntn or "")
+            self.invoice_buyer_ntn_input.blockSignals(False)
+
             # Update dealer status based on customer type
             from app.db.models import CustomerType
             self._is_dealer_selected = (customer.type == CustomerType.DEALER)
@@ -7837,6 +8057,7 @@ class MainWindow(QMainWindow):
         if not preserve:
             self._reset_invoice_form()
             self._generate_invoice_number()
+            self.invoice_buyer_cnic_input.setFocus()
             return
 
         self._invoice_current_price = None
@@ -7859,6 +8080,7 @@ class MainWindow(QMainWindow):
         self._display_invoice_qr(None)
         self._generate_invoice_number()
         self._check_invoice_form_completeness()
+        self.invoice_buyer_cnic_input.setFocus()
 
     def _on_invoice_reset_clicked(self) -> None:
         self._reset_invoice_form()
@@ -9259,6 +9481,1090 @@ class MainWindow(QMainWindow):
         finally:
             db.close()
 
+    # ---------------------------------------------------------------
+    # Quotation Module — completely independent of Invoice/Advance
+    # Booking. Reads live model/color/price data from price_service
+    # (the existing Price Table) but snapshots the chosen price onto
+    # its own QuotationItem rows via quotation_service, exactly like
+    # AdvanceBooking does, so a later Price Table change never rewrites
+    # a historical quotation.
+    # ---------------------------------------------------------------
+
+    def _create_quotation_page(self) -> QWidget:
+        page = PanScrollArea(self)
+        page.setWidgetResizable(True)
+        page.setFrameShape(QFrame.Shape.NoFrame)
+        page.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        page.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+
+        host = QWidget()
+        host.setStyleSheet("""
+            QWidget { background-color: #f8f9fa; }
+            QLabel#pageHeader { font-size: 26px; font-weight: bold; color: #2c3e50; }
+            QFrame#card { background-color: white; border: 1px solid #e0e0e0; border-radius: 12px; }
+            QLabel.fieldLabel { color: #7f8c8d; font-weight: bold; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+            QLineEdit, QComboBox, QDoubleSpinBox, QDateEdit { padding: 8px 12px; border: 1px solid #dee2e6; border-radius: 8px; background-color: #ffffff; font-size: 13px; }
+            QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus, QDateEdit:focus { border: 2px solid #3498db; background-color: #f7fbfe; }
+            QPushButton#primaryButton { background-color: #3498db; color: white; border: none; border-radius: 8px; font-weight: bold; padding: 10px 20px; }
+            QPushButton#primaryButton:hover { background-color: #2980b9; }
+            QPushButton#resetButton { background-color: #f8f9fa; color: #2c3e50; border: 1px solid #dee2e6; border-radius: 8px; font-weight: bold; padding: 10px 20px; }
+            QPushButton#resetButton:hover { background-color: #e9ecef; }
+            QTableView, QTableWidget {
+                background-color: white;
+                border: 1px solid #e0e0e0;
+                border-radius: 12px;
+                gridline-color: #f1f1f1;
+                alternate-background-color: #fafafa;
+                selection-background-color: #e3f2fd;
+                selection-color: #1976d2;
+                outline: none;
+            }
+            QHeaderView::section {
+                background-color: #f8f9fa;
+                color: #5a6268;
+                padding: 12px;
+                font-weight: bold;
+                text-transform: uppercase;
+                font-size: 11px;
+                border: none;
+                border-bottom: 2px solid #e9ecef;
+            }
+        """)
+        page.setWidget(host)
+
+        host_layout = QVBoxLayout(host)
+        host_layout.setContentsMargins(0, 0, 0, 0)
+        host_layout.setSpacing(0)
+
+        container = QWidget()
+        container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(24, 24, 24, 24)
+        container_layout.setSpacing(18)
+        host_layout.addWidget(container, 0, Qt.AlignmentFlag.AlignTop)
+
+        header_widget = QWidget()
+        header_layout = QHBoxLayout(header_widget)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_v = QVBoxLayout()
+        header = QLabel("Quotation")
+        header.setObjectName("pageHeader")
+        header_v.addWidget(header)
+        subtitle = QLabel("Create price quotations from the live Price Table and print/share with customers.")
+        subtitle.setStyleSheet("color: #7f8c8d; font-size: 13px;")
+        header_v.addWidget(subtitle)
+        header_layout.addLayout(header_v)
+        header_layout.addStretch(1)
+        container_layout.addWidget(header_widget)
+
+        def make_label(text: str) -> QLabel:
+            lbl = QLabel(text)
+            lbl.setProperty("class", "fieldLabel")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            return lbl
+
+        # --- Customer details card ---
+        customer_card = QFrame()
+        customer_card.setObjectName("card")
+        customer_grid = QGridLayout(customer_card)
+        customer_grid.setContentsMargins(25, 20, 25, 20)
+        customer_grid.setHorizontalSpacing(20)
+        customer_grid.setVerticalSpacing(14)
+        customer_grid.setColumnStretch(1, 1)
+        customer_grid.setColumnStretch(3, 1)
+
+        self.quo_customer_name = QLineEdit()
+        self.quo_customer_name.setPlaceholderText("Customer Name")
+
+        def force_upper(le: QLineEdit) -> None:
+            t = le.text()
+            up = to_uppercase_preserving(t)
+            if up != t:
+                pos = le.cursorPosition()
+                le.blockSignals(True)
+                le.setText(up)
+                le.setCursorPosition(pos)
+                le.blockSignals(False)
+
+        self.quo_customer_name.textChanged.connect(lambda: force_upper(self.quo_customer_name))
+
+        self.quo_customer_phone = QLineEdit()
+        self.quo_customer_phone.setPlaceholderText("03xxxxxxxxx")
+
+        def format_quo_phone_input() -> None:
+            text = self.quo_customer_phone.text()
+            digits = "".join(c for c in text if c.isdigit())
+            if len(digits) > 11:
+                digits = digits[:11]
+            if digits != text:
+                pos = self.quo_customer_phone.cursorPosition()
+                self.quo_customer_phone.setText(digits)
+                self.quo_customer_phone.setCursorPosition(min(pos, len(digits)))
+
+        self.quo_customer_phone.textChanged.connect(format_quo_phone_input)
+
+        self.quo_customer_address = QLineEdit()
+        self.quo_customer_address.setPlaceholderText("Customer Address")
+
+        self.quo_valid_until = QDateEdit()
+        self.quo_valid_until.setCalendarPopup(True)
+        self.quo_valid_until.setDate(QDate.currentDate().addDays(15))
+
+        self.quo_notes = QLineEdit()
+        self.quo_notes.setPlaceholderText("Optional notes shown on the printed quotation")
+
+        customer_grid.addWidget(make_label("Customer Name"), 0, 0)
+        customer_grid.addWidget(self.quo_customer_name, 0, 1)
+        customer_grid.addWidget(make_label("Customer Phone"), 0, 2)
+        customer_grid.addWidget(self.quo_customer_phone, 0, 3)
+        customer_grid.addWidget(make_label("Address"), 1, 0)
+        customer_grid.addWidget(self.quo_customer_address, 1, 1)
+        customer_grid.addWidget(make_label("Valid Until"), 1, 2)
+        customer_grid.addWidget(self.quo_valid_until, 1, 3)
+        customer_grid.addWidget(make_label("Notes"), 2, 0)
+        customer_grid.addWidget(self.quo_notes, 2, 1, 1, 3)
+        container_layout.addWidget(customer_card)
+
+        # --- Line items card ---
+        items_card = QFrame()
+        items_card.setObjectName("card")
+        items_card_layout = QVBoxLayout(items_card)
+        items_card_layout.setContentsMargins(25, 20, 25, 20)
+        items_card_layout.setSpacing(10)
+
+        items_header_row = QHBoxLayout()
+        items_title = QLabel("Line Items")
+        items_title.setStyleSheet("font-weight: bold; color: #2c3e50; font-size: 14px;")
+        items_header_row.addWidget(items_title)
+        items_header_row.addStretch(1)
+        add_line_btn = QPushButton("➕ Add Line")
+        add_line_btn.setObjectName("resetButton")
+        add_line_btn.clicked.connect(self._add_quotation_line_row)
+        items_header_row.addWidget(add_line_btn)
+        items_card_layout.addLayout(items_header_row)
+
+        self.quo_items_table = QTableWidget(0, 7)
+        self.quo_items_table.setHorizontalHeaderLabels(
+            ["#", "Model", "Available Colors", "Qty", "Unit Price (Rs.)", "Line Total (Rs.)", ""]
+        )
+        self.quo_items_table.verticalHeader().setVisible(False)
+        self.quo_items_table.horizontalHeader().setStretchLastSection(False)
+        self.quo_items_table.setColumnWidth(0, 30)
+        self.quo_items_table.setColumnWidth(3, 70)
+        self.quo_items_table.setColumnWidth(4, 130)
+        self.quo_items_table.setColumnWidth(5, 130)
+        self.quo_items_table.setColumnWidth(6, 46)
+        self.quo_items_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.quo_items_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.quo_items_table.setMinimumHeight(160)
+        items_card_layout.addWidget(self.quo_items_table)
+
+        # --- Totals row ---
+        totals_row = QHBoxLayout()
+        totals_row.addStretch(1)
+        totals_row.addWidget(make_label("Subtotal"))
+        self.quo_subtotal_display = QLineEdit("Rs. 0")
+        self.quo_subtotal_display.setReadOnly(True)
+        self.quo_subtotal_display.setFixedWidth(140)
+        totals_row.addWidget(self.quo_subtotal_display)
+
+        totals_row.addWidget(make_label("Discount"))
+        self.quo_discount_spin = QDoubleSpinBox()
+        self.quo_discount_spin.setMaximum(100000000)
+        self.quo_discount_spin.setDecimals(0)
+        self.quo_discount_spin.setPrefix("Rs. ")
+        self.quo_discount_spin.setFixedWidth(140)
+        self.quo_discount_spin.valueChanged.connect(self._recalc_quotation_totals)
+        totals_row.addWidget(self.quo_discount_spin)
+
+        totals_row.addWidget(make_label("Total"))
+        self.quo_total_display = QLineEdit("Rs. 0")
+        self.quo_total_display.setReadOnly(True)
+        self.quo_total_display.setFixedWidth(160)
+        self.quo_total_display.setStyleSheet("font-weight: bold; font-size: 15px; color: #2c3e50;")
+        totals_row.addWidget(self.quo_total_display)
+        items_card_layout.addLayout(totals_row)
+
+        container_layout.addWidget(items_card)
+
+        # --- Accessories card (optional, manually priced - no catalog) ---
+        accessories_card = QFrame()
+        accessories_card.setObjectName("card")
+        accessories_card_layout = QVBoxLayout(accessories_card)
+        accessories_card_layout.setContentsMargins(25, 20, 25, 20)
+        accessories_card_layout.setSpacing(10)
+
+        accessories_header_row = QHBoxLayout()
+        accessories_title = QLabel("Accessories / Add-ons (Optional)")
+        accessories_title.setStyleSheet("font-weight: bold; color: #2c3e50; font-size: 14px;")
+        accessories_header_row.addWidget(accessories_title)
+        accessories_header_row.addStretch(1)
+        add_accessory_btn = QPushButton("➕ Add Accessory")
+        add_accessory_btn.setObjectName("resetButton")
+        add_accessory_btn.clicked.connect(self._add_quotation_accessory_row)
+        accessories_header_row.addWidget(add_accessory_btn)
+        accessories_card_layout.addLayout(accessories_header_row)
+
+        self.quo_accessories_table = QTableWidget(0, 6)
+        self.quo_accessories_table.setHorizontalHeaderLabels(
+            ["#", "Item (e.g. Helmet, Safeguard)", "Qty", "Unit Price (Rs.)", "Line Total (Rs.)", ""]
+        )
+        self.quo_accessories_table.verticalHeader().setVisible(False)
+        self.quo_accessories_table.horizontalHeader().setStretchLastSection(False)
+        self.quo_accessories_table.setColumnWidth(0, 30)
+        self.quo_accessories_table.setColumnWidth(2, 70)
+        self.quo_accessories_table.setColumnWidth(3, 130)
+        self.quo_accessories_table.setColumnWidth(4, 130)
+        self.quo_accessories_table.setColumnWidth(5, 46)
+        self.quo_accessories_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.quo_accessories_table.setMinimumHeight(100)
+        accessories_card_layout.addWidget(self.quo_accessories_table)
+
+        accessories_totals_row = QHBoxLayout()
+        accessories_totals_row.addStretch(1)
+        accessories_totals_row.addWidget(make_label("Accessories Subtotal"))
+        self.quo_accessories_subtotal_display = QLineEdit("Rs. 0")
+        self.quo_accessories_subtotal_display.setReadOnly(True)
+        self.quo_accessories_subtotal_display.setFixedWidth(140)
+        accessories_totals_row.addWidget(self.quo_accessories_subtotal_display)
+        accessories_card_layout.addLayout(accessories_totals_row)
+
+        container_layout.addWidget(accessories_card)
+
+        # --- Action buttons ---
+        btn_bar = QHBoxLayout()
+        btn_bar.addStretch(1)
+        reset_btn = QPushButton("↺ Reset Form")
+        reset_btn.setObjectName("resetButton")
+        reset_btn.clicked.connect(self._reset_quotation_form)
+        save_btn = QPushButton("💾 Save Quotation")
+        save_btn.setObjectName("primaryButton")
+        save_btn.clicked.connect(self._save_quotation)
+        btn_bar.addWidget(reset_btn)
+        btn_bar.addWidget(save_btn)
+        container_layout.addLayout(btn_bar)
+
+        # --- Saved quotations list ---
+        list_card = QFrame()
+        list_card.setObjectName("card")
+        list_card_layout = QVBoxLayout(list_card)
+        list_card_layout.setContentsMargins(25, 20, 25, 20)
+        list_card_layout.setSpacing(10)
+
+        list_header_row = QHBoxLayout()
+        list_title = QLabel("Saved Quotations")
+        list_title.setStyleSheet("font-weight: bold; color: #2c3e50; font-size: 14px;")
+        list_header_row.addWidget(list_title)
+        list_header_row.addStretch(1)
+
+        self.quo_search_input = QLineEdit()
+        self.quo_search_input.setPlaceholderText("Search by customer, phone, or quotation #")
+        self.quo_search_input.setFixedWidth(260)
+        self.quo_search_input.textChanged.connect(self._reload_quotations)
+        list_header_row.addWidget(self.quo_search_input)
+
+        self.quo_status_filter = QComboBox()
+        self.quo_status_filter.addItems(["ALL", "PENDING", "CANCELLED"])
+        self.quo_status_filter.currentTextChanged.connect(self._reload_quotations)
+        list_header_row.addWidget(self.quo_status_filter)
+
+        print_btn = QPushButton("🖨️ Print Selected")
+        print_btn.setObjectName("resetButton")
+        print_btn.setToolTip("Prints immediately on A4 to the default printer - no preview dialog.")
+        print_btn.clicked.connect(self._print_selected_quotation)
+        list_header_row.addWidget(print_btn)
+
+        cancel_btn = QPushButton("❌ Cancel Selected")
+        cancel_btn.setObjectName("resetButton")
+        cancel_btn.clicked.connect(self._cancel_selected_quotation)
+        list_header_row.addWidget(cancel_btn)
+
+        refresh_btn = QPushButton("↻ Refresh")
+        refresh_btn.setObjectName("resetButton")
+        refresh_btn.clicked.connect(self._reload_quotations)
+        list_header_row.addWidget(refresh_btn)
+
+        list_card_layout.addLayout(list_header_row)
+
+        self.quo_table_model = QuotationsTableModel()
+        self.quo_table_view = QTableView()
+        self.quo_table_view.setModel(self.quo_table_model)
+        self.quo_table_view.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self.quo_table_view.setSelectionMode(QTableView.SelectionMode.SingleSelection)
+        self.quo_table_view.setAlternatingRowColors(True)
+        self.quo_table_view.setMinimumHeight(260)
+        self.quo_table_view.horizontalHeader().setStretchLastSection(True)
+        self.quo_table_view.doubleClicked.connect(self._on_quotation_double_clicked)
+        list_card_layout.addWidget(self.quo_table_view)
+
+        container_layout.addWidget(list_card)
+
+        self._add_quotation_line_row()
+        self._reload_quotations()
+
+        return page
+
+    def _build_quotation_line_row(self, table: QTableWidget, on_change) -> dict:
+        """Appends one model/color/qty/price row to `table` (used for both
+        the main form's grid and the edit dialog's own grid). `on_change`
+        is called whenever this row's price/qty changes, so the caller
+        controls which totals widgets get recalculated."""
+        row = table.rowCount()
+        table.insertRow(row)
+        # The host stylesheet pads QLineEdit/QComboBox/QDoubleSpinBox by 8px
+        # top+bottom; a table's default row height doesn't account for that
+        # padding on embedded cell widgets, which clips the top of capital
+        # letters in the Available Colors field (digits/combo text happen
+        # to still look fine, masking it there) unless the row is made
+        # tall enough up front.
+        table.setRowHeight(row, 42)
+        table.setItem(row, 0, QTableWidgetItem(str(row + 1)))
+
+        model_combo = QComboBox()
+        model_combo.setEditable(False)
+        model_combo.addItem("")
+        prices = price_service.get_all_active_prices()
+        models: List[str] = []
+        for p in prices:
+            if p.product_model and p.product_model.model_name and p.product_model.model_name not in models:
+                models.append(p.product_model.model_name)
+        for m in models:
+            model_combo.addItem(m)
+
+        # Read-only display of every color linked to the selected model in
+        # the Price Table, comma-separated - not a single-choice picker.
+        # A quotation shows the customer every color the model comes in,
+        # rather than forcing staff to commit to one before the sale.
+        color_display = QLineEdit("")
+        color_display.setReadOnly(True)
+        color_display.setPlaceholderText("Select a model to see its available colors")
+
+        qty_spin = QDoubleSpinBox()
+        qty_spin.setDecimals(0)
+        qty_spin.setMinimum(1)
+        qty_spin.setMaximum(1000)
+        qty_spin.setValue(1)
+
+        unit_price_display = QLineEdit("0")
+        unit_price_display.setReadOnly(True)
+        unit_price_display.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+        line_total_display = QLineEdit("0")
+        line_total_display.setReadOnly(True)
+        line_total_display.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+        remove_btn = QPushButton("✕")
+        remove_btn.setFixedSize(26, 26)
+        remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        remove_btn.setToolTip("Remove this line")
+        remove_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #fdecea;
+                color: #c0392b;
+                border: 1px solid #f1b0b7;
+                border-radius: 13px;
+                font-weight: bold;
+                font-size: 12px;
+                padding: 0px;
+            }
+            QPushButton:hover {
+                background-color: #e74c3c;
+                color: white;
+                border: 1px solid #e74c3c;
+            }
+            QPushButton:pressed {
+                background-color: #c0392b;
+            }
+        """)
+        remove_cell = QWidget()
+        remove_cell_layout = QHBoxLayout(remove_cell)
+        remove_cell_layout.setContentsMargins(0, 0, 0, 0)
+        remove_cell_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        remove_cell_layout.addWidget(remove_btn)
+
+        def load_colors_for_model(model_name: str) -> None:
+            colors: List[str] = []
+            if model_name:
+                active_prices = price_service.get_active_prices_for_model(model_name)
+                for p in active_prices:
+                    opt = getattr(p, "optional_features", None)
+                    if opt and isinstance(opt, dict):
+                        colors_str = opt.get("colors") or opt.get("color") or ""
+                        if colors_str:
+                            for part in str(colors_str).split(","):
+                                value = part.strip()
+                                if value and value not in colors:
+                                    colors.append(value)
+            color_display.setText(", ".join(colors))
+
+        def update_price_and_total() -> None:
+            model_name = model_combo.currentText()
+            # No specific color is chosen (the field just lists every color
+            # the model comes in) - resolve the model's price directly;
+            # get_price_by_model_and_color() already falls back to the
+            # model's first active price when color is blank.
+            price = price_service.get_price_by_model_and_color(model_name, "") if model_name else None
+            unit_price = float(getattr(price, "total_price", 0) or 0) if price else 0.0
+            unit_price_display.setText(f"{unit_price:,.0f}")
+            line_total = unit_price * float(qty_spin.value())
+            line_total_display.setText(f"{line_total:,.0f}")
+            on_change()
+
+        def on_model_changed(model_name: str) -> None:
+            load_colors_for_model(model_name)
+            update_price_and_total()
+
+        model_combo.currentTextChanged.connect(on_model_changed)
+        qty_spin.valueChanged.connect(lambda _val=None: update_price_and_total())
+
+        def on_remove() -> None:
+            for r in range(table.rowCount()):
+                if table.cellWidget(r, 6) is remove_cell:
+                    table.removeRow(r)
+                    break
+            on_change()
+
+        remove_btn.clicked.connect(on_remove)
+
+        table.setCellWidget(row, 1, model_combo)
+        table.setCellWidget(row, 2, color_display)
+        table.setCellWidget(row, 3, qty_spin)
+        table.setCellWidget(row, 4, unit_price_display)
+        table.setCellWidget(row, 5, line_total_display)
+        table.setCellWidget(row, 6, remove_cell)
+
+        return {
+            "model_combo": model_combo,
+            "color_display": color_display,
+            "qty_spin": qty_spin,
+            "unit_price_display": unit_price_display,
+            "line_total_display": line_total_display,
+        }
+
+    def _add_quotation_line_row(self) -> None:
+        self._build_quotation_line_row(self.quo_items_table, self._recalc_quotation_totals)
+        self._recalc_quotation_totals()
+
+    def _recalc_quotation_line_totals_for_table(
+        self, table: QTableWidget, discount_spin: QDoubleSpinBox,
+        subtotal_display: QLineEdit, total_display: QLineEdit,
+        extra_subtotal: float = 0.0,
+    ) -> None:
+        subtotal = 0.0
+        for row in range(table.rowCount()):
+            table.setItem(row, 0, QTableWidgetItem(str(row + 1)))
+            unit_price_display = table.cellWidget(row, 4)
+            line_total_display = table.cellWidget(row, 5)
+            if not isinstance(unit_price_display, QLineEdit) or not isinstance(line_total_display, QLineEdit):
+                continue
+            try:
+                line_total = float((line_total_display.text() or "0").replace(",", ""))
+            except ValueError:
+                line_total = 0.0
+            subtotal += line_total
+
+        subtotal += float(extra_subtotal or 0.0)
+
+        discount = float(discount_spin.value())
+        if discount > subtotal:
+            discount = subtotal
+            discount_spin.blockSignals(True)
+            discount_spin.setValue(discount)
+            discount_spin.blockSignals(False)
+        total = subtotal - discount
+        subtotal_display.setText(f"Rs. {subtotal:,.0f}")
+        total_display.setText(f"Rs. {total:,.0f}")
+
+    def _recalc_accessory_subtotal_for_table(self, table: QTableWidget, subtotal_display: QLineEdit) -> float:
+        subtotal = 0.0
+        for row in range(table.rowCount()):
+            table.setItem(row, 0, QTableWidgetItem(str(row + 1)))
+            qty_spin = table.cellWidget(row, 2)
+            unit_price_spin = table.cellWidget(row, 3)
+            line_total_display = table.cellWidget(row, 4)
+            if not isinstance(qty_spin, QDoubleSpinBox) or not isinstance(unit_price_spin, QDoubleSpinBox) or not isinstance(line_total_display, QLineEdit):
+                continue
+            line_total = float(qty_spin.value()) * float(unit_price_spin.value())
+            line_total_display.setText(f"{line_total:,.0f}")
+            subtotal += line_total
+        subtotal_display.setText(f"Rs. {subtotal:,.0f}")
+        return subtotal
+
+    def _recalc_quotation_totals(self) -> None:
+        if not hasattr(self, "quo_items_table"):
+            return
+        accessories_subtotal = 0.0
+        if hasattr(self, "quo_accessories_table"):
+            accessories_subtotal = self._recalc_accessory_subtotal_for_table(
+                self.quo_accessories_table, self.quo_accessories_subtotal_display
+            )
+        self._recalc_quotation_line_totals_for_table(
+            self.quo_items_table, self.quo_discount_spin, self.quo_subtotal_display, self.quo_total_display,
+            extra_subtotal=accessories_subtotal,
+        )
+
+    def _build_quotation_accessory_row(self, table: QTableWidget, on_change) -> dict:
+        """Appends one manually-priced accessory row (helmet, safeguard,
+        etc.) to `table`. Deliberately no catalog/price lookup - staff type
+        the item name and price by hand, per explicit instruction."""
+        row = table.rowCount()
+        table.insertRow(row)
+        table.setRowHeight(row, 42)
+        table.setItem(row, 0, QTableWidgetItem(str(row + 1)))
+
+        item_name_input = QLineEdit()
+        item_name_input.setPlaceholderText("e.g. Helmet")
+
+        qty_spin = QDoubleSpinBox()
+        qty_spin.setDecimals(0)
+        qty_spin.setMinimum(1)
+        qty_spin.setMaximum(1000)
+        qty_spin.setValue(1)
+
+        unit_price_spin = QDoubleSpinBox()
+        unit_price_spin.setDecimals(0)
+        unit_price_spin.setMinimum(0)
+        unit_price_spin.setMaximum(10000000)
+        unit_price_spin.setPrefix("Rs. ")
+
+        line_total_display = QLineEdit("0")
+        line_total_display.setReadOnly(True)
+        line_total_display.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+        remove_btn = QPushButton("✕")
+        remove_btn.setFixedSize(26, 26)
+        remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        remove_btn.setToolTip("Remove this accessory")
+        remove_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #fdecea;
+                color: #c0392b;
+                border: 1px solid #f1b0b7;
+                border-radius: 13px;
+                font-weight: bold;
+                font-size: 12px;
+                padding: 0px;
+            }
+            QPushButton:hover {
+                background-color: #e74c3c;
+                color: white;
+                border: 1px solid #e74c3c;
+            }
+            QPushButton:pressed {
+                background-color: #c0392b;
+            }
+        """)
+        remove_cell = QWidget()
+        remove_cell_layout = QHBoxLayout(remove_cell)
+        remove_cell_layout.setContentsMargins(0, 0, 0, 0)
+        remove_cell_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        remove_cell_layout.addWidget(remove_btn)
+
+        def update_line_total() -> None:
+            line_total = float(qty_spin.value()) * float(unit_price_spin.value())
+            line_total_display.setText(f"{line_total:,.0f}")
+            on_change()
+
+        qty_spin.valueChanged.connect(lambda _val=None: update_line_total())
+        unit_price_spin.valueChanged.connect(lambda _val=None: update_line_total())
+
+        def on_remove() -> None:
+            for r in range(table.rowCount()):
+                if table.cellWidget(r, 5) is remove_cell:
+                    table.removeRow(r)
+                    break
+            on_change()
+
+        remove_btn.clicked.connect(on_remove)
+
+        table.setCellWidget(row, 1, item_name_input)
+        table.setCellWidget(row, 2, qty_spin)
+        table.setCellWidget(row, 3, unit_price_spin)
+        table.setCellWidget(row, 4, line_total_display)
+        table.setCellWidget(row, 5, remove_cell)
+
+        return {
+            "item_name_input": item_name_input,
+            "qty_spin": qty_spin,
+            "unit_price_spin": unit_price_spin,
+            "line_total_display": line_total_display,
+        }
+
+    def _add_quotation_accessory_row(self) -> None:
+        self._build_quotation_accessory_row(self.quo_accessories_table, self._recalc_quotation_totals)
+        self._recalc_quotation_totals()
+
+    def _collect_quotation_accessory_items(self, table: QTableWidget) -> List[Dict]:
+        items: List[Dict] = []
+        for row in range(table.rowCount()):
+            name_input = table.cellWidget(row, 1)
+            qty_spin = table.cellWidget(row, 2)
+            unit_price_spin = table.cellWidget(row, 3)
+            if not isinstance(name_input, QLineEdit):
+                continue
+            name = (name_input.text() or "").strip()
+            if not name:
+                continue
+            qty = float(qty_spin.value()) if isinstance(qty_spin, QDoubleSpinBox) else 0.0
+            unit_price = float(unit_price_spin.value()) if isinstance(unit_price_spin, QDoubleSpinBox) else 0.0
+            items.append({
+                "item_name": name,
+                "quantity": qty,
+                "unit_price": unit_price,
+            })
+        return items
+
+    def _collect_quotation_line_items(self, table: QTableWidget) -> List[Dict]:
+        items: List[Dict] = []
+        for row in range(table.rowCount()):
+            model_combo = table.cellWidget(row, 1)
+            color_display = table.cellWidget(row, 2)
+            qty_spin = table.cellWidget(row, 3)
+            if not isinstance(model_combo, QComboBox):
+                continue
+            model_name = (model_combo.currentText() or "").strip()
+            if not model_name:
+                continue
+            # color_display lists every color the model comes in
+            # (comma-separated, read-only) - not a single selection.
+            colors = (color_display.text() or "").strip() if isinstance(color_display, QLineEdit) else ""
+            qty = float(qty_spin.value()) if isinstance(qty_spin, QDoubleSpinBox) else 0.0
+            price = price_service.get_price_by_model_and_color(model_name, "")
+            unit_price = float(getattr(price, "total_price", 0) or 0) if price else 0.0
+            items.append({
+                "motorcycle_model": model_name,
+                "color": colors,
+                "quantity": qty,
+                "unit_price": unit_price,
+            })
+        return items
+
+    def _reset_quotation_form(self) -> None:
+        self.quo_customer_name.clear()
+        self.quo_customer_phone.clear()
+        self.quo_customer_address.clear()
+        self.quo_notes.clear()
+        self.quo_valid_until.setDate(QDate.currentDate().addDays(15))
+        self.quo_discount_spin.setValue(0)
+        self.quo_items_table.setRowCount(0)
+        self._add_quotation_line_row()
+        self.quo_accessories_table.setRowCount(0)
+        self._recalc_quotation_totals()
+
+    def _save_quotation(self) -> None:
+        name = (self.quo_customer_name.text() or "").strip()
+        phone = (self.quo_customer_phone.text() or "").strip()
+
+        if not name:
+            self._show_error("Validation Error", "Customer Name is required.")
+            self.quo_customer_name.setFocus()
+            return
+        if phone and not re.match(r"^03\d{9}$", phone):
+            self._show_error("Validation Error", "Please enter a valid phone number (e.g., 03001234567).")
+            self.quo_customer_phone.setFocus()
+            return
+
+        items = self._collect_quotation_line_items(self.quo_items_table)
+        if not items:
+            self._show_error("Validation Error", "Add at least one line item with a Model/Color selected.")
+            return
+
+        valid_until_qdate = self.quo_valid_until.date()
+        valid_until = dt.datetime(valid_until_qdate.year(), valid_until_qdate.month(), valid_until_qdate.day())
+
+        db = SessionLocal()
+        try:
+            created_by = None
+            if auth_session.is_logged_in():
+                created_by = auth_session.current_full_name()
+            quotation = quotation_service.create_quotation(
+                db=db,
+                customer_name=name,
+                items=items,
+                accessory_items=self._collect_quotation_accessory_items(self.quo_accessories_table),
+                customer_phone=phone,
+                customer_address=(self.quo_customer_address.text() or "").strip(),
+                discount_amount=float(self.quo_discount_spin.value()),
+                valid_until=valid_until,
+                notes=(self.quo_notes.text() or "").strip(),
+                created_by=created_by,
+            )
+            self._show_success("Saved", f"Quotation {quotation.quotation_number} saved successfully.")
+            self._reset_quotation_form()
+            self._reload_quotations()
+        except ValueError as e:
+            self._show_error("Validation Error", str(e))
+        except Exception as e:
+            logger.error(f"Quotation save failed: {e}", exc_info=True)
+            self._show_error("Error", f"Failed to save quotation: {e}")
+        finally:
+            db.close()
+
+    def _reload_quotations(self) -> None:
+        if not hasattr(self, "quo_table_model"):
+            return
+        status = self.quo_status_filter.currentText() if hasattr(self, "quo_status_filter") else "ALL"
+        search = self.quo_search_input.text() if hasattr(self, "quo_search_input") else ""
+
+        db = SessionLocal()
+        try:
+            quotations = quotation_service.list_quotations(db, limit=300, status=status, search=search)
+            rows = [
+                QuotationRow(
+                    quotation_number=q.quotation_number,
+                    created_at=q.created_at,
+                    customer_name=q.customer_name,
+                    customer_phone=q.customer_phone or "",
+                    item_count=len(q.items),
+                    subtotal=q.subtotal,
+                    discount_amount=q.discount_amount,
+                    total_amount=q.total_amount,
+                    status=q.status,
+                )
+                for q in quotations
+            ]
+            self.quo_table_model.update_rows(rows)
+        finally:
+            db.close()
+
+    def _get_selected_quotation_number(self) -> str | None:
+        if not hasattr(self, "quo_table_view"):
+            return None
+        selection_model = self.quo_table_view.selectionModel()
+        selection = selection_model.selectedRows()
+        if selection:
+            row = selection[0].row()
+        else:
+            current = self.quo_table_view.currentIndex()
+            if not current.isValid():
+                return None
+            row = current.row()
+        return self.quo_table_model._rows[row].quotation_number
+
+    def _print_selected_quotation(self) -> None:
+        quotation_number = self._get_selected_quotation_number()
+        if not quotation_number:
+            self._show_error("Selection Required", "Please select a quotation to print.")
+            return
+
+        db = SessionLocal()
+        try:
+            quotation = quotation_service.get_by_number(db, quotation_number)
+            if not quotation:
+                self._show_error("Error", "Quotation not found.")
+                return
+            html = print_service_v2.render_quotation({
+                "quotation_number": quotation.quotation_number,
+                "created_at": quotation.created_at,
+                "valid_until": quotation.valid_until,
+                "customer_name": quotation.customer_name,
+                "customer_phone": quotation.customer_phone or "",
+                "customer_address": quotation.customer_address or "",
+                "subtotal": quotation.subtotal,
+                "accessories_subtotal": quotation.accessories_subtotal,
+                "discount_amount": quotation.discount_amount,
+                "total_amount": quotation.total_amount,
+                "notes": quotation.notes or "",
+                "items": [
+                    {
+                        "motorcycle_model": item.motorcycle_model,
+                        "color": item.color or "",
+                        "quantity": item.quantity,
+                        "unit_price": item.unit_price,
+                        "line_total": item.line_total,
+                    }
+                    for item in quotation.items
+                ],
+                "accessory_items": [
+                    {
+                        "item_name": accessory.item_name,
+                        "quantity": accessory.quantity,
+                        "unit_price": accessory.unit_price,
+                        "line_total": accessory.line_total,
+                    }
+                    for accessory in quotation.accessory_items
+                ],
+            })
+            print_service_v2.print_html_direct(html)
+        except Exception as e:
+            logger.error(f"Quotation print failed: {e}", exc_info=True)
+            self._show_error("Print Error", f"Failed to print quotation: {e}")
+        finally:
+            db.close()
+
+    def _cancel_selected_quotation(self) -> None:
+        quotation_number = self._get_selected_quotation_number()
+        if not quotation_number:
+            self._show_error("Selection Required", "Please select a quotation to cancel.")
+            return
+
+        confirm = QMessageBox.question(
+            self, "Confirm Cancellation",
+            f"Cancel quotation {quotation_number}? It will remain visible but marked CANCELLED.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+
+        db = SessionLocal()
+        try:
+            quotation_service.cancel_quotation(db, quotation_number)
+            self._reload_quotations()
+        except Exception as e:
+            self._show_error("Error", f"Failed to cancel quotation: {e}")
+        finally:
+            db.close()
+
+    def _on_quotation_double_clicked(self, index: QModelIndex) -> None:
+        if not index.isValid():
+            return
+        row_data = self.quo_table_model._rows[index.row()]
+
+        db = SessionLocal()
+        try:
+            quotation = quotation_service.get_by_number(db, row_data.quotation_number)
+            if not quotation:
+                self._show_error("Error", "Quotation not found.")
+                return
+
+            if quotation.status != "PENDING":
+                QMessageBox.information(
+                    self, "Read Only",
+                    f"Only PENDING quotations can be edited; this one is {quotation.status}.",
+                )
+                return
+
+            dialog = QDialog(self)
+            dialog.setWindowTitle(f"Edit Quotation - {quotation.quotation_number}")
+            dialog.setMinimumWidth(640)
+
+            # The Line Items + Accessories tables can grow tall enough
+            # (several rows in each) to exceed the available screen height,
+            # which pushed Save/Cancel off-screen and left the dialog
+            # effectively stuck - unreachable but still application-modal,
+            # freezing the rest of the app. Scrollable body + a pinned
+            # footer + a hard max-size clamp keeps the whole dialog, and
+            # its buttons, always reachable regardless of content size.
+            outer_layout = QVBoxLayout(dialog)
+            outer_layout.setContentsMargins(0, 0, 0, 0)
+            outer_layout.setSpacing(0)
+
+            scroll_area = QScrollArea(dialog)
+            scroll_area.setWidgetResizable(True)
+            scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+            scroll_content = QWidget()
+            layout = QVBoxLayout(scroll_content)
+            layout.setContentsMargins(25, 25, 25, 15)
+            layout.setSpacing(12)
+            scroll_area.setWidget(scroll_content)
+            outer_layout.addWidget(scroll_area, 1)
+
+            screen = self.screen() if self.screen() else QApplication.primaryScreen()
+            avail = screen.availableGeometry()
+            max_h = max(400, int(avail.height() * 0.85))
+            max_w = max(500, int(avail.width() * 0.9))
+            dialog.setMaximumHeight(max_h)
+            dialog.setMaximumWidth(max_w)
+            dialog.resize(min(700, max_w), min(760, max_h))
+
+            header = QLabel(f"Edit Quotation: {quotation.quotation_number}")
+            header.setStyleSheet("font-size: 18px; font-weight: bold; color: #2c3e50;")
+            layout.addWidget(header)
+
+            form_grid = QGridLayout()
+            form_grid.setSpacing(10)
+
+            def add_field(row, label_text, widget):
+                lbl = QLabel(label_text)
+                lbl.setStyleSheet("font-weight: bold; color: #7f8c8d; font-size: 11px;")
+                form_grid.addWidget(lbl, row, 0)
+                form_grid.addWidget(widget, row, 1)
+                return widget
+
+            edit_name = QLineEdit(quotation.customer_name)
+            edit_phone = QLineEdit(quotation.customer_phone or "")
+            edit_phone.setPlaceholderText("03xxxxxxxxx")
+            edit_address = QLineEdit(quotation.customer_address or "")
+            edit_notes = QLineEdit(quotation.notes or "")
+
+            add_field(0, "Customer Name:", edit_name)
+            add_field(1, "Phone:", edit_phone)
+            add_field(2, "Address:", edit_address)
+            add_field(3, "Notes:", edit_notes)
+            layout.addLayout(form_grid)
+
+            items_label = QLabel("Line Items")
+            items_label.setStyleSheet("font-weight: bold; color: #2c3e50; margin-top: 8px;")
+            layout.addWidget(items_label)
+
+            dialog_table = QTableWidget(0, 7)
+            dialog_table.setHorizontalHeaderLabels(
+                ["#", "Model", "Available Colors", "Qty", "Unit Price (Rs.)", "Line Total (Rs.)", ""]
+            )
+            dialog_table.verticalHeader().setVisible(False)
+            dialog_table.setColumnWidth(0, 30)
+            dialog_table.setColumnWidth(3, 70)
+            dialog_table.setColumnWidth(4, 130)
+            dialog_table.setColumnWidth(5, 130)
+            dialog_table.setColumnWidth(6, 46)
+            dialog_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+            dialog_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+            dialog_table.setMinimumHeight(160)
+            layout.addWidget(dialog_table)
+
+            def recalc_dialog_totals() -> None:
+                accessories_subtotal = self._recalc_accessory_subtotal_for_table(
+                    dialog_accessories_table, dialog_accessories_subtotal
+                )
+                self._recalc_quotation_line_totals_for_table(
+                    dialog_table, dialog_discount, dialog_subtotal, dialog_total,
+                    extra_subtotal=accessories_subtotal,
+                )
+
+            def add_dialog_line(prefill: Optional[Dict] = None) -> None:
+                widgets = self._build_quotation_line_row(dialog_table, recalc_dialog_totals)
+                if prefill:
+                    # Setting the model re-triggers load_colors_for_model(),
+                    # which repopulates color_display on its own.
+                    widgets["model_combo"].setCurrentText(prefill.get("motorcycle_model", ""))
+                    widgets["qty_spin"].setValue(float(prefill.get("quantity", 1) or 1))
+
+            add_line_btn = QPushButton("➕ Add Line")
+            layout.addWidget(add_line_btn)
+            add_line_btn.clicked.connect(lambda: add_dialog_line())
+
+            accessories_label = QLabel("Accessories / Add-ons (Optional)")
+            accessories_label.setStyleSheet("font-weight: bold; color: #2c3e50; margin-top: 8px;")
+            layout.addWidget(accessories_label)
+
+            dialog_accessories_table = QTableWidget(0, 6)
+            dialog_accessories_table.setHorizontalHeaderLabels(
+                ["#", "Item (e.g. Helmet, Safeguard)", "Qty", "Unit Price (Rs.)", "Line Total (Rs.)", ""]
+            )
+            dialog_accessories_table.verticalHeader().setVisible(False)
+            dialog_accessories_table.setColumnWidth(0, 30)
+            dialog_accessories_table.setColumnWidth(2, 70)
+            dialog_accessories_table.setColumnWidth(3, 130)
+            dialog_accessories_table.setColumnWidth(4, 130)
+            dialog_accessories_table.setColumnWidth(5, 46)
+            dialog_accessories_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+            dialog_accessories_table.setMinimumHeight(100)
+            layout.addWidget(dialog_accessories_table)
+
+            dialog_accessories_subtotal_row = QHBoxLayout()
+            dialog_accessories_subtotal_row.addStretch(1)
+            dialog_accessories_subtotal_row.addWidget(QLabel("Accessories Subtotal:"))
+            dialog_accessories_subtotal = QLineEdit("Rs. 0")
+            dialog_accessories_subtotal.setReadOnly(True)
+            dialog_accessories_subtotal.setFixedWidth(130)
+            dialog_accessories_subtotal_row.addWidget(dialog_accessories_subtotal)
+            layout.addLayout(dialog_accessories_subtotal_row)
+
+            def add_dialog_accessory(prefill: Optional[Dict] = None) -> None:
+                widgets = self._build_quotation_accessory_row(dialog_accessories_table, recalc_dialog_totals)
+                if prefill:
+                    widgets["item_name_input"].setText(prefill.get("item_name", ""))
+                    widgets["qty_spin"].setValue(float(prefill.get("quantity", 1) or 1))
+                    widgets["unit_price_spin"].setValue(float(prefill.get("unit_price", 0) or 0))
+
+            add_accessory_btn = QPushButton("➕ Add Accessory")
+            layout.addWidget(add_accessory_btn)
+            add_accessory_btn.clicked.connect(lambda: add_dialog_accessory())
+
+            totals_row = QHBoxLayout()
+            totals_row.addStretch(1)
+            totals_row.addWidget(QLabel("Subtotal:"))
+            dialog_subtotal = QLineEdit("Rs. 0")
+            dialog_subtotal.setReadOnly(True)
+            dialog_subtotal.setFixedWidth(130)
+            totals_row.addWidget(dialog_subtotal)
+            totals_row.addWidget(QLabel("Discount:"))
+            dialog_discount = QDoubleSpinBox()
+            dialog_discount.setMaximum(100000000)
+            dialog_discount.setDecimals(0)
+            dialog_discount.setPrefix("Rs. ")
+            dialog_discount.setFixedWidth(130)
+            dialog_discount.setValue(float(quotation.discount_amount or 0))
+            totals_row.addWidget(dialog_discount)
+            totals_row.addWidget(QLabel("Total:"))
+            dialog_total = QLineEdit("Rs. 0")
+            dialog_total.setReadOnly(True)
+            dialog_total.setFixedWidth(150)
+            dialog_total.setStyleSheet("font-weight: bold;")
+            totals_row.addWidget(dialog_total)
+            layout.addLayout(totals_row)
+
+            dialog_discount.valueChanged.connect(recalc_dialog_totals)
+
+            for item in quotation.items:
+                add_dialog_line({
+                    "motorcycle_model": item.motorcycle_model,
+                    "color": item.color,
+                    "quantity": item.quantity,
+                })
+            for accessory in quotation.accessory_items:
+                add_dialog_accessory({
+                    "item_name": accessory.item_name,
+                    "quantity": accessory.quantity,
+                    "unit_price": accessory.unit_price,
+                })
+            recalc_dialog_totals()
+
+            footer_widget = QWidget()
+            footer_widget.setStyleSheet("background-color: #f8f9fa; border-top: 1px solid #e0e0e0;")
+            btn_layout = QHBoxLayout(footer_widget)
+            btn_layout.setContentsMargins(25, 12, 25, 12)
+            save_btn = QPushButton("💾 Save Changes")
+            save_btn.setStyleSheet("background-color: #3498db; color: white; padding: 10px; border-radius: 5px;")
+            cancel_btn = QPushButton("Cancel")
+            cancel_btn.setStyleSheet("background-color: #e74c3c; color: white; padding: 10px; border-radius: 5px;")
+            btn_layout.addStretch(1)
+            btn_layout.addWidget(cancel_btn)
+            btn_layout.addWidget(save_btn)
+            outer_layout.addWidget(footer_widget, 0)
+
+            def on_save() -> None:
+                items = self._collect_quotation_line_items(dialog_table)
+                if not items:
+                    self._show_error("Validation Error", "Add at least one line item with a Model/Color selected.")
+                    return
+                accessory_items = self._collect_quotation_accessory_items(dialog_accessories_table)
+                try:
+                    quotation_service.update_quotation(
+                        db=db,
+                        quotation_number=quotation.quotation_number,
+                        customer_name=edit_name.text(),
+                        customer_phone=edit_phone.text(),
+                        customer_address=edit_address.text(),
+                        items=items,
+                        accessory_items=accessory_items,
+                        discount_amount=float(dialog_discount.value()),
+                        notes=edit_notes.text(),
+                    )
+                    self._reload_quotations()
+                    QMessageBox.information(self, "Success", "Quotation updated successfully.")
+                    dialog.accept()
+                except Exception as e:
+                    self._show_error("Update Failed", str(e))
+
+            save_btn.clicked.connect(on_save)
+            cancel_btn.clicked.connect(dialog.reject)
+
+            # Explicitly center on the available screen (not just the
+            # parent window) so the dialog can never open partially
+            # off-screen even if the main window itself is positioned
+            # near a screen edge.
+            frame_geo = dialog.frameGeometry()
+            frame_geo.moveCenter(avail.center())
+            dialog.move(frame_geo.topLeft())
+
+            dialog.exec()
+        except Exception as e:
+            logger.error(f"Error opening quotation edit dialog: {e}", exc_info=True)
+            self._show_error("Error", f"Could not load quotation details: {e}")
+        finally:
+            db.close()
+
     def _mark_selected_booking_delivered(self) -> None:
         booking_number = self._get_selected_advance_booking_number()
         if not booking_number:
@@ -9953,7 +11259,6 @@ class MainWindow(QMainWindow):
                     description=desc_input.text().strip(),
                     month_key=month_key,
                     timestamp=selected_dt,
-                    company_id=settings_service.get_active_company_id(),
                 )
                 db.add(new_txn)
                 db.flush()  # Flush to get the ID
@@ -10200,6 +11505,13 @@ class MainWindow(QMainWindow):
                         btn.setVisible(False)
 
     def _select_page(self, key: str) -> None:
+        # Defense in depth: this is the single choke point every page switch
+        # goes through (nav clicks and any other internal call), so a Staff
+        # account without a module's permission can't reach it even if
+        # something other than its (already-hidden) nav button tried to
+        # select it.
+        if auth_session.is_logged_in() and key in STAFF_MODULE_CODES and not auth_session.has_permission(key):
+            return
         widget = self._pages.get(key)
         if widget is None:
             return
@@ -10224,6 +11536,8 @@ class MainWindow(QMainWindow):
         elif key == "advance_booking":
             self._load_ab_models()
             self._reload_advance_bookings()
+        elif key == "quotation":
+            self._reload_quotations()
         elif key == "credit_ledger":
             if hasattr(self, "credit_ledger_page") and self.credit_ledger_page:
                 try:
@@ -10238,101 +11552,347 @@ class MainWindow(QMainWindow):
             self._update_fbr_submitted_counter()
             self._generate_invoice_number()
 
+    def _sales_date_range(self):
+        """(start_dt, end_dt) for the current Time Period selection."""
+        period = self.sales_period_combo.currentText() if hasattr(self, "sales_period_combo") else "All Time"
+        now = dt.datetime.now()
+        if period == "Today":
+            start_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_dt = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+        elif period == "This Week":
+            start_dt = (now - dt.timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+            end_dt = now
+        elif period in ("This Month", "Current Month"):
+            start_dt = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            end_dt = now
+        elif period == "This Year":
+            start_dt = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+            end_dt = now
+        elif period == "Custom Range" and hasattr(self, "sales_from_date"):
+            from_q = self.sales_from_date.date()
+            to_q = self.sales_to_date.date()
+            start_dt = dt.datetime(from_q.year(), from_q.month(), from_q.day())
+            end_dt = dt.datetime(to_q.year(), to_q.month(), to_q.day(), 23, 59, 59)
+        else:
+            start_dt = None
+            end_dt = None
+        return start_dt, end_dt
+
+    def _sales_filtered_query(self, db: Session):
+        """Builds the Invoice query for the Sales & FBR Report page's
+        current filter selections - shared by the on-screen listing, the
+        summary-card aggregates, and every export/print path, so they can
+        never disagree with each other."""
+        search = self.sales_search_input.text().strip() if hasattr(self, "sales_search_input") else ""
+        status = self.sales_status_combo.currentText() if hasattr(self, "sales_status_combo") else "All Statuses"
+        start_dt, end_dt = self._sales_date_range()
+
+        query = db.query(Invoice).join(Customer, isouter=True)
+        if search:
+            value = f"%{search}%"
+            query = query.filter(
+                (Invoice.invoice_number.ilike(value))
+                | (Customer.name.ilike(value))
+                | (Customer.cnic.ilike(value))
+            )
+        if status == "Synced":
+            query = query.filter(Invoice.is_fiscalized.is_(True))
+        elif status == "Pending":
+            query = query.filter(Invoice.is_fiscalized.is_(False), Invoice.sync_status != "FAILED")
+        elif status == "Failed":
+            query = query.filter(Invoice.sync_status == "FAILED")
+        if start_dt:
+            query = query.filter(Invoice.datetime >= start_dt)
+        if end_dt:
+            query = query.filter(Invoice.datetime <= end_dt)
+        return query
+
+    def _sales_rows_from_invoices(self, invoices) -> List[SalesRow]:
+        data: List[SalesRow] = []
+        for inv in invoices:
+            if inv.is_fiscalized:
+                row_status = "Synced"
+            elif inv.sync_status == "FAILED":
+                row_status = "Failed"
+            else:
+                row_status = "Pending"
+            buyer = inv.customer.name if getattr(inv, "customer", None) else "N/A"
+            chassis_list: List[str] = []
+            engine_list: List[str] = []
+            for item in getattr(inv, "items", []) or []:
+                mc = getattr(item, "motorcycle", None)
+                if mc:
+                    if mc.chassis_number:
+                        chassis_list.append(mc.chassis_number)
+                    if mc.engine_number:
+                        engine_list.append(mc.engine_number)
+            data.append(
+                SalesRow(
+                    date_value=inv.datetime,
+                    invoice_number=inv.invoice_number or "",
+                    fbr_invoice_number=inv.fbr_invoice_number or "",
+                    buyer=buyer,
+                    chassis=", ".join(chassis_list),
+                    engine=", ".join(engine_list),
+                    total=float(inv.total_amount or 0),
+                    status=row_status,
+                )
+            )
+        return data
+
     def _reload_sales(self) -> None:
-        """Handles reloading for the dashboard/legacy sales list."""
+        """Handles reloading for the Sales & FBR Submission Report page."""
         if hasattr(self, "report_page"):
             self.report_page.refresh_data()
             return
         if not hasattr(self, "sales_table_model"):
             return
 
-        search = self.sales_search_input.text().strip() if hasattr(self, "sales_search_input") else ""
-        status = self.sales_status_combo.currentText() if hasattr(self, "sales_status_combo") else "All"
-        if status == "All Statuses":
-            status = "All"
-        period = self.sales_period_combo.currentText() if hasattr(self, "sales_period_combo") else "All Time"
+        from sqlalchemy import func
+
+        page_size = int(self.sales_page_size_combo.currentText()) if hasattr(self, "sales_page_size_combo") else 500
+        page = getattr(self, "_sales_current_page", 0)
 
         db = SessionLocal()
-        data: List[SalesRow] = []
+        try:
+            base_query = self._sales_filtered_query(db)
+            total_count = base_query.count()
+            amount_sum = base_query.with_entities(func.coalesce(func.sum(Invoice.total_amount), 0.0)).scalar() or 0.0
+            synced_count = base_query.filter(Invoice.is_fiscalized.is_(True)).count()
+            failed_count = base_query.filter(Invoice.sync_status == "FAILED").count()
+            pending_count = max(0, total_count - synced_count - failed_count)
+
+            page_query = (
+                base_query.options(
+                    joinedload(Invoice.customer),
+                    joinedload(Invoice.items).joinedload(InvoiceItem.motorcycle),
+                )
+                .order_by(Invoice.datetime.desc())
+                .offset(page * page_size)
+                .limit(page_size)
+            )
+            data = self._sales_rows_from_invoices(page_query.all())
+        finally:
+            db.close()
+
+        self._sales_total_records = total_count
+        self.sales_table_model.update_rows(data)
+
+        if hasattr(self, "report_total_count_label"):
+            self.report_total_count_label.setText(f"Total Records: {total_count}")
+
+        if hasattr(self, "report_company_label"):
+            company = settings_service.get_company() or {}
+            company_name = company.get("name") or ""
+            self.report_company_label.setText(f"Company: {company_name}" if company_name else "")
+
+        if hasattr(self, "sales_page_label"):
+            max_page = max(0, (total_count - 1) // page_size) if total_count else 0
+            page = min(page, max_page)
+            self._sales_current_page = page
+            self.sales_page_label.setText(f"Page {page + 1} of {max_page + 1}")
+            self.sales_prev_btn.setEnabled(page > 0)
+            self.sales_next_btn.setEnabled(page < max_page)
+
+        if hasattr(self, "_report_stat_cards"):
+            avg_amount = (amount_sum / total_count) if total_count else 0.0
+            self._report_stat_cards["total_invoices"].setText(f"{total_count:,}")
+            self._report_stat_cards["total_amount"].setText(f"{amount_sum:,.0f}")
+            self._report_stat_cards["avg_amount"].setText(f"{avg_amount:,.0f}")
+            self._report_stat_cards["synced"].setText(f"{synced_count:,}")
+            self._report_stat_cards["pending"].setText(f"{pending_count:,}")
+            self._report_stat_cards["failed"].setText(f"{failed_count:,}")
+
+    def _on_sales_filters_changed(self) -> None:
+        self._sales_current_page = 0
+        self._reload_sales()
+
+    def _on_sales_period_changed(self) -> None:
+        is_custom = self.sales_period_combo.currentText() == "Custom Range"
+        if hasattr(self, "sales_custom_range_widget"):
+            self.sales_custom_range_widget.setVisible(is_custom)
+        self._on_sales_filters_changed()
+
+    def _on_sales_clear_filters(self) -> None:
+        if hasattr(self, "sales_search_input"):
+            self.sales_search_input.blockSignals(True)
+            self.sales_search_input.clear()
+            self.sales_search_input.blockSignals(False)
+        if hasattr(self, "sales_status_combo"):
+            self.sales_status_combo.blockSignals(True)
+            self.sales_status_combo.setCurrentIndex(0)
+            self.sales_status_combo.blockSignals(False)
+        if hasattr(self, "sales_period_combo"):
+            self.sales_period_combo.blockSignals(True)
+            self.sales_period_combo.setCurrentIndex(0)
+            self.sales_period_combo.blockSignals(False)
+        if hasattr(self, "sales_custom_range_widget"):
+            self.sales_custom_range_widget.setVisible(False)
+        self._sales_current_page = 0
+        self._reload_sales()
+
+    def _on_sales_page_size_changed(self) -> None:
+        self._sales_current_page = 0
+        self._reload_sales()
+
+    def _on_sales_page_prev(self) -> None:
+        if getattr(self, "_sales_current_page", 0) > 0:
+            self._sales_current_page -= 1
+            self._reload_sales()
+
+    def _on_sales_page_next(self) -> None:
+        page_size = int(self.sales_page_size_combo.currentText())
+        total = getattr(self, "_sales_total_records", 0)
+        max_page = max(0, (total - 1) // page_size) if total else 0
+        if getattr(self, "_sales_current_page", 0) < max_page:
+            self._sales_current_page += 1
+            self._reload_sales()
+
+    def _on_sales_columns_menu(self) -> None:
+        from PyQt6.QtWidgets import QMenu
+        from PyQt6.QtGui import QCursor
+        menu = QMenu(self)
+        for col, title in enumerate(self.sales_table_model.headers):
+            action = menu.addAction(title)
+            action.setCheckable(True)
+            action.setChecked(not self.sales_table_view.isColumnHidden(col))
+            action.toggled.connect(lambda checked, c=col: self.sales_table_view.setColumnHidden(c, not checked))
+        menu.exec(QCursor.pos())
+
+    def _sales_export_rows(self) -> List[SalesRow]:
+        """The FULL filtered result set (no pagination) - used by export
+        and print, which must cover everything matching the current
+        filters, not just the page currently on screen."""
+        db = SessionLocal()
         try:
             query = (
-                db.query(Invoice)
-                .join(Customer, isouter=True)
+                self._sales_filtered_query(db)
                 .options(
                     joinedload(Invoice.customer),
                     joinedload(Invoice.items).joinedload(InvoiceItem.motorcycle),
                 )
                 .order_by(Invoice.datetime.desc())
             )
-
-            if search:
-                value = f"%{search}%"
-                query = query.filter(
-                    (Invoice.invoice_number.ilike(value))
-                    | (Customer.name.ilike(value))
-                    | (Customer.cnic.ilike(value))
-                )
-
-            if status == "Synced":
-                query = query.filter(Invoice.is_fiscalized.is_(True))
-            elif status == "Pending":
-                query = query.filter(Invoice.is_fiscalized.is_(False), Invoice.sync_status != "FAILED")
-            elif status == "Failed":
-                query = query.filter(Invoice.sync_status == "FAILED")
-
-            now = dt.datetime.now()
-            if period == "Today":
-                start_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
-                end_dt = now.replace(hour=23, minute=59, second=59, microsecond=999999)
-                query = query.filter(Invoice.datetime >= start_dt, Invoice.datetime <= end_dt)
-            elif period in ("This Month", "Current Month"):
-                start_dt = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-                query = query.filter(Invoice.datetime >= start_dt)
-
-            rows = query.limit(500).all()
-            
-            # Update the total count label
-            if hasattr(self, "report_total_count_label"):
-                self.report_total_count_label.setText(f"Total Records: {len(rows)}")
-
-            for inv in rows:
-                if inv.is_fiscalized:
-                    status = "Synced"
-                elif inv.sync_status == "FAILED":
-                    status = "Failed"
-                else:
-                    status = "Pending"
-
-                buyer = inv.customer.name if getattr(inv, "customer", None) else "N/A"
-
-                chassis_list: List[str] = []
-                engine_list: List[str] = []
-                for item in getattr(inv, "items", []) or []:
-                    mc = getattr(item, "motorcycle", None)
-                    if mc:
-                        if mc.chassis_number:
-                            chassis_list.append(mc.chassis_number)
-                        if mc.engine_number:
-                            engine_list.append(mc.engine_number)
-
-                chassis_str = ", ".join(chassis_list)
-                engine_str = ", ".join(engine_list)
-
-                data.append(
-                    SalesRow(
-                        date_value=inv.datetime,
-                        invoice_number=inv.invoice_number or "",
-                        buyer=buyer,
-                        chassis=chassis_str,
-                        engine=engine_str,
-                        total=float(inv.total_amount or 0),
-                        status=status,
-                    )
-                )
+            return self._sales_rows_from_invoices(query.all())
         finally:
             db.close()
 
-        self.sales_table_model.update_rows(data)
+    def _on_sales_export(self, fmt: str) -> None:
+        rows = self._sales_export_rows()
+        if not rows:
+            self._show_error("Export", "No records match the current filters.")
+            return
+
+        from PyQt6.QtWidgets import QFileDialog
+        filter_map = {"csv": "CSV Files (*.csv)", "xlsx": "Excel Files (*.xlsx)", "pdf": "PDF Files (*.pdf)"}
+        path, _ = QFileDialog.getSaveFileName(self, "Export Report", f"sales_report.{fmt}", filter_map.get(fmt, "All Files (*)"))
+        if not path:
+            return
+
+        try:
+            if fmt == "csv":
+                self._export_sales_csv(rows, path)
+            elif fmt == "xlsx":
+                self._export_sales_xlsx(rows, path)
+            else:
+                self._export_sales_pdf(rows, path)
+            self._show_success("Export Complete", f"Report exported to:\n{path}")
+        except Exception as e:
+            self._show_error("Export Failed", str(e))
+
+    def _export_sales_csv(self, rows: List[SalesRow], path: str) -> None:
+        import csv
+        with open(path, "w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Date", "Invoice #", "FBR Invoice #", "Buyer", "Chassis", "Engine", "Total", "FBR Status"])
+            for r in rows:
+                writer.writerow([
+                    r.date_value.strftime("%Y-%m-%d %H:%M") if r.date_value else "",
+                    r.invoice_number, r.fbr_invoice_number, r.buyer, r.chassis, r.engine, f"{r.total:.2f}", r.status,
+                ])
+
+    def _export_sales_xlsx(self, rows: List[SalesRow], path: str) -> None:
+        from openpyxl import Workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Sales Report"
+        ws.append(["Date", "Invoice #", "FBR Invoice #", "Buyer", "Chassis", "Engine", "Total", "FBR Status"])
+        for r in rows:
+            ws.append([
+                r.date_value.strftime("%Y-%m-%d %H:%M") if r.date_value else "",
+                r.invoice_number, r.fbr_invoice_number, r.buyer, r.chassis, r.engine, r.total, r.status,
+            ])
+        wb.save(path)
+
+    def _export_sales_pdf(self, rows: List[SalesRow], path: str) -> None:
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib import colors
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet
+
+        doc = SimpleDocTemplate(path, pagesize=landscape(A4))
+        styles = getSampleStyleSheet()
+        company_name = (settings_service.get_company() or {}).get("name") or ""
+        elements = [
+            Paragraph(f"Sales &amp; FBR Submission Report", styles["Title"]),
+            Paragraph(f"Company: {company_name}", styles["Normal"]),
+            Spacer(1, 12),
+        ]
+
+        data = [["Date", "Invoice #", "FBR Invoice #", "Buyer", "Chassis", "Engine", "Total", "FBR Status"]]
+        for r in rows:
+            data.append([
+                r.date_value.strftime("%Y-%m-%d %H:%M") if r.date_value else "",
+                r.invoice_number, r.fbr_invoice_number, r.buyer, r.chassis, r.engine, f"{r.total:,.2f}", r.status,
+            ])
+        table = Table(data, repeatRows=1)
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#3498db")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#dddddd")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8f9fa")]),
+        ]))
+        elements.append(table)
+        doc.build(elements)
+
+    def _on_sales_print(self) -> None:
+        rows = self._sales_export_rows()
+        if not rows:
+            self._show_error("Print", "No records match the current filters.")
+            return
+
+        company_name = (settings_service.get_company() or {}).get("name") or ""
+        rows_html = "".join(
+            f"<tr><td>{r.date_value.strftime('%Y-%m-%d %H:%M') if r.date_value else ''}</td>"
+            f"<td>{r.invoice_number}</td><td>{r.fbr_invoice_number}</td><td>{r.buyer}</td><td>{r.chassis}</td>"
+            f"<td>{r.engine}</td><td style='text-align:right;'>{r.total:,.2f}</td><td>{r.status}</td></tr>"
+            for r in rows
+        )
+        html = (
+            "<html><head><style>"
+            "body { font-family: Arial, sans-serif; font-size: 11px; }"
+            "h2 { margin-bottom: 2px; }"
+            "table { width: 100%; border-collapse: collapse; margin-top: 10px; }"
+            "th, td { border: 1px solid #ccc; padding: 5px 8px; text-align: left; }"
+            "th { background: #3498db; color: white; }"
+            "</style></head><body>"
+            "<h2>Sales &amp; FBR Submission Report</h2>"
+            f"<div>Company: {company_name}</div>"
+            "<table><thead><tr><th>Date</th><th>Invoice #</th><th>FBR Invoice #</th><th>Buyer</th><th>Chassis</th>"
+            "<th>Engine</th><th>Total</th><th>FBR Status</th></tr></thead>"
+            f"<tbody>{rows_html}</tbody></table></body></html>"
+        )
+
+        from PyQt6.QtGui import QTextDocument
+        from PyQt6.QtPrintSupport import QPrinter, QPrintDialog
+        document = QTextDocument()
+        document.setHtml(html)
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        dialog = QPrintDialog(printer, self)
+        if dialog.exec() == QPrintDialog.DialogCode.Accepted:
+            document.print(printer)
+
 
     def _reload_invoice_list(self) -> None:
         search = self.invoice_search_input.text().strip() if hasattr(self, "invoice_search_input") else ""
@@ -10522,6 +12082,204 @@ class MainWindow(QMainWindow):
             return False
         finally:
             db.close()
+
+    def _on_add_inventory_clicked(self) -> None:
+        self._open_add_inventory_dialog()
+
+    def _open_add_inventory_dialog(self) -> None:
+        db = SessionLocal()
+        try:
+            model_names = [m.model_name for m in db.query(ProductModel).order_by(ProductModel.model_name).all()]
+        finally:
+            db.close()
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Add Motorcycle")
+        dialog.setMinimumSize(460, 560)
+        dialog.setStyleSheet("""
+            QDialog { background-color: #f8f9fa; }
+            QLabel { font-weight: bold; color: #2c3e50; }
+            QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox, QDateEdit { padding: 8px; border: 1px solid #ced4da; border-radius: 4px; }
+        """)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(30, 30, 30, 30)
+        layout.setSpacing(15)
+
+        form_grid = QGridLayout()
+        form_grid.setSpacing(10)
+
+        def force_upper(le: QLineEdit) -> None:
+            t = le.text()
+            up = to_uppercase_preserving(t)
+            if up != t:
+                pos = le.cursorPosition()
+                le.blockSignals(True)
+                le.setText(up)
+                le.setCursorPosition(pos)
+                le.blockSignals(False)
+
+        row = 0
+        form_grid.addWidget(QLabel("Model: *"), row, 0)
+        model_combo = QComboBox()
+        model_combo.setEditable(True)
+        model_combo.addItems(model_names)
+        model_combo.setCurrentText("")
+        model_combo.setPlaceholderText("Select or type a new model")
+        form_grid.addWidget(model_combo, row, 1)
+        row += 1
+
+        form_grid.addWidget(QLabel("Chassis Number: *"), row, 0)
+        chassis_input = QLineEdit()
+        chassis_input.textChanged.connect(lambda: force_upper(chassis_input))
+        form_grid.addWidget(chassis_input, row, 1)
+        row += 1
+
+        form_grid.addWidget(QLabel("Engine Number: *"), row, 0)
+        engine_input = QLineEdit()
+        engine_input.textChanged.connect(lambda: force_upper(engine_input))
+        form_grid.addWidget(engine_input, row, 1)
+        row += 1
+
+        form_grid.addWidget(QLabel("VIN (Optional):"), row, 0)
+        vin_input = QLineEdit()
+        vin_input.textChanged.connect(lambda: force_upper(vin_input))
+        form_grid.addWidget(vin_input, row, 1)
+        row += 1
+
+        form_grid.addWidget(QLabel("Color:"), row, 0)
+        color_input = QLineEdit()
+        color_input.textChanged.connect(lambda: force_upper(color_input))
+        form_grid.addWidget(color_input, row, 1)
+        row += 1
+
+        form_grid.addWidget(QLabel("Year: *"), row, 0)
+        year_spin = QSpinBox()
+        year_spin.setRange(1990, 2100)
+        year_spin.setValue(QDate.currentDate().year())
+        form_grid.addWidget(year_spin, row, 1)
+        row += 1
+
+        form_grid.addWidget(QLabel("Cost Price: *"), row, 0)
+        cost_spin = QDoubleSpinBox()
+        cost_spin.setMaximum(100000000)
+        cost_spin.setDecimals(0)
+        cost_spin.setPrefix("Rs. ")
+        form_grid.addWidget(cost_spin, row, 1)
+        row += 1
+
+        form_grid.addWidget(QLabel("Sale Price: *"), row, 0)
+        sale_spin = QDoubleSpinBox()
+        sale_spin.setMaximum(100000000)
+        sale_spin.setDecimals(0)
+        sale_spin.setPrefix("Rs. ")
+        form_grid.addWidget(sale_spin, row, 1)
+        row += 1
+
+        form_grid.addWidget(QLabel("Status:"), row, 0)
+        status_combo = QComboBox()
+        status_combo.addItems(["IN_STOCK", "SOLD"])
+        form_grid.addWidget(status_combo, row, 1)
+        row += 1
+
+        form_grid.addWidget(QLabel("Purchase Date:"), row, 0)
+        purchase_date_edit = QDateEdit()
+        purchase_date_edit.setCalendarPopup(True)
+        purchase_date_edit.setDate(QDate.currentDate())
+        form_grid.addWidget(purchase_date_edit, row, 1)
+        row += 1
+
+        layout.addLayout(form_grid)
+
+        error_label = QLabel("")
+        error_label.setStyleSheet("color: #e74c3c; font-weight: normal;")
+        error_label.setWordWrap(True)
+        layout.addWidget(error_label)
+        layout.addStretch(1)
+
+        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        btn_box.button(QDialogButtonBox.StandardButton.Save).setText("Add to Inventory")
+        layout.addWidget(btn_box)
+
+        def on_save() -> None:
+            error_label.setText("")
+            model_name = (model_combo.currentText() or "").strip().upper()
+            chassis = (chassis_input.text() or "").strip().upper()
+            engine = (engine_input.text() or "").strip().upper()
+            vin = (vin_input.text() or "").strip().upper()
+            color = (color_input.text() or "").strip().upper()
+            year = year_spin.value()
+            cost_price = float(cost_spin.value())
+            sale_price = float(sale_spin.value())
+            status = status_combo.currentText()
+            purchase_qdate = purchase_date_edit.date()
+            purchase_date = dt.datetime(purchase_qdate.year(), purchase_qdate.month(), purchase_qdate.day())
+
+            if not model_name:
+                error_label.setText("Model is required.")
+                return
+            if not chassis:
+                error_label.setText("Chassis Number is required.")
+                return
+            if not engine:
+                error_label.setText("Engine Number is required.")
+                return
+            if cost_price <= 0:
+                error_label.setText("Cost Price must be greater than zero.")
+                return
+            if sale_price <= 0:
+                error_label.setText("Sale Price must be greater than zero.")
+                return
+
+            db2 = SessionLocal()
+            try:
+                dup_filters = [Motorcycle.chassis_number == chassis, Motorcycle.engine_number == engine]
+                if vin:
+                    dup_filters.append(Motorcycle.vin == vin)
+                existing = db2.query(Motorcycle).filter(or_(*dup_filters)).first()
+                if existing:
+                    if existing.chassis_number == chassis:
+                        error_label.setText(f"Chassis {chassis} already exists in inventory.")
+                    elif existing.engine_number == engine:
+                        error_label.setText(f"Engine {engine} already exists in inventory.")
+                    else:
+                        error_label.setText(f"VIN {vin} already exists in inventory.")
+                    return
+
+                product_model = db2.query(ProductModel).filter(ProductModel.model_name == model_name).first()
+                if not product_model:
+                    product_model = ProductModel(model_name=model_name, make="Honda")
+                    db2.add(product_model)
+                    db2.flush()
+
+                bike = Motorcycle(
+                    product_model_id=product_model.id,
+                    vin=vin or None,
+                    chassis_number=chassis,
+                    engine_number=engine,
+                    year=year,
+                    color=color or None,
+                    cost_price=cost_price,
+                    sale_price=sale_price,
+                    status=status,
+                    purchase_date=purchase_date,
+                )
+                db2.add(bike)
+                db2.commit()
+                dialog.accept()
+                self._reload_inventory()
+                QMessageBox.information(self, "Added", f"Motorcycle {chassis} added to inventory successfully.")
+            except Exception as e:
+                db2.rollback()
+                logger.error(f"Error adding motorcycle: {e}", exc_info=True)
+                error_label.setText(f"Failed to add motorcycle: {e}")
+            finally:
+                db2.close()
+
+        btn_box.accepted.connect(on_save)
+        btn_box.rejected.connect(dialog.reject)
+
+        dialog.exec()
 
     def _on_edit_inventory_clicked(self) -> None:
         selection = self.inventory_table_view.selectionModel().selectedRows()
@@ -11214,7 +12972,9 @@ class MainWindow(QMainWindow):
                         father_name=father_value if not is_synced else cust.father_name,
                         phone=phone_value,
                         address=address_value,
-                        ntn=ntn_value
+                        ntn=ntn_value,
+                        business_name=cust.business_name,
+                        customer_type=cust.type
                     )
                     if updated:
                         QMessageBox.information(self, "Updated", "Customer record has been updated.")
@@ -11530,7 +13290,8 @@ class MainWindow(QMainWindow):
                     father_name=father,
                     business_name=biz_name,
                     phone=phone,
-                    address=address
+                    address=address,
+                    ntn=ntn
                 )
                 QMessageBox.information(self, "Success", "New dealer has been added successfully.")
             except ValueError as ve:
@@ -11860,6 +13621,7 @@ class SalesRow:
         self,
         date_value,
         invoice_number: str,
+        fbr_invoice_number: str,
         buyer: str,
         chassis: str,
         engine: str,
@@ -11868,6 +13630,7 @@ class SalesRow:
     ) -> None:
         self.date_value = date_value
         self.invoice_number = invoice_number
+        self.fbr_invoice_number = fbr_invoice_number
         self.buyer = buyer
         self.chassis = chassis
         self.engine = engine
@@ -12018,7 +13781,7 @@ class InvoiceRow:
 
 
 class SalesTableModel(QAbstractTableModel):
-    headers = ["Date", "Invoice #", "Buyer", "Chassis", "Engine", "Total", "FBR Status"]
+    headers = ["Date", "Invoice #", "FBR Invoice #", "Buyer", "Chassis", "Engine", "Total", "FBR Status"]
 
     def __init__(self) -> None:
         super().__init__()
@@ -12042,31 +13805,46 @@ class SalesTableModel(QAbstractTableModel):
             if col == 1:
                 return row.invoice_number
             if col == 2:
-                return row.buyer
+                return row.fbr_invoice_number or "Not Synced"
             if col == 3:
-                return row.chassis
+                return row.buyer
             if col == 4:
-                return row.engine
+                return row.chassis
             if col == 5:
+                return row.engine
+            if col == 6:
                 return f"{row.total:,.2f}"
-            if col == 6:
+            if col == 7:
                 return row.status
-        
-        if role == Qt.ItemDataRole.ForegroundRole:
+
+        # EditRole carries the raw, unformatted value for columns whose
+        # display text wouldn't sort correctly as text (e.g. "9.00" vs
+        # "10.00" lexicographically) - the proxy model is configured
+        # (setSortRole) to sort by this instead of the formatted string.
+        # Falls through to the same value as DisplayRole for every other
+        # column, so plain text columns still sort correctly too.
+        if role == Qt.ItemDataRole.EditRole:
+            if col == 0:
+                return row.date_value
             if col == 6:
+                return row.total
+            return self.data(index, Qt.ItemDataRole.DisplayRole)
+
+        if role == Qt.ItemDataRole.ForegroundRole:
+            if col == 7:
                 if row.status == "Synced":
                     return Qt.GlobalColor.darkGreen
                 if row.status == "Failed":
                     return Qt.GlobalColor.red
                 if row.status == "Pending":
                     return Qt.GlobalColor.darkYellow
-                    
+
         if role == Qt.ItemDataRole.TextAlignmentRole:
-            if col == 5: # Total column
+            if col == 6: # Total column
                 return Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            if col in (0, 1, 6): # Center alignment for some columns
+            if col in (0, 1, 2, 7): # Center alignment for some columns
                 return Qt.AlignmentFlag.AlignCenter
-                
+
         return None
 
     def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.ItemDataRole.DisplayRole):
@@ -12304,6 +14082,95 @@ class AdvanceBookingsTableModel(QAbstractTableModel):
         return super().headerData(section, orientation, role)
 
     def update_rows(self, rows: List[AdvanceBookingRow]) -> None:
+        self.beginResetModel()
+        self._rows = rows
+        self.endResetModel()
+
+
+class QuotationRow:
+    def __init__(
+        self,
+        quotation_number: str,
+        created_at: dt.datetime,
+        customer_name: str,
+        customer_phone: str,
+        item_count: int,
+        subtotal: float,
+        discount_amount: float,
+        total_amount: float,
+        status: str,
+    ) -> None:
+        self.quotation_number = quotation_number
+        self.created_at = created_at
+        self.customer_name = customer_name
+        self.customer_phone = customer_phone
+        self.item_count = item_count
+        self.subtotal = subtotal
+        self.discount_amount = discount_amount
+        self.total_amount = total_amount
+        self.status = status
+
+
+class QuotationsTableModel(QAbstractTableModel):
+    headers = ["Quotation #", "Date", "Customer", "Phone", "Items", "Subtotal", "Discount", "Total", "Status"]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._rows: List[QuotationRow] = []
+
+    def rowCount(self, parent: QModelIndex | None = None) -> int:
+        return len(self._rows)
+
+    def columnCount(self, parent: QModelIndex | None = None) -> int:
+        return len(self.headers)
+
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
+        if not index.isValid():
+            return None
+        row = self._rows[index.row()]
+        col = index.column()
+
+        if role == Qt.ItemDataRole.DisplayRole:
+            if col == 0:
+                return row.quotation_number
+            if col == 1:
+                return row.created_at.strftime("%Y-%m-%d %H:%M") if row.created_at else ""
+            if col == 2:
+                return row.customer_name
+            if col == 3:
+                return row.customer_phone
+            if col == 4:
+                return str(row.item_count)
+            if col == 5:
+                return f"{row.subtotal:,.0f}"
+            if col == 6:
+                return f"{row.discount_amount:,.0f}"
+            if col == 7:
+                return f"{row.total_amount:,.0f}"
+            if col == 8:
+                return row.status
+
+        if role == Qt.ItemDataRole.TextAlignmentRole:
+            if col in (4, 5, 6, 7):
+                return Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            return Qt.AlignmentFlag.AlignCenter
+
+        if role == Qt.ItemDataRole.ForegroundRole and col == 8:
+            if (row.status or "").upper() == "PENDING":
+                return Qt.GlobalColor.darkGreen
+            return Qt.GlobalColor.darkYellow
+
+        return None
+
+    def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.ItemDataRole.DisplayRole):
+        if role != Qt.ItemDataRole.DisplayRole:
+            return None
+        if orientation == Qt.Orientation.Horizontal:
+            if 0 <= section < len(self.headers):
+                return self.headers[section]
+        return super().headerData(section, orientation, role)
+
+    def update_rows(self, rows: List[QuotationRow]) -> None:
         self.beginResetModel()
         self._rows = rows
         self.endResetModel()

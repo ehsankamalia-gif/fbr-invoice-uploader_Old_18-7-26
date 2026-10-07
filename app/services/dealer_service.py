@@ -2,7 +2,6 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from app.db.session import SessionLocal
 from app.db.models import Customer, CustomerType
-from app.services.settings_service import settings_service
 from typing import List, Optional
 import logging
 
@@ -52,7 +51,7 @@ class DealerService:
         finally:
             db.close()
 
-    def create_dealer(self, cnic: str, name: str, father_name: str, business_name: str, phone: str, address: str) -> Customer:
+    def create_dealer(self, cnic: str, name: str, father_name: str, business_name: str, phone: str, address: str, ntn: str = None) -> Customer:
         """Create a new dealer (Customer with type DEALER)."""
         # Validation
         error_msg = self.check_duplicate_dealer(business_name, cnic)
@@ -70,8 +69,8 @@ class DealerService:
                 normalized_business_name=norm_name,
                 phone=phone,
                 address=(address or "").upper(),
+                ntn=(ntn or None),
                 type=CustomerType.DEALER,
-                company_id=settings_service.get_active_company_id(),
             )
             db.add(dealer)
             db.commit()

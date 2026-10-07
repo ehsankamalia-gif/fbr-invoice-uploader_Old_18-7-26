@@ -21,34 +21,27 @@ class FBRClient:
         retry=retry_if_exception_type(requests.RequestException)
     )
     def post_invoice(self, invoice_data: dict):
-        """
-        Sends invoice data to FBR.
-        """
-        # Get latest settings dynamically
+        """Sends invoice data to FBR, using the configured FBR credentials."""
         settings = settings_service.get_active_settings()
-        
+
         # MAPPING FIX: Use correct keys as returned by settings_service.get_active_settings()
         base_url = settings.get("base_url", "")
         auth_token = settings.get("token", "")
-        
+
         if not base_url:
              logger.error("FBR API Base URL is not configured in settings!")
              raise Exception("FBR API URL is missing. Please check FBR Configuration settings.")
 
-        # Safeguard: each company has its own POS ID/Auth Token (see
-        # app/db/company_scope.py's multi-company support). An empty or
-        # newly-added company with no FBR credentials configured yet must
-        # never submit to FBR's live gateway with blank values - that's a
-        # guaranteed-wrong, unidentifiable submission. Fail fast, locally,
-        # before any network call, instead of sending garbage to FBR.
+        # Safeguard: no FBR credentials configured yet must never submit to
+        # FBR's live gateway with blank values - that's a guaranteed-wrong,
+        # unidentifiable submission. Fail fast, locally, before any network
+        # call, instead of sending garbage to FBR.
         pos_id_configured = settings.get("pos_id", "")
         if not pos_id_configured or not auth_token:
             missing = [name for name, val in (("POS ID", pos_id_configured), ("Auth Token", auth_token)) if not val]
-            active_company = settings_service.get_active_company()
-            company_label = active_company["name"] if active_company else "the active company"
-            logger.error(f"FBR configuration incomplete for {company_label} - missing: {', '.join(missing)}")
+            logger.error(f"FBR configuration incomplete - missing: {', '.join(missing)}")
             raise Exception(
-                f"FBR is not configured for {company_label} (missing {' and '.join(missing)}). "
+                f"FBR is not configured (missing {' and '.join(missing)}). "
                 "Configure FBR credentials in Settings before submitting invoices."
             )
 

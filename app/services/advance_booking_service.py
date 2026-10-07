@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 
 from app.core.logger import logger
 from app.db.models import AdvanceBooking, AdvanceBookingAudit, AdvanceBookingModelCounter, pk_now
-from app.services.settings_service import settings_service
 
 
 class AdvanceBookingService:
@@ -116,7 +115,6 @@ class AdvanceBookingService:
             advance_remaining=float(advance_paid),
             advance_applied=0.0,
             delivery_paid=0.0,
-            company_id=settings_service.get_active_company_id(),
         )
 
         db.add(booking)
@@ -156,7 +154,7 @@ class AdvanceBookingService:
         try:
             from app.services.sms_service import sms_service, normalize_pk_mobile
             from app.db.models import SMSConfiguration, SMSQueue, SMSStatus
-            
+
             config = db.query(SMSConfiguration).filter(SMSConfiguration.is_enabled == True).first()
             if not config or not booking.customer_phone:
                 return
@@ -195,7 +193,7 @@ class AdvanceBookingService:
                 message=msg,
                 status=SMSStatus.PENDING,
                 channel="SMS",
-                created_at=dt.datetime.utcnow()
+                created_at=dt.datetime.utcnow(),
             )
             db.add(sms_entry)
             db.commit()

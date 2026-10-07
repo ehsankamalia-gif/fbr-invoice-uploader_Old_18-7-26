@@ -2,7 +2,6 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, desc
 from app.db.models import Price, ProductModel
 from app.db.session import SessionLocal
-from app.services.settings_service import settings_service
 from datetime import datetime
 import json
 import logging
@@ -19,6 +18,11 @@ class PriceService:
 
     def get_db(self):
         return SessionLocal()
+
+    def invalidate_cache(self) -> None:
+        """Forces the next price lookup to re-read from the database."""
+        self._cache = {}
+        self._cache_timestamp = None
 
     def get_price_by_id(self, price_id: int, db: Session = None) -> Optional[Price]:
         """Get a price record by its unique ID."""
@@ -172,7 +176,7 @@ class PriceService:
             # 1. Find or Create ProductModel
             product_model = db.query(ProductModel).filter(ProductModel.model_name == model).first()
             if not product_model:
-                product_model = ProductModel(model_name=model, make="Honda", company_id=settings_service.get_active_company_id())
+                product_model = ProductModel(model_name=model, make="Honda")
                 db.add(product_model)
                 db.flush()
 
@@ -220,7 +224,6 @@ class PriceService:
                 optional_features=optional_features or {},
                 effective_date=now,
                 currency='Rs',
-                company_id=settings_service.get_active_company_id(),
             )
             
             db.add(new_price)
@@ -260,7 +263,7 @@ class PriceService:
             if price.product_model.model_name != model:
                 product_model = db.query(ProductModel).filter(ProductModel.model_name == model).first()
                 if not product_model:
-                    product_model = ProductModel(model_name=model, make="Honda", company_id=settings_service.get_active_company_id())
+                    product_model = ProductModel(model_name=model, make="Honda")
                     db.add(product_model)
                     db.flush()
                 price.product_model_id = product_model.id
@@ -394,10 +397,10 @@ class PriceService:
 
     def import_prices(self, parsed_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Commits the valid (error-free) rows from parse_import_rows via
-        add_price (so find-or-create ProductModel, active-company stamping,
-        and expiring the prior price all happen exactly as they do for a
-        manually-entered price). Returns a summary; never raises - each
-        row's own failure is collected instead of aborting the whole batch."""
+        add_price (so find-or-create ProductModel and expiring the prior
+        price all happen exactly as they do for a manually-entered price).
+        Returns a summary; never raises - each row's own failure is
+        collected instead of aborting the whole batch."""
         imported, failed = 0, []
         db = self.get_db()
         try:

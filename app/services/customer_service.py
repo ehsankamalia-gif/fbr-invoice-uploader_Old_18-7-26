@@ -1,7 +1,6 @@
 from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
 from app.db.models import Customer, CustomerType
-from app.services.settings_service import settings_service
 from typing import List, Optional
 
 class CustomerService:
@@ -36,7 +35,6 @@ class CustomerService:
                 address=(address or "").upper(),
                 ntn=ntn,
                 type=customer_type,
-                company_id=settings_service.get_active_company_id(),
             )
             db.add(customer)
             db.commit()
