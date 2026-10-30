@@ -149,7 +149,8 @@ class InvoiceItem(Base):
     further_tax = Column(Float, default=0.0)
     total_amount = Column(Float, nullable=False)
     discount = Column(Float, default=0.0)
-    
+    invoice_type = Column(String(20), nullable=True)
+
     invoice = relationship("Invoice", back_populates="items")
 
 
@@ -467,7 +468,7 @@ class FBRConfiguration(Base):
     secret_key = Column(String(255), nullable=True) # New field for HMAC signature
     
     tax_rate = Column(Float, default=18.0)
-    invoice_type = Column(String(20), default="Standard")
+    invoice_type = Column(String(20), default="3rd Schedule New")
     discount = Column(Float, default=0.0)
     pos_fee = Column(Float, default=1.0)
     

@@ -9,15 +9,16 @@ class ToastNotification(QWidget):
     """
     clicked = pyqtSignal()
 
-    def __init__(self, title: str, message: str, parent=None, duration_ms: int = 8000, 
-                 show_action: bool = True, bg_color: str = "#2c3e50", position: str = "bottom-right"):
+    def __init__(self, title: str, message: str, parent=None, duration_ms: int = 8000,
+                 show_action: bool = True, bg_color: str = "#2c3e50", position: str = "bottom-right",
+                 action_text: str = "View Details"):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        
+
         self.duration_ms = duration_ms
         self.position = position
-        self._init_ui(title, message, show_action, bg_color)
+        self._init_ui(title, message, show_action, bg_color, action_text)
         
         # Setup fade-in animation
         self.setWindowOpacity(0.0)
@@ -27,7 +28,7 @@ class ToastNotification(QWidget):
         self.animation.setEndValue(1.0)
         self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
 
-    def _init_ui(self, title: str, message: str, show_action: bool, bg_color: str):
+    def _init_ui(self, title: str, message: str, show_action: bool, bg_color: str, action_text: str = "View Details"):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         
@@ -105,7 +106,7 @@ class ToastNotification(QWidget):
             action_layout = QHBoxLayout()
             action_layout.addStretch()
             
-            self.action_btn = QPushButton("View Details")
+            self.action_btn = QPushButton(action_text)
             self.action_btn.setObjectName("actionBtn")
             self.action_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             self.action_btn.clicked.connect(self._on_action_clicked)

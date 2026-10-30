@@ -410,26 +410,36 @@ class FormCaptureService:
                     col_present = 1 if forced_data.get("#txt_color") else 0
                     mod_present = 1 if forced_data.get("#txt_model") else 0
                     chassis_present = 1 if forced_data.get("#txt_chassis_no") else 0
-                    logging.info(f"METRIC:CAPTURE_QUALITY:chassis={chassis_present},engine={eng_present},color={col_present},model={mod_present}")
+                    _capture_logger.info(f"METRIC:CAPTURE_QUALITY:chassis={chassis_present},engine={eng_present},color={col_present},model={mod_present}")
 
                 # Log forced_data keys to help diagnose missing fields
                 if forced_data:
                     forced_keys = list(forced_data.keys())
-                    logging.info(f"Forced capture keys: {forced_keys}")
+                    _capture_logger.info(f"Forced capture keys: {forced_keys}")
                     # Check specifically for chassis number
                     chassis_val = forced_data.get("#txt_chassis_no") or forced_data.get("txt_chassis_no") or ""
                     if not chassis_val:
-                        logging.warning("Chassis number (#txt_chassis_no) is MISSING in forced capture data!")
+                        _capture_logger.warning("Chassis number (#txt_chassis_no) is MISSING in forced capture data!")
                         # Try to find chassis in _debug_all_inputs
                         debug_inputs = forced_data.get("_debug_all_inputs", {})
                         if isinstance(debug_inputs, dict):
                             for k, v in debug_inputs.items():
                                 if 'chassis' in k.lower() or 'frame' in k.lower():
-                                    logging.info(f"Found chassis-like field in debug inputs: {k} = {v}")
+                                    _capture_logger.info(f"Found chassis-like field in debug inputs: {k} = {v}")
 
+                # Pass the actual submitted page's URL through explicitly -
+                # process_submission previously fell back to "whichever page
+                # was last inserted into session_data['pages']", which is
+                # NOT necessarily the page the submit event fired on (the
+                # same browser context has multiple portal tabs open, and
+                # background polling/mutation capture on an unrelated tab
+                # can touch session_data after the customer-profile page's
+                # own fields were last updated). That mismatch silently fed
+                # the wrong page's (often empty) fields into validation.
+                submitted_url = data.get("url", "unknown_url")
                 with self._lock:
-                    success = self.processor.process_submission(self.session_data)
-                
+                    success = self.processor.process_submission(self.session_data, submitted_url=submitted_url)
+
                 if success:
                     _capture_logger.info("Invoice saved successfully. Clearing session data.")
                     
@@ -453,22 +463,22 @@ class FormCaptureService:
                     with self._lock:
                         self.clear_session_data()
                 else:
-                    logging.warning("process_submission returned False - data was NOT saved to database")
+                    _capture_logger.warning("process_submission returned False - data was NOT saved to database")
                     # Log what data was available for debugging
                     with self._lock:
                         available_pages = list(self.session_data.get("pages", {}).keys())
-                        logging.warning(f"Available pages in session_data: {available_pages}")
+                        _capture_logger.warning(f"Available pages in session_data: {available_pages}")
                         for url_key in available_pages:
                             fields = self.session_data.get("pages", {}).get(url_key, {}).get("fields", {})
                             field_keys = list(fields.keys())
-                            logging.warning(f"  Page '{url_key}' has fields: {field_keys}")
-                    
+                            _capture_logger.warning(f"  Page '{url_key}' has fields: {field_keys}")
+
                 # Always save after form submission
                 with self._lock:
                     self._save_data()
                     self.current_batch = 0
-                
-                logging.info("Submission captured. Waiting for next action.")
+
+                _capture_logger.info("Submission captured. Waiting for next action.")
                         
                 return
 
@@ -484,7 +494,7 @@ class FormCaptureService:
                     elif self.page:
                         page_url = self.page.url
                 except Exception as e:
-                    logging.error(f"Error getting page URL (using fallback): {e}")
+                    _capture_logger.error(f"Error getting page URL (using fallback): {e}")
 
                 # Initialize page entry if not exists
                 if page_url not in self.session_data["pages"]:
@@ -502,16 +512,16 @@ class FormCaptureService:
                     self.current_batch += 1
                     
                     if self.current_batch >= self.batch_size:
-                        logging.debug(f"Data updated in memory for {page_url}. Batch size {self.batch_size} reached. Saving data...")
+                        _capture_logger.debug(f"Data updated in memory for {page_url}. Batch size {self.batch_size} reached. Saving data...")
                         self._save_data()
                         self.current_batch = 0
                     else:
-                        logging.debug(f"Data updated in memory for {page_url}. Batch size {self.current_batch}/{self.batch_size}")
+                        _capture_logger.debug(f"Data updated in memory for {page_url}. Batch size {self.current_batch}/{self.batch_size}")
                 else:
-                    logging.warning(f"No selector in captured data: {data}")
-                
+                    _capture_logger.warning(f"No selector in captured data: {data}")
+
         except Exception as e:
-            logging.error(f"Error handling captured data: {e}", exc_info=True)
+            _capture_logger.error(f"Error handling captured data: {e}", exc_info=True)
 
     def _save_data(self):
         """Persist data to JSON file"""
@@ -1361,7 +1371,7 @@ class FormCaptureService:
                         forced_capture: currentData
                     }});
                 }}
-            }}, 1000);
+            }}, 50);
         }}
 
             // -----------------------------------------------------------

@@ -15,26 +15,37 @@ class CapturedFormProcessor:
         self.config = config
         self.mapping = config.get("field_mapping", {})
 
-    def process_submission(self, session_data: Dict[str, Any]) -> bool:
+    def process_submission(self, session_data: Dict[str, Any], submitted_url: Optional[str] = None) -> bool:
         """
-        Processes the captured session data, maps it to CapturedData model, 
+        Processes the captured session data, maps it to CapturedData model,
         and saves it to the database.
-        
+
         Accepts either:
         1. Full session_data dict with "pages" key (legacy)
         2. A flat dict directly (when forced_data is passed)
+
+        submitted_url, when given, is the URL the actual submit event fired
+        on - it is preferred over the "last page in the dict" heuristic
+        below, because the same browser context keeps multiple portal tabs
+        open and background polling on an unrelated tab can touch
+        session_data after the submitting page's own fields were last
+        updated, making "last" wrong and silently starving validation of
+        the real field values.
         """
         try:
             # 1. Flatten data - handle both full session_data and direct flat data
             if "pages" in session_data:
-                # Legacy: flatten from all pages (skip stale data from previous sessions)
                 flat_data = {}
                 pages = session_data.get("pages", {})
-                # Only use the LAST page's data (most recent)
-                page_urls = list(pages.keys())
-                if page_urls:
-                    last_page = pages[page_urls[-1]]
-                    fields = last_page.get("fields", {})
+                target_page = pages.get(submitted_url) if submitted_url else None
+                if target_page is None:
+                    # Fallback: last page inserted into the dict (previous
+                    # behavior), used only when the submitted URL wasn't
+                    # tracked for some reason.
+                    page_urls = list(pages.keys())
+                    target_page = pages[page_urls[-1]] if page_urls else None
+                if target_page:
+                    fields = target_page.get("fields", {})
                     for selector, field_info in fields.items():
                         val = field_info.get("value", "")
                         flat_data[selector] = val
@@ -68,23 +79,36 @@ class CapturedFormProcessor:
                         existing = db.query(CapturedData).filter(CapturedData.chassis_number == chassis).first()
                         
                         if existing:
-                            # Update existing record
+                            # Update existing record - but only overwrite a
+                            # field when this capture actually has a new
+                            # non-empty value for it. A later re-submission
+                            # that the portal rendered slightly differently
+                            # (slower load, a widget the capture script
+                            # missed that time) would otherwise blank out
+                            # previously-good data with empty strings/None,
+                            # which read as "capture isn't working" even
+                            # though the earlier capture had succeeded.
                             logger.debug(f"Updating existing record for chassis {chassis}")
-                            existing.name = (mapped_data.get("buyer_name") or "").upper()
-                            existing.father = (mapped_data.get("buyer_father_name") or "").upper()
-                            existing.cnic = mapped_data.get("buyer_cnic")
-                            existing.cell = mapped_data.get("buyer_phone")
-                            existing.address = (mapped_data.get("buyer_address") or "").upper()
-                            
-                            # Handle engine number (optional)
-                            engine_val = mapped_data.get("engine_number")
-                            if engine_val:
-                                existing.engine_number = engine_val.upper()
-                            else:
-                                existing.engine_number = None
 
-                            existing.color = (mapped_data.get("color") or "").upper()
-                            existing.model = (mapped_data.get("model_name") or "").upper()
+                            def _apply(attr: str, value: Any) -> None:
+                                if value:
+                                    setattr(existing, attr, value.upper() if isinstance(value, str) else value)
+
+                            _apply("name", mapped_data.get("buyer_name"))
+                            _apply("father", mapped_data.get("buyer_father_name"))
+                            _apply("cnic", mapped_data.get("buyer_cnic"))
+                            _apply("cell", mapped_data.get("buyer_phone"))
+                            _apply("address", mapped_data.get("buyer_address"))
+                            _apply("engine_number", mapped_data.get("engine_number"))
+                            _apply("color", mapped_data.get("color"))
+                            _apply("model", mapped_data.get("model_name"))
+
+                            # A fresh capture from the portal means the user
+                            # is actively re-entering/confirming this
+                            # chassis right now, so it belongs back in the
+                            # visible list even if someone had previously
+                            # deleted it from the Captured Data page.
+                            existing.is_deleted = False
                             existing.created_at = datetime.utcnow() # Update timestamp
                         else:
                             # Create new record
@@ -112,7 +136,8 @@ class CapturedFormProcessor:
                         
                 except Exception as e:
                     logger.error(f"Database error (attempt {attempt+1}): {e}")
-                    time.sleep(0.3 * (attempt + 1))
+                    if attempt < max_retries - 1:
+                        time.sleep(0.3 * (attempt + 1))
             
             logger.error("Failed to save to database after retries.")
             return False
