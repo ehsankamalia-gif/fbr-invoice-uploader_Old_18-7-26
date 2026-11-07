@@ -374,6 +374,15 @@ class FBRClient:
         else:
             final_total = computed_total
 
+        # Header InvoiceType must agree with the item(s)' own InvoiceType -
+        # mirror the first item's already-resolved value (user's per-invoice
+        # selection, falling back to the settings default same as the item
+        # did) instead of always using the settings default directly, which
+        # previously let the header silently disagree with what was actually
+        # selected for the (single, per the app's single-vehicle-per-invoice
+        # rule) item.
+        header_invoice_type_int = items[0]["InvoiceType"] if items else default_invoice_type_int
+
         return {
             # Per FBR's official spec, InvoiceNumber's status is "Blank" - it is
             # an output-only field FBR fills in with the assigned fiscal invoice
@@ -403,7 +412,7 @@ class FBRClient:
             "FurtherTax": total_further_rounded,
             "TotalBillAmount": final_total,
             "PaymentMode": mode_int,
-            "InvoiceType": default_invoice_type_int,
+            "InvoiceType": header_invoice_type_int,
             "Items": items
         }
 

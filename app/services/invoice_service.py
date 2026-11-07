@@ -157,6 +157,7 @@ class InvoiceService:
                 total_amount=line_total,
                 discount=item.discount,
                 motorcycle_id=motorcycle_id,
+                invoice_type=item.invoice_type,
                 # Removed chassis_number, engine_number from InvoiceItem
             )
             db_items.append(db_item)
@@ -298,7 +299,7 @@ class InvoiceService:
                         "total_amount": item.total_amount,
                         "pct_code": item.pct_code,
                         "discount": item.discount,
-                        "invoice_type": None,
+                        "invoice_type": item.invoice_type,
                         "ref_usin": None,
                     } for item in invoice.items
                 ]

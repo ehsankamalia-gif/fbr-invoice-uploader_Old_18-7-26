@@ -278,7 +278,7 @@ class FBRSecurityDialog(BaseSettingsDialog):
                 secret_key=self.secret_key.text().strip(),
                 tax_rate=existing.get("tax_rate", "18.0"),
                 pct_code=existing.get("pct_code", "8711.2010"),
-                invoice_type=existing.get("invoice_type", "Standard"),
+                invoice_type=existing.get("invoice_type", "3rd Schedule New"),
                 discount=existing.get("discount", "0.0"),
                 item_code=existing.get("item_code", "MOTO"),
                 item_name=existing.get("item_name", "Motorcycle"),
@@ -326,7 +326,7 @@ class BusinessPreferencesDialog(BaseSettingsDialog):
 
         layout.addWidget(QLabel("Default Invoice Type:"), 5, 0)
         self.invoice_type = QComboBox()
-        self.invoice_type.addItems(["Standard", "Debit Note", "Credit Note"])
+        self.invoice_type.addItems(["Standard", "3rd Schedule New", "Debit Note", "Credit Note"])
         layout.addWidget(self.invoice_type, 5, 1)
 
         layout.addWidget(QLabel("Default Discount (%):"), 6, 0)
@@ -523,7 +523,7 @@ class BusinessPreferencesDialog(BaseSettingsDialog):
             self.pct_code.setText(data.get("pct_code", "8711.2010"))
             self.item_code.setText(data.get("item_code", "ITEMCODE"))
             self.item_name.setText(data.get("item_name", "Honda"))
-            self.invoice_type.setCurrentText(data.get("invoice_type", "Standard"))
+            self.invoice_type.setCurrentText(data.get("invoice_type", "3rd Schedule New"))
             self.discount.setValue(float(data.get("discount", 0.0)))
         try:
             logo = settings_service.get_invoice_logo() or {}

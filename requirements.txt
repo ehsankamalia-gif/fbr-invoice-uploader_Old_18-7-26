@@ -8,6 +8,7 @@ requests>=2.26.0
 customtkinter>=5.2.0
 pillow>=8.3.0
 qrcode>=7.3.0
+python-barcode>=0.15.1
 tenacity>=8.0.0
 pymysql
 pytest

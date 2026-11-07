@@ -228,7 +228,7 @@ class SettingsService:
             "secret_key": os.getenv(f"{prefix}_SECRET_KEY", "").strip(),
             "tax_rate": os.getenv(f"{prefix}_TAX_RATE", "18.0").strip(),
             "pct_code": os.getenv(f"{prefix}_PCT_CODE", "8711.2010").strip(),
-            "invoice_type": os.getenv(f"{prefix}_INVOICE_TYPE", "Standard").strip(),
+            "invoice_type": os.getenv(f"{prefix}_INVOICE_TYPE", "3rd Schedule New").strip(),
             "discount": os.getenv(f"{prefix}_DISCOUNT", "0.0").strip(),
             "pos_fee": os.getenv(f"{prefix}_POS_FEE", "1.0").strip(),
             "item_code": os.getenv(f"{prefix}_ITEM_CODE", "").strip(),
@@ -330,7 +330,7 @@ class SettingsService:
                     auth_token="",
                     secret_key="",
                     tax_rate=18.0,
-                    invoice_type="Standard",
+                    invoice_type="3rd Schedule New",
                     discount=0.0,
                     pos_fee=1.0,
                     pct_code="8711.2010"
@@ -349,7 +349,7 @@ class SettingsService:
                     auth_token="",
                     secret_key="",
                     tax_rate=18.0,
-                    invoice_type="Standard",
+                    invoice_type="3rd Schedule New",
                     discount=0.0,
                     pos_fee=1.0,
                     pct_code="8711.2010"
@@ -693,7 +693,7 @@ class SettingsService:
         return {
             "env": env.upper(), "base_url": "", "pos_id": "", "usin": "",
             "token": "", "secret_key": "", "tax_rate": "18.0",
-            "pct_code": "8711.2010", "invoice_type": "Standard",
+            "pct_code": "8711.2010", "invoice_type": "3rd Schedule New",
             "discount": "0.0", "pos_fee": "1.0", "item_code": "",
             "item_name": "", "business_name": "Ehsan Trader",
             "configured": False,
@@ -734,7 +734,19 @@ class SettingsService:
             return result
         except Exception as e:
             logger.error(f"Failed to get active settings: {e}")
-            fallback = self._read_fbr_settings_from_env(self.get_active_environment())
+            active_env = self.get_active_environment()
+            fallback = self._read_fbr_settings_from_env(active_env)
+            if active_env == "SANDBOX":
+                # Standing instruction: SANDBOX must always submit using the
+                # configuration actually saved in Settings, never this
+                # app's built-in/.env default sandbox URL as a silent
+                # substitute when the DB read above failed. Blanking it
+                # here means fbr_client.post_invoice's existing "FBR API
+                # URL is missing" guard fires instead of quietly posting to
+                # a different endpoint than what Settings shows. PRODUCTION
+                # keeps its prior fallback behavior untouched until told
+                # otherwise.
+                fallback["base_url"] = ""
             with self._lock:
                 self._active_settings_cache = dict(fallback)
                 self._active_settings_cache_loaded_at = time.time()
@@ -751,7 +763,7 @@ class SettingsService:
             "secret_key": "", # Added secret_key
             "tax_rate": "18.0",
             "pct_code": "8711.2010",
-            "invoice_type": "Standard",
+            "invoice_type": "3rd Schedule New",
             "discount": "0.0",
             "item_code": "",
             "item_name": "",

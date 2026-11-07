@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, Callable, Optional
+from typing import Dict, List, Callable, Optional, Tuple
 from dataclasses import dataclass
 
 import io
@@ -65,6 +65,8 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem,
     QProgressDialog,
     QSplitter,
+    QMenu,
+    QMenuBar,
 )
 
 from sqlalchemy import or_
@@ -99,6 +101,7 @@ from app.services.form_capture_service import form_capture_service
 from app.services.backup_service import backup_service
 from app.services.print_service_v2 import print_service_v2
 from app.qt_ui.dealer_search_dialog import DealerSearchDialog
+from app.qt_ui.recent_customers_dialog import RecentCustomersDialog
 from app.qt_ui.web_import_dialog import WebImportDialog
 from app.qt_ui.settings_modals import (
     FBRSecurityDialog, 
@@ -122,6 +125,13 @@ from app.services.auth_session import auth_session
 from app.core.staff_modules import STAFF_MODULE_CODES
 from app.updater.updater_manager import UpdaterManager
 from app.qt_ui.whatsapp_campaign_widget import WhatsAppCampaignWidget
+
+# Navigation chrome switch: True shows the Excel/Office-style top ribbon
+# (MainWindow._build_ribbon_navigation), False shows the original left
+# sidebar (MainWindow._build_sidebar_navigation). Both implementations are
+# kept side-by-side in this file - to revert to the sidebar, set this back
+# to False and restart the app. No other change is required.
+USE_TOP_RIBBON_MENU = True
 
 
 @dataclass
@@ -1019,6 +1029,20 @@ class MainWindow(QMainWindow):
             self._update_model_cards_layout()
             self._update_form_layout()
 
+        # Top ribbon only: collapse the menu bar into a single hamburger
+        # button below ~900px so every page and utility action stays
+        # reachable at any window width. hasattr-guarded so this is a
+        # no-op in sidebar mode (where these attributes don't exist).
+        if hasattr(self, "ribbon_tab_row"):
+            is_narrow = current_width < 900
+            self.ribbon_tab_row.setVisible(not is_narrow)
+            self.ribbon_hamburger_btn.setVisible(is_narrow)
+            if hasattr(self, "ribbon_active_label"):
+                current = self.stack.currentWidget()
+                current_key = next((k for k, w in self._pages.items() if w is current), None)
+                if current_key is not None:
+                    self._update_ribbon_active_indicator(current_key)
+
     def _sync_invoice_page_with_fbr_settings(self, before: dict, after: dict, changed_keys: list[str]) -> None:
         try:
             if hasattr(self, "invoice_env_value_label") and hasattr(self, "invoice_env_badge"):
@@ -1057,7 +1081,12 @@ class MainWindow(QMainWindow):
             self.manual_update_btn.setText("🔄 Check for Updates Now")
         if hasattr(self, 'footer_update_btn'):
             self.footer_update_btn.setEnabled(True)
-            self.footer_update_btn.setText("🔄 Check for Updates")
+            # Icon-only in ribbon mode or a collapsed sidebar - see
+            # apply_sidebar_font_settings for the same compact/expanded rule.
+            if self._is_sidebar_collapsed or hasattr(self, "ribbon_tab_row"):
+                self.footer_update_btn.setText("↻")
+            else:
+                self.footer_update_btn.setText("🔄  Check for Updates")
         
         # Show a professional toast for 'Up to Date' status
         from app.updater.toast_notification import ToastNotification
@@ -1078,8 +1107,11 @@ class MainWindow(QMainWindow):
             self.manual_update_btn.setText("🔄 Check for Updates Now")
         if hasattr(self, 'footer_update_btn'):
             self.footer_update_btn.setEnabled(True)
-            self.footer_update_btn.setText("🔄 Check for Updates")
-        
+            if self._is_sidebar_collapsed or hasattr(self, "ribbon_tab_row"):
+                self.footer_update_btn.setText("↻")
+            else:
+                self.footer_update_btn.setText("🔄  Check for Updates")
+
         # Show a professional toast for 'Error' status
         from app.updater.toast_notification import ToastNotification
         toast = ToastNotification(
@@ -1256,6 +1288,123 @@ class MainWindow(QMainWindow):
             }
         """)
 
+        # self.stack and the 18 _add_page(...)/nav_icons/menu_groups below
+        # are shared, unbranched state - built exactly once regardless of
+        # which navigation chrome (ribbon or sidebar) is active, so the
+        # two chrome implementations can never drift out of sync on which
+        # pages exist.
+        self.stack = _CurrentPageStackedWidget(central)
+
+        self._add_page("dashboard", self._create_dashboard_page(), "Dashboard")
+        self._add_page("reports", self._create_reports_page(), "Reports")
+        self._add_page("invoice", self._create_invoice_page(), "Invoice")
+        self._add_page("print_document", self._create_print_document_page(), "Print Document")
+        self._add_page("inventory", self._create_inventory_page(), "Inventory")
+        self._add_page("captured_data", self._create_captured_data_page(), "Captured Data")
+        self._add_page("prices", self._create_prices_page(), "Prices")
+        self._add_page("customers", self._create_customers_page(), "Customers")
+        self._add_page("dealers", self._create_dealers_page(), "Dealers")
+        self._add_page("advance_booking", self._create_advance_booking_page(), "Advance Booking")
+        self._add_page("quotation", self._create_quotation_page(), "Quotation")
+        self._add_page("credit_ledger", self._create_credit_ledger_page(), "Credit Ledger System")
+        self._add_page("spare_ledger", self._create_spare_ledger_page(), "Spare Ledger")
+        self._add_page("sms", self._create_sms_page(), "SMS Module")
+        self._add_page("whatsapp", self._create_whatsapp_page(), "Whatsapp Module")
+        self._add_page("settings", self._create_settings_page(), "Settings")
+        self._add_page("welcome", self._create_welcome_page(), "Welcome")
+        self._add_page("portal_accounts", self._create_portal_accounts_page(), "Portal Accounts")
+        self._add_page("spare_parts", self._create_spare_parts_page(), "Spare Parts")
+
+        self.nav_icons = {
+            "dashboard": "📊",
+            "reports": "📈",
+            "invoice": "📝",
+            "inventory": "📦",
+            "prices": "💰",
+            "customers": "👥",
+            "dealers": "🏢",
+            "advance_booking": "📅",
+            "quotation": "📋",
+            "credit_ledger": "🧾",
+            "spare_ledger": "📒",
+            "sms": "💬",
+            "whatsapp": "📱",
+            "settings": "⚙️",
+            "welcome": "👋",
+            "captured_data": "📁",
+            "print_document": "🖨️",
+            "portal_accounts": "🔑",
+            "spare_parts": "🔧",
+        }
+
+        self.menu_groups = {
+            "GENERAL": ["dashboard", "welcome"],
+            "SALES": ["invoice", "reports", "advance_booking", "quotation", "print_document"],
+            "INVENTORY": ["inventory", "prices", "spare_ledger", "captured_data"],
+            "DIRECTORY": ["customers", "dealers"],
+            "PORTAL": ["portal_accounts", "credit_ledger"],
+            "SYSTEM": ["sms", "whatsapp", "settings"],
+            # Independent module (spare_parts/) - its own top-level group so
+            # it's never implied to be related to motorcycle INVENTORY/SALES.
+            "SPARE PARTS": ["spare_parts"],
+        }
+
+        # Navigation chrome: both branches populate the same shared state
+        # (self._nav_buttons, self._group_headers, self._group_buttons)
+        # using the same page/group data above, so _select_page and
+        # apply_sidebar_font_settings work identically either way. See
+        # USE_TOP_RIBBON_MENU (top of file) to switch/revert.
+        if USE_TOP_RIBBON_MENU:
+            self._build_ribbon_navigation(central)
+        else:
+            self._build_sidebar_navigation(central)
+
+        self.apply_sidebar_font_settings(self._ui_cfg)
+
+        self._select_page("welcome")
+        self._update_fbr_submitted_counter() # Initial load of counter state
+        self._update_today_submitted_counter()
+        self._update_month_submitted_counter()
+
+        # The ribbon's active-menu underline needs the menu bar's real
+        # laid-out geometry, which isn't final yet this early (before the
+        # window is first shown) - the _select_page call above already
+        # positioned it best-effort, this corrects it once layout settles.
+        if hasattr(self, "ribbon_active_label"):
+            QTimer.singleShot(0, lambda: self._update_ribbon_active_indicator("welcome"))
+
+        # Connect global focus signal to automatic scrolling logic
+        QApplication.instance().focusChanged.connect(self._on_focus_changed)
+
+        # Ensure the dashboard and welcome stats refresh their data once the application is fully ready
+        QTimer.singleShot(100, self._refresh_dashboard)
+        QTimer.singleShot(100, self._refresh_welcome_stats)
+        
+        # --- Handle Missing Database Notification ---
+        if self.db_status == "DATABASE_MISSING":
+            QTimer.singleShot(500, self._show_db_missing_warning)
+
+    def _visible_pages_in_group(self, group_name: str) -> List[Tuple[str, str, str]]:
+        """(key, icon, title) for every page in this menu_groups group
+        that the current session is allowed to see - the same
+        STAFF_MODULE_CODES/has_permission filter the sidebar has always
+        applied, factored out so the ribbon's tabs, action rows, and
+        narrow-window hamburger menu all agree with it (and each other)."""
+        result: List[Tuple[str, str, str]] = []
+        for key in self.menu_groups.get(group_name, []):
+            if auth_session.is_logged_in() and key in STAFF_MODULE_CODES and not auth_session.has_permission(key):
+                continue
+            widget = self._pages.get(key)
+            if widget is None:
+                continue
+            result.append((key, self.nav_icons.get(key, "🔹"), widget.windowTitle()))
+        return result
+
+    def _build_sidebar_navigation(self, central: QWidget) -> None:
+        """Original left-sidebar navigation chrome - unchanged behavior
+        and styling from before the top-ribbon redesign. Active when
+        USE_TOP_RIBBON_MENU is False (flip that flag, top of file, and
+        restart to revert from the ribbon back to this)."""
         root_layout = QHBoxLayout(central)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
@@ -1338,61 +1487,10 @@ class MainWindow(QMainWindow):
         self.sidebar_scroll_area.setWidget(nav_items_host)
         nav_layout.addWidget(self.sidebar_scroll_area, 1)
 
-        self.stack = _CurrentPageStackedWidget(central)
-
         root_layout.addWidget(self.nav_widget)
         root_layout.addWidget(self.stack, 1)
 
-        self._add_page("dashboard", self._create_dashboard_page(), "Dashboard")
-        self._add_page("reports", self._create_reports_page(), "Reports")
-        self._add_page("invoice", self._create_invoice_page(), "Invoice")
-        self._add_page("print_document", self._create_print_document_page(), "Print Document")
-        self._add_page("inventory", self._create_inventory_page(), "Inventory")
-        self._add_page("captured_data", self._create_captured_data_page(), "Captured Data")
-        self._add_page("prices", self._create_prices_page(), "Prices")
-        self._add_page("customers", self._create_customers_page(), "Customers")
-        self._add_page("dealers", self._create_dealers_page(), "Dealers")
-        self._add_page("advance_booking", self._create_advance_booking_page(), "Advance Booking")
-        self._add_page("quotation", self._create_quotation_page(), "Quotation")
-        self._add_page("credit_ledger", self._create_credit_ledger_page(), "Credit Ledger System")
-        self._add_page("spare_ledger", self._create_spare_ledger_page(), "Spare Ledger")
-        self._add_page("sms", self._create_sms_page(), "SMS Module")
-        self._add_page("whatsapp", self._create_whatsapp_page(), "Whatsapp Module")
-        self._add_page("settings", self._create_settings_page(), "Settings")
-        self._add_page("welcome", self._create_welcome_page(), "Welcome")
-        self._add_page("portal_accounts", self._create_portal_accounts_page(), "Portal Accounts")
-
         nav_items_layout.addSpacing(10)
-
-        self.nav_icons = {
-            "dashboard": "📊",
-            "reports": "📈",
-            "invoice": "📝",
-            "inventory": "📦",
-            "prices": "💰",
-            "customers": "👥",
-            "dealers": "🏢",
-            "advance_booking": "📅",
-            "quotation": "📋",
-            "credit_ledger": "🧾",
-            "spare_ledger": "📒",
-            "sms": "💬",
-            "whatsapp": "📱",
-            "settings": "⚙️",
-            "welcome": "👋",
-            "captured_data": "📁",
-            "print_document": "🖨️",
-            "portal_accounts": "🔑",
-        }
-
-        self.menu_groups = {
-            "GENERAL": ["dashboard", "welcome"],
-            "SALES": ["invoice", "reports", "advance_booking", "quotation", "print_document"],
-            "INVENTORY": ["inventory", "prices", "spare_ledger", "captured_data"],
-            "DIRECTORY": ["customers", "dealers"],
-            "PORTAL": ["portal_accounts", "credit_ledger"],
-            "SYSTEM": ["sms", "whatsapp", "settings"]
-        }
 
         self._group_headers: Dict[str, GroupHeaderButton] = {}
         self._group_buttons: Dict[str, List[NavigationButton]] = {}
@@ -1516,21 +1614,373 @@ class MainWindow(QMainWindow):
         self.exit_btn.clicked.connect(self.close)
         nav_layout.addWidget(self.exit_btn)
 
-        self.apply_sidebar_font_settings(self._ui_cfg)
+    def _build_ribbon_navigation(self, central: QWidget) -> None:
+        """Excel/Office-style top ribbon - alternative to the left
+        sidebar. Active when USE_TOP_RIBBON_MENU is True (flip that flag,
+        top of file, and restart to go back to _build_sidebar_navigation).
 
-        self._select_page("welcome")
-        self._update_fbr_submitted_counter() # Initial load of counter state
+        Everything lives in one slim top strip: the menu bar (one item
+        per sidebar group, hover-opens its dropdown) on the left, the
+        identity/Log Out/version/Check for Updates/Exit/hamburger cluster
+        on the right, then self.stack below. See eventFilter (installed
+        on each menu-bar button and its QMenu) and _open_ribbon_menu/
+        _ribbon_maybe_close_menu for the hover-open/hover-close logic.
+        """
+        root_layout = QVBoxLayout(central)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
 
-        # Connect global focus signal to automatic scrolling logic
-        QApplication.instance().focusChanged.connect(self._on_focus_changed)
+        # --- Top strip: menu bar (left) + utility cluster (right), one line ---
+        top_strip = QWidget(central)
+        top_strip.setObjectName("ribbonTopStrip")
+        top_strip.setStyleSheet(f"""
+            QWidget#ribbonTopStrip {{
+                background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {_SB_BG_TOP}, stop:1 {_SB_BG_BOTTOM});
+                border-bottom: 1px solid {_SB_BORDER};
+            }}
+        """)
+        # Ignored (not the default Preferred) so this row's natural content
+        # width never becomes a floor under the WHOLE WINDOW's minimum
+        # width - the same class of bug fixed earlier for the
+        # sidebar/invoice page (see _CurrentPageStackedWidget). Fixed
+        # vertically so it can never stretch taller on resize.
+        top_strip.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        top_layout = QHBoxLayout(top_strip)
+        # Minimal top/bottom margins so this strip's height tracks its
+        # content as tightly as possible. Every addWidget below passes
+        # AlignVCenter so the menu bar (left) and utility cluster (right)
+        # sit on one visually centered line.
+        top_layout.setContentsMargins(10, 2, 12, 2)
+        top_layout.setSpacing(10)
 
-        # Ensure the dashboard and welcome stats refresh their data once the application is fully ready
-        QTimer.singleShot(100, self._refresh_dashboard)
-        QTimer.singleShot(100, self._refresh_welcome_stats)
-        
-        # --- Handle Missing Database Notification ---
-        if self.db_status == "DATABASE_MISSING":
-            QTimer.singleShot(500, self._show_db_missing_warning)
+        # --- Menu bar (left side): a native QMenuBar, one QMenu per
+        # sidebar group. A previous hand-rolled version (separate
+        # QPushButtons + manual Enter/Leave event filtering + a QTimer)
+        # looked right in isolated testing but broke in real use: once a
+        # QMenu's popup() takes its internal mouse grab, Qt stops
+        # delivering genuine Enter/Leave events to sibling widgets, so
+        # hovering a different button never re-opened anything (only a
+        # click did, and even then the previous button's QSS :hover state
+        # could get stuck since it never received a matching Leave).
+        # QMenuBar/QMenu are Qt's own paired implementation for exactly
+        # this interaction - click a top-level item once to open it, then
+        # hovering any other top-level item switches menus instantly and
+        # reliably, with no custom event tracking needed.
+        self.ribbon_tab_row = QMenuBar(top_strip)
+        self.ribbon_tab_row.setObjectName("ribbonMenuBar")
+        self.ribbon_tab_row.setNativeMenuBar(False)
+        # Minimum (not Ignored) here: top_layout is horizontal, so this is
+        # the layout's MAIN axis - Ignored on the main axis tells Qt to
+        # collapse this widget to zero width instead of just excluding it
+        # from the WINDOW's minimum-size floor (that protection still
+        # comes from top_strip's own Ignored policy below, where the
+        # surrounding root_layout is vertical - Ignored only behaves as a
+        # "don't count toward minimum" hint on the layout's cross axis).
+        self.ribbon_tab_row.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        tab_font_size = int(self._ui_cfg.get("sidebar_group_font_size", 12) or 12) + 1
+        self.ribbon_tab_row.setStyleSheet(f"""
+            QMenuBar#ribbonMenuBar {{
+                background-color: transparent;
+                border: none;
+                padding: 0px;
+                spacing: 0px;
+            }}
+            QMenuBar#ribbonMenuBar::item {{
+                background-color: rgba(255, 255, 255, 0.05);
+                color: {_SB_TEXT_BRIGHT};
+                padding: 5px 14px;
+                margin: 0px;
+                border-radius: 4px;
+                font-size: {tab_font_size}px;
+                font-weight: 700;
+                letter-spacing: 0.6px;
+            }}
+            QMenuBar#ribbonMenuBar::item:selected, QMenuBar#ribbonMenuBar::item:pressed {{
+                background-color: {_SB_HOVER_BG};
+                color: {_SB_TEXT_BRIGHT};
+            }}
+        """)
+
+        self._group_headers: Dict[str, QMenu] = {}
+        menu_item_font_size = max(8, int(self._ui_cfg.get("sidebar_font_size", 15) or 15) - 2)
+        for group_name in self.menu_groups:
+            items = self._visible_pages_in_group(group_name)
+            if not items:
+                continue
+
+            menu = self.ribbon_tab_row.addMenu(group_name)
+            menu.setObjectName("ribbonDropdownMenu")
+            menu.setStyleSheet(f"""
+                QMenu#ribbonDropdownMenu {{
+                    background-color: {_SB_BG_BOTTOM};
+                    color: {_SB_TEXT_BRIGHT};
+                    border: 1px solid {_SB_BORDER};
+                    padding: 4px 0px;
+                }}
+                QMenu#ribbonDropdownMenu::item {{
+                    background-color: transparent;
+                    color: {_SB_TEXT_BRIGHT};
+                    padding: 7px 24px 7px 16px;
+                    border-radius: 4px;
+                    font-size: {menu_item_font_size}px;
+                }}
+                QMenu#ribbonDropdownMenu::item:selected {{
+                    background-color: {_SB_ACCENT};
+                    color: #ffffff;
+                }}
+            """)
+            # Selecting an item (or dismissing the menu any other way)
+            # closes it, but Qt leaves the menu bar's own top-level item
+            # painted as "active" until the cursor physically moves off
+            # it - if the mouse happens to still be sitting over e.g.
+            # SALES after picking something from its dropdown, SALES
+            # keeps showing the highlighted/pressed look. Explicitly
+            # clearing the active action on close makes it drop the
+            # highlight immediately, regardless of where the cursor is.
+            menu.aboutToHide.connect(
+                lambda: QTimer.singleShot(0, lambda: self.ribbon_tab_row.setActiveAction(None))
+            )
+            for key, icon, title in items:
+                action = menu.addAction(f"{icon}  {title}")
+                action.triggered.connect(lambda checked=False, k=key: self._select_page(k))
+                self._nav_buttons[key] = action
+            self._group_headers[group_name] = menu
+
+        top_layout.addWidget(self.ribbon_tab_row, 0, Qt.AlignmentFlag.AlignVCenter)
+        top_layout.addStretch(1)
+
+        # --- Utility cluster (right side) ---
+        if auth_session.is_logged_in():
+            role_text = "Admin" if auth_session.is_admin() else "Staff"
+            full_name = auth_session.current_full_name() or "?"
+            initial = next((c for c in full_name.strip() if c.isalnum()), "?").upper()
+
+            identity_chip = QWidget(top_strip)
+            identity_layout = QHBoxLayout(identity_chip)
+            identity_layout.setContentsMargins(0, 0, 0, 0)
+            identity_layout.setSpacing(8)
+
+            avatar_label = QLabel(initial)
+            avatar_label.setFixedSize(26, 26)
+            avatar_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            avatar_label.setStyleSheet(f"""
+                QLabel {{
+                    background-color: {_SB_ACCENT};
+                    color: {_SB_TEXT_BRIGHT};
+                    border-radius: 13px;
+                    font-size: 12px;
+                    font-weight: 700;
+                    border: none;
+                }}
+            """)
+            identity_layout.addWidget(avatar_label)
+
+            # Rich text (QLabel auto-detects the HTML) so the name reads
+            # brighter/bolder than the role next to it, in one widget.
+            identity_label = QLabel(
+                f"<span style='color:{_SB_TEXT_BRIGHT}; font-weight:700;'>{full_name}</span>"
+                f"<span style='color:{_SB_TEXT_MUTED};'> · {role_text}</span>"
+            )
+            identity_label.setStyleSheet("font-size: 12px; border: none; background: transparent;")
+            identity_layout.addWidget(identity_label)
+
+            top_layout.addWidget(identity_chip, 0, Qt.AlignmentFlag.AlignVCenter)
+
+            self.logout_btn = QPushButton("⏻  Log Out")
+            self.logout_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.logout_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: rgba(232, 162, 62, 0.16);
+                    color: #f5b958;
+                    border: 1px solid rgba(232, 162, 62, 0.45);
+                    padding: 5px 14px;
+                    font-size: 12px;
+                    font-weight: 700;
+                    border-radius: 14px;
+                }
+                QPushButton:hover {
+                    background-color: rgba(232, 162, 62, 0.30);
+                    border: 1px solid #f5b958;
+                }
+            """)
+            self.logout_btn.clicked.connect(self._on_logout_clicked)
+            top_layout.addWidget(self.logout_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        self.sidebar_version_label = QLabel(f"●  {VersionManager.get_version_string()}")
+        self.sidebar_version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.sidebar_version_label.setToolTip("Installed application version")
+        self.sidebar_version_label.setStyleSheet(f"""
+            QLabel {{
+                color: #7fd97f;
+                background-color: rgba(127, 217, 127, 0.12);
+                border: 1px solid rgba(127, 217, 127, 0.35);
+                border-radius: 10px;
+                padding: 3px 12px;
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 0.5px;
+            }}
+        """)
+        top_layout.addWidget(self.sidebar_version_label, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        # Update Button - solid circular chip (see _ribbon_icon_btn_qss
+        # for why this is used instead of the sidebar's flat/hover-only
+        # style); apply_sidebar_font_settings keeps it this style in
+        # ribbon mode via the same horizontal=ribbon-mode check.
+        self.footer_update_btn = QPushButton("↻")
+        self.footer_update_btn.setToolTip("Check for Updates")
+        self.footer_update_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        # setFixedSize must be (re-)applied AFTER addWidget too: adding a
+        # styled widget to a layout triggers Qt to re-polish/recompute its
+        # stylesheet-driven box size (merging the app-wide QPushButton
+        # rule's 8px/16px padding with this button's own QSS), which
+        # silently widened it back out to its much larger natural content
+        # size, undoing the setFixedSize call made just before addWidget.
+        self.footer_update_btn.setFixedSize(30, 30)
+        self.footer_update_btn.setStyleSheet(
+            self._ribbon_icon_btn_qss(16, _SB_ACCENT, _SB_ACCENT_HOVER)
+        )
+        self.footer_update_btn.clicked.connect(self._on_manual_update_check)
+        top_layout.addWidget(self.footer_update_btn)
+        self.footer_update_btn.setFixedSize(30, 30)
+
+        # Exit Button - solid circular chip, same reasoning as above.
+        self.exit_btn = QPushButton("✕")
+        self.exit_btn.setToolTip("Exit Application")
+        self.exit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.exit_btn.setFixedSize(30, 30)
+        self.exit_btn.setStyleSheet(
+            self._ribbon_icon_btn_qss(16, _SB_DANGER_HOVER_BG, "#c0392b")
+        )
+        self.exit_btn.clicked.connect(self.close)
+        top_layout.addWidget(self.exit_btn)
+        self.exit_btn.setFixedSize(30, 30)
+
+        # Hamburger button - hidden until resizeEvent narrows the window
+        # past the responsive threshold (see resizeEvent).
+        self.ribbon_hamburger_btn = QPushButton("☰ Menu")
+        self.ribbon_hamburger_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.ribbon_hamburger_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent; color: {_SB_TEXT_BRIGHT};
+                border: 1px solid {_SB_BORDER}; border-radius: 6px;
+                padding: 4px 12px; font-size: 13px; font-weight: 600;
+            }}
+            QPushButton:hover {{ background-color: {_SB_HOVER_BG}; }}
+        """)
+        self.ribbon_hamburger_btn.clicked.connect(self._show_ribbon_hamburger_menu)
+        self.ribbon_hamburger_btn.setVisible(False)
+        top_layout.addWidget(self.ribbon_hamburger_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        # Persistent "you are here" highlight - a single opaque label,
+        # manually positioned (not part of top_layout) directly OVER
+        # whichever top-level menu's group contains the current page, and
+        # stacked ABOVE the menu bar. It must be fully opaque: the native
+        # QMenuBar item underneath keeps rendering its own (muted-color)
+        # text regardless, so a translucent or text-only overlay just let
+        # that native text show through at the edges, looking like a
+        # ghostly double image. An opaque background fully masks it, with
+        # mouse events passed straight through (WA_TransparentForMouse
+        # Events) so hovering/clicking still reaches the real item
+        # beneath exactly as before. QMenuBar's own :selected/:hover QSS
+        # is purely mouse-position-driven and can't double as this, so
+        # this is tracked separately and repositioned on every
+        # _select_page via _update_ribbon_active_indicator.
+        self.ribbon_active_label = QLabel("", top_strip)
+        self.ribbon_active_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.ribbon_active_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.ribbon_active_label.setStyleSheet(f"""
+            QLabel {{
+                background-color: {_SB_ACCENT_HOVER};
+                color: {_SB_TEXT_BRIGHT};
+                padding: 5px 14px;
+                font-size: {tab_font_size}px;
+                font-weight: 700;
+                letter-spacing: 0.6px;
+                border: none;
+                border-bottom: 2px solid {_SB_ACCENT};
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+            }}
+        """)
+        self.ribbon_active_label.setVisible(False)
+
+        root_layout.addWidget(top_strip)
+        root_layout.addWidget(self.stack, 1)
+
+        # The window's first show() triggers Qt's one-time stylesheet
+        # "polish" pass, which recomputes these two buttons' box size
+        # from the cascaded QSS (app-wide QPushButton padding + this
+        # button's own rule) and silently overrides the setFixedSize
+        # calls made above - even though they're correct at construction
+        # time, they get undone the moment the window actually appears.
+        # Re-asserting once on the next event-loop tick (after that first
+        # polish has already happened) is what makes it stick.
+        QTimer.singleShot(0, lambda: self.footer_update_btn.setFixedSize(30, 30))
+        QTimer.singleShot(0, lambda: self.exit_btn.setFixedSize(30, 30))
+
+    def _update_ribbon_active_indicator(self, key: str) -> None:
+        """Moves the persistent active-menu highlight (see
+        _build_ribbon_navigation) to sit directly over whichever
+        top-level menu's group contains `key`, fully covering that
+        item's native text so only this label's brighter text shows.
+        Harmless no-op if the menu bar hasn't been laid out yet (e.g.
+        the very first call during __init__, before the window is
+        shown) - the next real navigation or resize corrects it."""
+        for group_name, keys in self.menu_groups.items():
+            if key not in keys:
+                continue
+            menu = self._group_headers.get(group_name)
+            if menu is None:
+                return
+            rect = self.ribbon_tab_row.actionGeometry(menu.menuAction())
+            if rect.isNull() or not self.ribbon_tab_row.isVisible():
+                self.ribbon_active_label.setVisible(False)
+                return
+            top_left = self.ribbon_tab_row.mapTo(self.ribbon_tab_row.parentWidget(), rect.topLeft())
+            # Size the label to its OWN sizeHint (never narrower than the
+            # real item's rect) rather than forcing it into exactly
+            # rect.width() - QLabel doesn't elide/compress text that
+            # doesn't fit, it just clips it, and even small font-metric
+            # differences between this label and the native QMenuBar
+            # item's own text measurement were enough to clip "PORTAL".
+            # Centering any extra width on the original rect keeps it
+            # visually aligned with the real item underneath.
+            self.ribbon_active_label.setText(group_name)
+            hint_width = max(rect.width(), self.ribbon_active_label.sizeHint().width())
+            box_x = top_left.x() - (hint_width - rect.width()) // 2
+            self.ribbon_active_label.setGeometry(box_x, top_left.y(), hint_width, rect.height())
+            self.ribbon_active_label.setVisible(True)
+            self.ribbon_active_label.raise_()
+            return
+        self.ribbon_active_label.setVisible(False)
+
+    def _show_ribbon_hamburger_menu(self) -> None:
+        """Narrow-window fallback for the top ribbon: every page and
+        every utility action the tab/action rows normally expose, in one
+        dropdown, built fresh each click from the same permission-filtered
+        data (_visible_pages_in_group) so it can never disagree with them."""
+        from PyQt6.QtWidgets import QMenu
+        menu = QMenu(self)
+        for group_name in self.menu_groups:
+            items = self._visible_pages_in_group(group_name)
+            if not items:
+                continue
+            submenu = menu.addMenu(group_name)
+            for key, icon, title in items:
+                action = submenu.addAction(f"{icon}  {title}")
+                action.triggered.connect(lambda checked=False, k=key: self._select_page(k))
+
+        menu.addSeparator()
+        if auth_session.is_logged_in():
+            logout_action = menu.addAction("⏻  Log Out")
+            logout_action.triggered.connect(self._on_logout_clicked)
+        update_action = menu.addAction("🔄  Check for Updates")
+        update_action.triggered.connect(self._on_manual_update_check)
+        exit_action = menu.addAction("⏻  Exit Application")
+        exit_action.triggered.connect(self.close)
+
+        menu.exec(self.ribbon_hamburger_btn.mapToGlobal(self.ribbon_hamburger_btn.rect().bottomLeft()))
 
     def _show_db_missing_warning(self):
         """Professionally warns the user that the selected database does not exist."""
@@ -1590,7 +2040,8 @@ class MainWindow(QMainWindow):
     def _sidebar_footer_btn_qss(self, font_size: int, collapsed: bool) -> str:
         """Shared style for the sidebar's 'Check for Updates' footer
         button, used both at initial build and whenever
-        apply_sidebar_font_settings re-applies font/collapsed state."""
+        apply_sidebar_font_settings re-applies font/collapsed state. The
+        top ribbon uses its own _ribbon_icon_btn_qss instead."""
         align = "center" if collapsed else "left"
         padding = "14px 0px" if collapsed else "14px 20px"
         return f"""
@@ -1613,7 +2064,8 @@ class MainWindow(QMainWindow):
 
     def _sidebar_exit_btn_qss(self, font_size: int, collapsed: bool) -> str:
         """Shared style for the sidebar's Exit button - see
-        _sidebar_footer_btn_qss for why this is a shared helper."""
+        _sidebar_footer_btn_qss for why this is a shared helper. The top
+        ribbon uses its own _ribbon_icon_btn_qss instead."""
         align = "center" if collapsed else "left"
         padding = "14px 0px" if collapsed else "14px 20px"
         return f"""
@@ -1630,6 +2082,33 @@ class MainWindow(QMainWindow):
             QPushButton:hover {{
                 background-color: {_SB_DANGER_HOVER_BG};
                 color: {_SB_TEXT_BRIGHT};
+            }}
+        """
+
+    def _ribbon_icon_btn_qss(self, font_size: int, bg_color: str, hover_color: str) -> str:
+        """Solid, circular icon-button style for the top ribbon's utility
+        cluster (Check for Updates / Exit). The sidebar's equivalent
+        buttons (_sidebar_footer_btn_qss/_sidebar_exit_btn_qss) are
+        flat/transparent until hovered, which reads fine as part of a
+        tall vertical list but was barely visible as a lone icon in the
+        ribbon's single-line top strip - a filled, colored chip is
+        clearly visible and reads as a real button at a glance."""
+        return f"""
+            QPushButton {{
+                background-color: {bg_color};
+                color: {_SB_TEXT_BRIGHT};
+                border: none;
+                border-radius: 15px;
+                min-width: 30px;
+                max-width: 30px;
+                min-height: 30px;
+                max-height: 30px;
+                font-size: {font_size}px;
+                font-weight: 700;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                background-color: {hover_color};
             }}
         """
 
@@ -1651,15 +2130,60 @@ class MainWindow(QMainWindow):
             if hasattr(header, "set_font_size"):
                 header.set_font_size(sidebar_group_font_size)
 
+        # Top ribbon only: _group_headers holds QMenu objects there (one
+        # per QMenuBar entry), which have no set_font_size of their own -
+        # the menu bar's item font size lives in the QMenuBar's own QSS.
+        if hasattr(self, "ribbon_tab_row"):
+            self.ribbon_tab_row.setStyleSheet(f"""
+                QMenuBar#ribbonMenuBar {{
+                    background-color: transparent;
+                    border: none;
+                    padding: 0px;
+                    spacing: 0px;
+                }}
+                QMenuBar#ribbonMenuBar::item {{
+                    background-color: rgba(255, 255, 255, 0.05);
+                    color: {_SB_TEXT_BRIGHT};
+                    padding: 5px 14px;
+                    margin: 0px;
+                    border-radius: 4px;
+                    font-size: {sidebar_group_font_size + 1}px;
+                    font-weight: 700;
+                    letter-spacing: 0.6px;
+                }}
+                QMenuBar#ribbonMenuBar::item:selected, QMenuBar#ribbonMenuBar::item:pressed {{
+                    background-color: {_SB_HOVER_BG};
+                    color: {_SB_TEXT_BRIGHT};
+                }}
+            """)
+
         for btn in getattr(self, "_nav_buttons", {}).values():
             if hasattr(btn, "set_font_sizes"):
                 btn.set_font_sizes(sidebar_font_size, sidebar_collapsed_font_size)
             if hasattr(btn, "set_collapsed"):
                 btn.set_collapsed(self._is_sidebar_collapsed)
 
+        # The top ribbon's top strip has no expanded/collapsed sidebar
+        # concept of its own - its footer/exit buttons are always the
+        # compact, icon-only style (set at build time in
+        # _build_ribbon_navigation), just re-sized by the same sliders.
+        footer_exit_collapsed = self._is_sidebar_collapsed or hasattr(self, "ribbon_tab_row")
+        footer_exit_horizontal = hasattr(self, "ribbon_tab_row")
+
         if hasattr(self, "footer_update_btn"):
-            if self._is_sidebar_collapsed:
-                self.footer_update_btn.setText("🔄")
+            if footer_exit_horizontal:
+                self.footer_update_btn.setText("↻")
+                self.footer_update_btn.setToolTip("Check for Updates")
+                self.footer_update_btn.setStyleSheet(
+                    self._ribbon_icon_btn_qss(16, _SB_ACCENT, _SB_ACCENT_HOVER)
+                )
+                # See _build_ribbon_navigation: re-styling an already-laid-
+                # out widget can re-trigger Qt's stylesheet box-size
+                # polish and widen it back out, so the fixed size is
+                # re-asserted every time this style is (re-)applied.
+                self.footer_update_btn.setFixedSize(30, 30)
+            elif footer_exit_collapsed:
+                self.footer_update_btn.setText("↻")
                 self.footer_update_btn.setToolTip("Check for Updates")
                 self.footer_update_btn.setStyleSheet(
                     self._sidebar_footer_btn_qss(sidebar_collapsed_font_size, True)
@@ -1672,8 +2196,15 @@ class MainWindow(QMainWindow):
                 )
 
         if hasattr(self, "exit_btn"):
-            if self._is_sidebar_collapsed:
-                self.exit_btn.setText("⏻")
+            if footer_exit_horizontal:
+                self.exit_btn.setText("✕")
+                self.exit_btn.setToolTip("Exit Application")
+                self.exit_btn.setStyleSheet(
+                    self._ribbon_icon_btn_qss(16, _SB_DANGER_HOVER_BG, "#c0392b")
+                )
+                self.exit_btn.setFixedSize(30, 30)
+            elif footer_exit_collapsed:
+                self.exit_btn.setText("✕")
                 self.exit_btn.setToolTip("Exit Application")
                 self.exit_btn.setStyleSheet(
                     self._sidebar_exit_btn_qss(sidebar_collapsed_font_size, True)
@@ -1743,16 +2274,17 @@ class MainWindow(QMainWindow):
             
         # Check if the focused widget is a child of the invoice scroll area
         if hasattr(self, "invoice_scroll_area") and self.invoice_scroll_area.widget():
-            # SPECIAL CASE: If Chassis input is focused, ensure Pricing Summary is also visible
-            if now == self.invoice_chassis_input:
-                if hasattr(self, "invoice_pricing_group"):
-                    # Scroll to ensure the bottom of the pricing group is visible
-                    self.invoice_scroll_area.ensureWidgetVisible(self.invoice_pricing_group, 50, 50)
-                    return
-
             # isAncestorOf is more reliable for nested widgets (like QComboBox's line edit)
             if self.invoice_scroll_area.widget().isAncestorOf(now):
-                # Scroll to the widget with a 100px vertical margin for better context
+                # Scroll to the widget with a 100px vertical margin for better context.
+                # Chassis Number used to be a special case that forced the
+                # Pricing Summary group into view on every focus, which
+                # yanked the form upward out from under the user the moment
+                # they clicked/selected a chassis - jarring during data
+                # entry and not something they asked for. It's now treated
+                # like every other field: ensureWidgetVisible is a no-op if
+                # the field is already on screen, which it always is right
+                # after being clicked/selected.
                 self.invoice_scroll_area.ensureWidgetVisible(now, 50, 100)
 
     def _add_page(self, key: str, widget: QWidget, title: str) -> None:
@@ -3207,22 +3739,32 @@ class MainWindow(QMainWindow):
             self._refresh_dashboard()
             self._update_invoice_upload_status()
 
-    def _delete_invoice(self, invoice_id: int, invoice_number: str, dialog: QDialog | None = None) -> None:
-        """Deletes a single FAILED invoice (see invoice_service.delete_invoice)."""
-        reply = QMessageBox.question(
-            self,
-            "Delete Invoice",
-            f"Permanently delete invoice {invoice_number}? This cannot be undone.\n\n"
-            "Any motorcycle it marked as SOLD will be restored to resale (IN_STOCK).",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
+    def _delete_invoice(self, invoice_id: int, invoice_number: str, dialog: QDialog | None = None, confirm: bool = True) -> bool:
+        """Deletes a single FAILED invoice (see invoice_service.delete_invoice).
+
+        confirm=False skips the Yes/No prompt - used by the chassis-recovery
+        dialog (_check_stuck_chassis_recovery), which already shows its own
+        explicit "Release This Chassis" choice and would otherwise confirm
+        twice. Returns whether the invoice was actually deleted, so callers
+        can decide whether to proceed with follow-up UI state (e.g. clearing
+        the chassis field) only on real success."""
+        if confirm:
+            reply = QMessageBox.question(
+                self,
+                "Delete Invoice",
+                f"Permanently delete invoice {invoice_number}? This cannot be undone.\n\n"
+                "Any motorcycle it marked as SOLD will be restored to resale (IN_STOCK).",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return False
 
         db = SessionLocal()
+        deleted = False
         try:
-            invoice_service.delete_invoice(db, invoice_id)
-            self._show_success("Invoice Deleted", f"Invoice {invoice_number} has been deleted.")
+            deleted = invoice_service.delete_invoice(db, invoice_id)
+            if deleted:
+                self._show_success("Invoice Deleted", f"Invoice {invoice_number} has been deleted.")
         except ValueError as e:
             self._show_error("Cannot Delete", str(e))
         except Exception as e:
@@ -3234,6 +3776,7 @@ class MainWindow(QMainWindow):
                 dialog.accept()
             self._refresh_dashboard()
             self._update_invoice_upload_status()
+        return deleted
 
     def _delete_failed_invoices(self) -> None:
         """Bulk-delete FAILED invoices for the Dashboard's FAILED SYNC card.
@@ -3289,6 +3832,139 @@ class MainWindow(QMainWindow):
         self._show_success("Invoices Deleted", f"Deleted {deleted} failed invoice(s).")
         self._refresh_dashboard()
         self._update_invoice_upload_status()
+
+    def _open_failed_invoices_dialog(self) -> None:
+        """Invoice page's "Retry" button: a working list of every FAILED
+        invoice, each with its own Retry/Delete - the per-invoice actions
+        already built for the single-invoice detail view (_retry_invoice_upload/
+        _delete_invoice) reachable without leaving the invoice form or
+        digging through Reports/Dashboard. Deliberately scoped to exactly
+        the per-row actions requested - no new bulk controls (those already
+        exist on the Dashboard's FAILED SYNC card via _retry_all_failed_invoices/
+        _delete_failed_invoices)."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Failed Invoices")
+        dialog.setMinimumSize(650, 500)
+        dialog.resize(700, 550)
+
+        outer = QVBoxLayout(dialog)
+        outer.setContentsMargins(20, 20, 20, 20)
+        outer.setSpacing(15)
+
+        header = QLabel("Failed Invoices")
+        header.setStyleSheet("font-size: 18px; font-weight: bold; color: #2c3e50;")
+        outer.addWidget(header)
+
+        scroll = QScrollArea(dialog)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        outer.addWidget(scroll, 1)
+
+        rows_container = QWidget()
+        rows_layout = QVBoxLayout(rows_container)
+        rows_layout.setContentsMargins(0, 0, 10, 0)
+        rows_layout.setSpacing(10)
+        scroll.setWidget(rows_container)
+
+        close_btn = QPushButton("Close")
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.clicked.connect(dialog.accept)
+        close_row = QHBoxLayout()
+        close_row.addStretch(1)
+        close_row.addWidget(close_btn)
+        outer.addLayout(close_row)
+
+        def refresh_rows() -> None:
+            while rows_layout.count():
+                item = rows_layout.takeAt(0)
+                w = item.widget()
+                if w is not None:
+                    w.deleteLater()
+
+            db = SessionLocal()
+            try:
+                failed = (
+                    db.query(Invoice)
+                    .options(joinedload(Invoice.customer))
+                    .filter(Invoice.sync_status == "FAILED")
+                    .order_by(Invoice.datetime.desc())
+                    .all()
+                )
+                rows_data = [
+                    (
+                        inv.id,
+                        inv.invoice_number,
+                        inv.datetime.strftime("%Y-%m-%d %H:%M") if inv.datetime else "N/A",
+                        inv.customer.name if inv.customer else "N/A",
+                        inv.fbr_response_message or "Unknown error",
+                    )
+                    for inv in failed
+                ]
+            finally:
+                db.close()
+
+            if not rows_data:
+                empty_label = QLabel("No failed invoices ✓")
+                empty_label.setStyleSheet("color: #27ae60; font-size: 14px; padding: 30px;")
+                empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                rows_layout.addWidget(empty_label)
+                rows_layout.addStretch(1)
+                return
+
+            for inv_id, inv_num, dt_str, buyer_name, error_msg in rows_data:
+                row = QFrame()
+                row.setObjectName("formGroup")
+                row_layout = QVBoxLayout(row)
+                row_layout.setContentsMargins(15, 12, 15, 12)
+                row_layout.setSpacing(6)
+
+                top_line = QLabel(f"<b>{inv_num}</b>  •  {dt_str}  •  {buyer_name}")
+                top_line.setStyleSheet("color: #2c3e50; font-size: 13px;")
+                row_layout.addWidget(top_line)
+
+                error_line = QLabel(error_msg)
+                error_line.setStyleSheet("color: #e74c3c; font-size: 11px;")
+                error_line.setWordWrap(True)
+                row_layout.addWidget(error_line)
+
+                btn_row = QHBoxLayout()
+                btn_row.addStretch(1)
+
+                row_retry_btn = QPushButton("\U0001f504 Retry")
+                row_retry_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                row_retry_btn.setStyleSheet(
+                    "QPushButton { background-color: #3498db; color: white; border: none; "
+                    "border-radius: 6px; font-weight: bold; padding: 6px 16px; }"
+                    "QPushButton:hover { background-color: #2980b9; }"
+                )
+                # No `dialog` passed through - unlike the single-invoice detail
+                # view's retry/delete buttons, this list must stay open so
+                # the user can work through multiple failed invoices in one
+                # sitting; refresh_rows() re-queries afterward instead.
+                row_retry_btn.clicked.connect(
+                    lambda checked=False, iid=inv_id: (self._retry_invoice_upload(iid), refresh_rows())
+                )
+                btn_row.addWidget(row_retry_btn)
+
+                row_delete_btn = QPushButton("\U0001f5d1️ Delete")
+                row_delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                row_delete_btn.setStyleSheet(
+                    "QPushButton { background-color: #e74c3c; color: white; border: none; "
+                    "border-radius: 6px; font-weight: bold; padding: 6px 16px; }"
+                    "QPushButton:hover { background-color: #c0392b; }"
+                )
+                row_delete_btn.clicked.connect(
+                    lambda checked=False, iid=inv_id, inum=inv_num: (self._delete_invoice(iid, inum), refresh_rows())
+                )
+                btn_row.addWidget(row_delete_btn)
+
+                row_layout.addLayout(btn_row)
+                rows_layout.addWidget(row)
+
+            rows_layout.addStretch(1)
+
+        refresh_rows()
+        dialog.exec()
 
     def _create_invoice_page(self) -> QWidget:
         page = QWidget(self)
@@ -3356,9 +4032,69 @@ class MainWindow(QMainWindow):
 
         env_badge_layout.addWidget(env_label_title)
         env_badge_layout.addWidget(self.invoice_env_value_label)
-        
+
+        # "Submitted Today" Counter - sits directly left of the Environment
+        # badge so the cashier sees today's progress right next to which
+        # FBR environment it's going to. Read-only count, same style
+        # language as the FBR SUBMITTED box (flat color + bold value) but
+        # its own color so the two aren't mistaken for the same stat.
+        self.invoice_today_stat_widget = QFrame(header_widget)
+        self.invoice_today_stat_widget.setObjectName("todayStatBox")
+        self.invoice_today_stat_widget.setStyleSheet("""
+            #todayStatBox {
+                background-color: #2980b9;
+                border-radius: 8px;
+                min-width: 140px;
+            }
+        """)
+        today_stat_layout = QVBoxLayout(self.invoice_today_stat_widget)
+        today_stat_layout.setContentsMargins(15, 10, 15, 10)
+        today_stat_layout.setSpacing(2)
+
+        today_stat_label = QLabel("SUBMITTED TODAY")
+        today_stat_label.setStyleSheet("font-weight: bold; font-size: 10px; color: rgba(255,255,255,0.8); text-transform: uppercase;")
+        today_stat_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.invoice_today_stat_value = QLabel("0")
+        self.invoice_today_stat_value.setStyleSheet("font-weight: bold; font-size: 24px; color: white;")
+        self.invoice_today_stat_value.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        today_stat_layout.addWidget(today_stat_label)
+        today_stat_layout.addWidget(self.invoice_today_stat_value)
+
+        # "Submitted This Month" Counter - sits directly adjacent (right) to
+        # the Today counter, same style language, own color so all three
+        # badges (Today / Month / All-time) stay visually distinct.
+        self.invoice_month_stat_widget = QFrame(header_widget)
+        self.invoice_month_stat_widget.setObjectName("monthStatBox")
+        self.invoice_month_stat_widget.setStyleSheet("""
+            #monthStatBox {
+                background-color: #8e44ad;
+                border-radius: 8px;
+                min-width: 140px;
+            }
+        """)
+        month_stat_layout = QVBoxLayout(self.invoice_month_stat_widget)
+        month_stat_layout.setContentsMargins(15, 10, 15, 10)
+        month_stat_layout.setSpacing(2)
+
+        month_stat_label = QLabel("SUBMITTED THIS MONTH")
+        month_stat_label.setStyleSheet("font-weight: bold; font-size: 10px; color: rgba(255,255,255,0.8); text-transform: uppercase;")
+        month_stat_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.invoice_month_stat_value = QLabel("0")
+        self.invoice_month_stat_value.setStyleSheet("font-weight: bold; font-size: 24px; color: white;")
+        self.invoice_month_stat_value.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        month_stat_layout.addWidget(month_stat_label)
+        month_stat_layout.addWidget(self.invoice_month_stat_value)
+
         # Insert before the FBR stat widget
         header_layout.insertWidget(2, self.invoice_env_badge)
+        # Then insert the Today counter to the left of the Environment badge
+        header_layout.insertWidget(2, self.invoice_today_stat_widget)
+        # Then insert the Month counter directly adjacent (right) of Today
+        header_layout.insertWidget(3, self.invoice_month_stat_widget)
 
         root_layout.addWidget(header_widget)
 
@@ -3466,10 +4202,19 @@ class MainWindow(QMainWindow):
         group1_layout.addLayout(qr_fbr_layout, 2, 3)
 
         # CNIC
-        group1_layout.addWidget(QLabel("ID Card (CNIC)"), 3, 0)
+        group1_layout.addWidget(QLabel('ID Card (CNIC) <span style="color:#e74c3c;">*</span>'), 3, 0)
         self.invoice_buyer_cnic_input = QLineEdit()
         self.invoice_buyer_cnic_input.setPlaceholderText("12345-1234567-1")
         group1_layout.addWidget(self.invoice_buyer_cnic_input, 3, 1)
+
+        # Persistent "existing customer" indicator - unlike the toast below
+        # (which auto-hides after 5s), this stays visible for as long as the
+        # typed CNIC matches someone, and clears the instant it stops
+        # matching (edited further, or cleared).
+        self.invoice_cnic_match_label = QLabel("")
+        self.invoice_cnic_match_label.setWordWrap(True)
+        self.invoice_cnic_match_label.setStyleSheet("color: #27ae60; font-size: 11px;")
+        group1_layout.addWidget(self.invoice_cnic_match_label, 3, 4)
 
         def format_invoice_cnic_input():
             text = self.invoice_buyer_cnic_input.text()
@@ -3484,6 +4229,10 @@ class MainWindow(QMainWindow):
             if len(formatted) != 15:
                 # Leaving a complete CNIC re-arms the check for the next one.
                 self._last_cnic_toast = None
+                # Runs on every keystroke (unlike the debounced block below),
+                # so the persistent indicator never lags behind an
+                # incomplete/edited CNIC.
+                self.invoice_cnic_match_label.clear()
             if formatted != text:
                 # Signals stay blocked: an unblocked setText re-emits textChanged and
                 # runs every slot on this field a second time for one keystroke.
@@ -3499,6 +4248,7 @@ class MainWindow(QMainWindow):
                 try:
                     existing = db_check.query(Customer).filter(Customer.cnic == formatted).first()
                     if existing:
+                        self.invoice_cnic_match_label.setText(f"✓ Existing customer: {existing.name}")
                         from app.updater.toast_notification import ToastNotification
                         msg = f"A {existing.type.lower()} named '{existing.name}' with this CNIC already exists."
                         toast = ToastNotification(
@@ -3506,11 +4256,28 @@ class MainWindow(QMainWindow):
                                 message=msg,
                                 parent=self,
                                 duration_ms=5000,
-                                show_action=False,
+                                show_action=True,
+                                action_text="Load Customer",
                                 bg_color="#3498db", # Informative Blue
                                 position="top-right"
                             )
+                        # Kept referenced on self so the Python wrapper can't
+                        # be GC'd before the user clicks the action button -
+                        # the previous toast's would-be reference (if any)
+                        # is simply replaced, which is fine - each toast
+                        # also has its own auto-hide timer regardless.
+                        self._cnic_duplicate_toast = toast
+                        toast.clicked.connect(
+                            lambda cnic=formatted: self._on_load_customer_toast_clicked(cnic)
+                        )
                         toast.show_notification()
+                    else:
+                        # Covers editing a middle digit of an already-complete
+                        # CNIC straight into a different, unmatched one - the
+                        # length never dips below 15 along the way, so the
+                        # per-keystroke clear() above never fires for this
+                        # transition.
+                        self.invoice_cnic_match_label.clear()
                 finally:
                     db_check.close()
 
@@ -3519,11 +4286,31 @@ class MainWindow(QMainWindow):
         # NTN
         group1_layout.addWidget(QLabel("NTN (Optional)"), 3, 2)
         self.invoice_buyer_ntn_input = QLineEdit()
+
+        def format_invoice_ntn_input():
+            text = self.invoice_buyer_ntn_input.text()
+            filtered = "".join(c for c in text if c.isdigit() or c == "-")
+            # 9 chars matches the real constraint fbr_client.py already
+            # enforces server-side (truncates BuyerNTN to 9 chars before
+            # sending) - surfaced here at entry time instead of silently
+            # truncated later.
+            if len(filtered) > 9:
+                filtered = filtered[:9]
+            if filtered != text:
+                # Blocked (not left open like phone's formatter): NTN has a
+                # second textChanged consumer below (_on_invoice_ntn_changed,
+                # a DB-lookup autofill) that must see the cleaned text once,
+                # not run twice for one keystroke.
+                self.invoice_buyer_ntn_input.blockSignals(True)
+                self.invoice_buyer_ntn_input.setText(filtered)
+                self.invoice_buyer_ntn_input.blockSignals(False)
+
+        self.invoice_buyer_ntn_input.textChanged.connect(format_invoice_ntn_input)
         self.invoice_buyer_ntn_input.textChanged.connect(self._on_invoice_ntn_changed)
         group1_layout.addWidget(self.invoice_buyer_ntn_input, 3, 3)
 
         # Buyer Name & Father Name (Side by Side)
-        group1_layout.addWidget(QLabel("Buyer Name"), 4, 0)
+        group1_layout.addWidget(QLabel('Buyer Name <span style="color:#e74c3c;">*</span>'), 4, 0)
         
         buyer_name_layout = QHBoxLayout()
         buyer_name_layout.setSpacing(0)
@@ -3567,10 +4354,36 @@ class MainWindow(QMainWindow):
         """)
         search_dealer_btn.clicked.connect(self._open_dealer_search_dialog)
         buyer_name_layout.addWidget(search_dealer_btn)
-        
+
+        recent_customers_btn = QPushButton("🕘")
+        recent_customers_btn.setFixedSize(40, 36)
+        recent_customers_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        recent_customers_btn.setToolTip("Recent Customers (F3)")
+        recent_customers_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f8f9fa;
+                color: #2c3e50;
+                border: 1px solid #ced4da;
+                border-radius: 4px;
+                font-size: 18px;
+                font-weight: bold;
+                padding: 0;
+                margin-left: 6px;
+            }
+            QPushButton:hover {
+                background-color: #e9ecef;
+                color: #3498db;
+            }
+            QPushButton:pressed {
+                background-color: #dee2e6;
+            }
+        """)
+        recent_customers_btn.clicked.connect(self._open_recent_customers_dialog)
+        buyer_name_layout.addWidget(recent_customers_btn)
+
         group1_layout.addLayout(buyer_name_layout, 4, 1)
 
-        group1_layout.addWidget(QLabel("Father Name"), 4, 2)
+        group1_layout.addWidget(QLabel('Father Name <span style="color:#e74c3c;">*</span>'), 4, 2)
         self.invoice_buyer_father_input = QLineEdit()
         group1_layout.addWidget(self.invoice_buyer_father_input, 4, 3)
 
@@ -3583,7 +4396,7 @@ class MainWindow(QMainWindow):
         self.invoice_buyer_father_input.textChanged.connect(format_invoice_father_input)
 
         # Phone & Address
-        group1_layout.addWidget(QLabel("Cell (Phone)"), 5, 0)
+        group1_layout.addWidget(QLabel('Cell (Phone) <span style="color:#e74c3c;">*</span>'), 5, 0)
         self.invoice_buyer_phone_input = QLineEdit()
         self.invoice_buyer_phone_input.setPlaceholderText("03021234567")
         group1_layout.addWidget(self.invoice_buyer_phone_input, 5, 1)
@@ -3600,7 +4413,7 @@ class MainWindow(QMainWindow):
 
         self.invoice_buyer_phone_input.textChanged.connect(format_invoice_phone_input)
 
-        group1_layout.addWidget(QLabel("Address"), 5, 2)
+        group1_layout.addWidget(QLabel('Address <span style="color:#e74c3c;">*</span>'), 5, 2)
         self.invoice_buyer_address_input = AddressShortcodeLineEdit()
         group1_layout.addWidget(self.invoice_buyer_address_input, 5, 3)
 
@@ -3633,20 +4446,29 @@ class MainWindow(QMainWindow):
         group2_layout.addWidget(g2_title, 0, 0, 1, 4)
 
         # Model & Color
-        group2_layout.addWidget(QLabel("Model"), 1, 0)
+        group2_layout.addWidget(QLabel('Model <span style="color:#e74c3c;">*</span>'), 1, 0)
         self.invoice_model_combo = QComboBox()
         group2_layout.addWidget(self.invoice_model_combo, 1, 1)
 
-        group2_layout.addWidget(QLabel("Color"), 1, 2)
+        group2_layout.addWidget(QLabel('Color <span style="color:#e74c3c;">*</span>'), 1, 2)
         self.invoice_color_combo = QComboBox()
         group2_layout.addWidget(self.invoice_color_combo, 1, 3)
 
+        # Live IN_STOCK count for the selected Model+Color, updated by
+        # _update_invoice_stock_hint (called from _on_invoice_model_changed
+        # and _on_invoice_color_changed). Informational only - never blocks
+        # submission, same as the existing out-of-stock soft-note in
+        # _validate_invoice_form which this complements, not replaces.
+        self.invoice_stock_hint_label = QLabel("")
+        self.invoice_stock_hint_label.setStyleSheet("font-size: 11px;")
+        group2_layout.addWidget(self.invoice_stock_hint_label, 1, 4)
+
         # Chassis & Engine
-        group2_layout.addWidget(QLabel("Chassis Number"), 2, 0)
+        group2_layout.addWidget(QLabel('Chassis Number <span style="color:#e74c3c;">*</span>'), 2, 0)
         self.invoice_chassis_input = AutocompleteLineEdit()
         group2_layout.addWidget(self.invoice_chassis_input, 2, 1)
 
-        group2_layout.addWidget(QLabel("Engine Number"), 2, 2)
+        group2_layout.addWidget(QLabel('Engine Number <span style="color:#e74c3c;">*</span>'), 2, 2)
         self.invoice_engine_input = QLineEdit()
         group2_layout.addWidget(self.invoice_engine_input, 2, 3)
 
@@ -3672,20 +4494,51 @@ class MainWindow(QMainWindow):
 
         container_layout.addWidget(group2)
 
-        # --- Group 2.5: Advanced FBR Fields (Collapsible style) ---
+        # --- Group 2.5: Advanced FBR Fields (collapsible - hidden/shown by
+        # the user, the fields and their values are completely unaffected
+        # either way, so this cannot change what gets sent to FBR) ---
         group_fbr = QFrame()
         group_fbr.setObjectName("formGroup")
-        group_fbr_layout = QGridLayout(group_fbr)
-        group_fbr_layout.setContentsMargins(20, 25, 20, 20)
+        group_fbr_outer = QVBoxLayout(group_fbr)
+        group_fbr_outer.setContentsMargins(20, 15, 20, 20)
+        group_fbr_outer.setSpacing(0)
+
+        # A clickable header (styled identically to the plain QLabel groupTitle
+        # it replaces) toggling the content below - same expand/collapse
+        # pattern already used for the sidebar's group headers.
+        self.invoice_fbr_advanced_toggle = QPushButton("▶  ADVANCED FBR FIELDS (OPTIONAL)")
+        self.invoice_fbr_advanced_toggle.setObjectName("groupTitleToggle")
+        self.invoice_fbr_advanced_toggle.setCheckable(True)
+        self.invoice_fbr_advanced_toggle.setChecked(False)  # Collapsed by default
+        self.invoice_fbr_advanced_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.invoice_fbr_advanced_toggle.setStyleSheet("""
+            QPushButton#groupTitleToggle {
+                background: transparent;
+                border: none;
+                text-align: left;
+                font-weight: bold;
+                color: #34495e;
+                font-size: 14px;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+                padding: 0;
+                margin-bottom: 5px;
+            }
+            QPushButton#groupTitleToggle:hover {
+                color: #2c3e50;
+            }
+        """)
+        group_fbr_outer.addWidget(self.invoice_fbr_advanced_toggle)
+
+        gfbr_content = QWidget()
+        gfbr_content.setVisible(False)  # Matches the toggle's collapsed default above
+        group_fbr_layout = QGridLayout(gfbr_content)
+        group_fbr_layout.setContentsMargins(0, 10, 0, 0)
         group_fbr_layout.setHorizontalSpacing(20)
         group_fbr_layout.setVerticalSpacing(15)
 
-        gfbr_title = QLabel("Advanced FBR Fields (Optional)")
-        gfbr_title.setObjectName("groupTitle")
-        group_fbr_layout.addWidget(gfbr_title, 0, 0, 1, 4)
-
         # Invoice Type & Ref USIN
-        group_fbr_layout.addWidget(QLabel("Invoice Type"), 1, 0)
+        group_fbr_layout.addWidget(QLabel("Invoice Type"), 0, 0)
         self.invoice_type_combo = QComboBox()
         self.invoice_type_combo.addItems([
             "1 - New (Standard)",
@@ -3694,13 +4547,22 @@ class MainWindow(QMainWindow):
             "11 - 3rd Schedule New",
             "12 - 3rd Schedule Credit",
         ])
-        self.invoice_type_combo.setCurrentIndex(0)
-        group_fbr_layout.addWidget(self.invoice_type_combo, 1, 1)
+        self.invoice_type_combo.setCurrentIndex(3)  # Default to "11 - 3rd Schedule New"
+        group_fbr_layout.addWidget(self.invoice_type_combo, 0, 1)
 
-        group_fbr_layout.addWidget(QLabel("Reference USIN (RefUSIN)"), 1, 2)
+        group_fbr_layout.addWidget(QLabel("Reference USIN (RefUSIN)"), 0, 2)
         self.invoice_ref_usin_input = QLineEdit()
         self.invoice_ref_usin_input.setPlaceholderText("Required for Debit/Credit notes. Leave blank for New invoices.")
-        group_fbr_layout.addWidget(self.invoice_ref_usin_input, 1, 3)
+        group_fbr_layout.addWidget(self.invoice_ref_usin_input, 0, 3)
+
+        group_fbr_outer.addWidget(gfbr_content)
+
+        def _toggle_advanced_fbr_fields(expanded: bool) -> None:
+            gfbr_content.setVisible(expanded)
+            arrow = "▼" if expanded else "▶"
+            self.invoice_fbr_advanced_toggle.setText(f"{arrow}  ADVANCED FBR FIELDS (OPTIONAL)")
+
+        self.invoice_fbr_advanced_toggle.toggled.connect(_toggle_advanced_fbr_fields)
 
         container_layout.addWidget(group_fbr)
 
@@ -3758,7 +4620,18 @@ class MainWindow(QMainWindow):
         self.invoice_fbr_label = QLabel("Ready to submit")
         self.invoice_fbr_label.setStyleSheet("color: #7f8c8d; font-style: italic;")
         button_layout.addWidget(self.invoice_fbr_label)
-        
+
+        # Separate from invoice_fbr_label on purpose: that label is
+        # already triple-duty (static caption / out-of-stock notice from
+        # _validate_invoice_form / post-submission FBR confirmation from
+        # _display_invoice_qr) - reusing it here would let this label's
+        # own updates stomp the FBR confirmation the instant it appears.
+        # This one has exactly one job: explain why Submit is disabled.
+        self.invoice_validation_hint_label = QLabel("")
+        self.invoice_validation_hint_label.setStyleSheet("color: #e67e22; font-size: 11px;")
+        self.invoice_validation_hint_label.setWordWrap(True)
+        button_layout.addWidget(self.invoice_validation_hint_label)
+
         button_layout.addStretch(1)
         
         reset_btn = QPushButton("Reset Form")
@@ -3790,7 +4663,14 @@ class MainWindow(QMainWindow):
         """)
         self.invoice_upload_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         button_layout.addWidget(self.invoice_upload_status_label)
-        
+
+        retry_failed_invoices_btn = QPushButton("\U0001f504 Retry")
+        retry_failed_invoices_btn.setObjectName("resetButton")
+        retry_failed_invoices_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        retry_failed_invoices_btn.setToolTip("Review and retry/delete failed FBR uploads")
+        retry_failed_invoices_btn.clicked.connect(self._open_failed_invoices_dialog)
+        button_layout.addWidget(retry_failed_invoices_btn)
+
         root_layout.addWidget(button_bar)
 
         # Autocomplete setup for Buyer Name
@@ -3810,6 +4690,9 @@ class MainWindow(QMainWindow):
 
         dealer_search_shortcut = QShortcut(QKeySequence(Qt.Key.Key_F2), self.invoice_buyer_name_input)
         dealer_search_shortcut.activated.connect(self._open_dealer_search_dialog)
+
+        recent_customers_shortcut = QShortcut(QKeySequence(Qt.Key.Key_F3), self.invoice_buyer_name_input)
+        recent_customers_shortcut.activated.connect(self._open_recent_customers_dialog)
 
         # Autocomplete setup for Chassis
         self._chassis_completer_model = QStringListModel(self)
@@ -3907,7 +4790,14 @@ class MainWindow(QMainWindow):
         # Move from Engine (Row 2 Right) to Payment Mode (Row 3 Left)
         self.setTabOrder(self.invoice_engine_input, self.invoice_payment_mode_combo)
         self.setTabOrder(self.invoice_payment_mode_combo, self.invoice_quantity_spin)
-        self.setTabOrder(self.invoice_quantity_spin, self.invoice_submit_btn)
+        # Pricing fields were previously skipped entirely - reachable only
+        # by mouse click for a manual override. Pure tab-order metadata;
+        # no change to any value/default/computation.
+        self.setTabOrder(self.invoice_quantity_spin, self.invoice_amount_spin)
+        self.setTabOrder(self.invoice_amount_spin, self.invoice_tax_spin)
+        self.setTabOrder(self.invoice_tax_spin, self.invoice_further_tax_spin)
+        self.setTabOrder(self.invoice_further_tax_spin, self.invoice_total_spin)
+        self.setTabOrder(self.invoice_total_spin, self.invoice_submit_btn)
 
         self._invoice_current_price = None
         self._load_invoice_models()
@@ -4437,6 +5327,27 @@ class MainWindow(QMainWindow):
     def _create_portal_accounts_page(self) -> QWidget:
         from app.qt_ui.portal_account_page import PortalAccountPage
         return PortalAccountPage(self)
+
+    def _create_spare_parts_page(self) -> QWidget:
+        """The one integration point for the fully independent Spare Parts
+        module (spare_parts/ at the repo root - its own package, own
+        sp_-prefixed tables, no imports from this app). Deleting that
+        folder and removing this method plus its _add_page/nav_icons/
+        menu_groups entries below is the complete, clean removal path -
+        see spare_parts/__init__.py. The import is deliberately lazy and
+        wrapped so a missing/broken spare_parts/ only disables this one
+        page instead of preventing the whole app from starting."""
+        try:
+            from spare_parts.ui.main_widget import SparePartsModuleWidget
+            return SparePartsModuleWidget(self)
+        except Exception as e:
+            logger.error(f"Spare Parts module failed to load: {e}", exc_info=True)
+            placeholder = QWidget(self)
+            placeholder_layout = QVBoxLayout(placeholder)
+            placeholder_label = QLabel("Spare Parts module is unavailable.\nSee logs for details.")
+            placeholder_label.setStyleSheet("color: #e74c3c; padding: 40px; font-size: 14px;")
+            placeholder_layout.addWidget(placeholder_label)
+            return placeholder
 
     def _open_fbr_security(self):
         dialog = FBRSecurityDialog(self)
@@ -7051,6 +7962,30 @@ class MainWindow(QMainWindow):
             self.invoice_model_combo.addItem(name)
         self.invoice_color_combo.clear()
 
+        # Dropdown CONTENTS are unchanged (still priced models only - zero
+        # risk to the pricing logic that feeds invoice_amount_spin). This
+        # only makes the omission discoverable: _recalculate_invoice_totals
+        # already has a working fallback (global tax-rate calculation)
+        # when no price is selected, it just wasn't obvious that entering
+        # Amount manually for an unlisted model was a supported path.
+        try:
+            from app.db.models import ProductModel
+            db_mc = SessionLocal()
+            try:
+                all_model_count = db_mc.query(ProductModel).count()
+            finally:
+                db_mc.close()
+            missing_count = max(0, all_model_count - len(models))
+            if missing_count:
+                self.invoice_model_combo.setToolTip(
+                    f"{missing_count} model(s) have no active price and aren't listed here - "
+                    "enter Amount manually below if selling one."
+                )
+            else:
+                self.invoice_model_combo.setToolTip("")
+        except Exception as e:
+            logger.error(f"Error checking for unpriced models: {e}")
+
     def _generate_invoice_number(self) -> None:
         db = SessionLocal()
         try:
@@ -7068,17 +8003,20 @@ class MainWindow(QMainWindow):
             if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                 self.focusNextChild()
                 return True
+
         return super().eventFilter(obj, event)
 
     def _on_invoice_model_changed(self, model_name: str) -> None:
         if not model_name:
             self.invoice_color_combo.clear()
             self._invoice_current_price = None
+            self._update_invoice_stock_hint()
             return
         prices = price_service.get_active_prices_for_model(model_name)
         if not prices:
             self.invoice_color_combo.clear()
             self._invoice_current_price = None
+            self._update_invoice_stock_hint()
             return
         colors: List[str] = []
         for price in prices:
@@ -7104,10 +8042,12 @@ class MainWindow(QMainWindow):
             self._invoice_current_price = price
             self.invoice_amount_spin.setValue(float(price.base_price or 0))
             self._recalculate_invoice_totals()
+            self._update_invoice_stock_hint()
 
     def _on_invoice_color_changed(self, color: str) -> None:
         model_name = self.invoice_model_combo.currentText()
         if not model_name or not color:
+            self._update_invoice_stock_hint()
             return
         price = price_service.get_price_by_model_and_color(model_name, color)
         self._invoice_current_price = price
@@ -7116,6 +8056,36 @@ class MainWindow(QMainWindow):
             self.invoice_amount_spin.setValue(float(price.base_price or 0))
             self.invoice_amount_spin.blockSignals(False)
             self._recalculate_invoice_totals()
+        self._update_invoice_stock_hint()
+
+    def _update_invoice_stock_hint(self) -> None:
+        """Live IN_STOCK count for the current Model+Color - purely
+        informational, never changes submit eligibility (that's governed
+        solely by _check_invoice_form_completeness/_validate_invoice_form,
+        unchanged)."""
+        model_name = self.invoice_model_combo.currentText().strip()
+        color = self.invoice_color_combo.currentText().strip().upper()
+        if not model_name or not color:
+            self.invoice_stock_hint_label.clear()
+            return
+        db = SessionLocal()
+        try:
+            model_obj = db.query(ProductModel).filter(ProductModel.model_name == model_name).first()
+            count = 0
+            if model_obj:
+                count = db.query(Motorcycle).filter(
+                    Motorcycle.product_model_id == model_obj.id,
+                    Motorcycle.color == color,
+                    Motorcycle.status == "IN_STOCK",
+                ).count()
+        finally:
+            db.close()
+        if count > 0:
+            self.invoice_stock_hint_label.setText(f"✓ {count} in stock")
+            self.invoice_stock_hint_label.setStyleSheet("color: #27ae60; font-size: 11px;")
+        else:
+            self.invoice_stock_hint_label.setText("⚠ Out of stock")
+            self.invoice_stock_hint_label.setStyleSheet("color: #e67e22; font-size: 11px;")
 
     def _recalculate_invoice_totals(self) -> None:
         try:
@@ -7286,6 +8256,74 @@ class MainWindow(QMainWindow):
         finally:
             db.close()
 
+    def _check_stuck_chassis_recovery(self, chassis_upper: str) -> bool:
+        """Detects a motorcycle that's stuck SOLD only because a LOCAL
+        invoice for it never actually synced to FBR (create_invoice marks a
+        matched motorcycle SOLD before attempting the FBR sync, and that
+        commits either way - see invoice_service.py). Without this, the
+        chassis search still surfaces it, autofill proceeds as if it were a
+        normal in-stock bike, and the user only discovers it's blocked at
+        Submit time with a bare "already SOLD" error and no way forward.
+
+        Offers two already-existing, already-correct recovery actions
+        instead of writing new ones: retry the same invoice's FBR sync
+        (_retry_invoice_upload) or release the chassis by deleting that
+        local invoice (_delete_invoice, which itself only ever calls
+        invoice_service.delete_invoice - never touches create_invoice's own
+        SOLD-marking logic).
+
+        Returns True if a blocking dialog was shown (caller should stop -
+        chassis field already cleared below), False if this chassis isn't
+        stuck this way (caller proceeds with its own normal/soft handling).
+        """
+        db = SessionLocal()
+        try:
+            bike = db.query(Motorcycle).filter(Motorcycle.chassis_number == chassis_upper).first()
+            if not bike or (bike.status or "").upper() == "IN_STOCK":
+                return False
+
+            blocking_invoice = (
+                db.query(Invoice)
+                .join(InvoiceItem, InvoiceItem.invoice_id == Invoice.id)
+                .filter(InvoiceItem.motorcycle_id == bike.id, Invoice.is_fiscalized == False)
+                .order_by(Invoice.id.desc())
+                .first()
+            )
+            if not blocking_invoice:
+                return False  # Stuck for some other reason - let the generic soft-note handle it.
+
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Chassis Blocked by Unsynced Invoice")
+            msg.setIcon(QMessageBox.Icon.Warning)
+            msg.setText(
+                f"Chassis {chassis_upper} is marked {bike.status} by invoice "
+                f"{blocking_invoice.invoice_number}, which never synced to FBR "
+                f"(status: {blocking_invoice.sync_status}).\n\n"
+                f"Reason: {blocking_invoice.fbr_response_message or 'Unknown'}\n\n"
+                "Retry uploading that invoice, or release this chassis to start fresh."
+            )
+            retry_btn = msg.addButton("Retry FBR Sync", QMessageBox.ButtonRole.ActionRole)
+            release_btn = msg.addButton("Release Chassis && Start Fresh", QMessageBox.ButtonRole.ActionRole)
+            msg.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+            msg.exec()
+
+            clicked = msg.clickedButton()
+            if clicked is retry_btn:
+                self._retry_invoice_upload(blocking_invoice.id)
+                self.invoice_chassis_input.clear()
+                self.invoice_engine_input.clear()
+                self._check_invoice_form_completeness()
+            elif clicked is release_btn:
+                if self._delete_invoice(blocking_invoice.id, blocking_invoice.invoice_number, confirm=False):
+                    self.invoice_chassis_input.clear()
+                    self.invoice_engine_input.clear()
+                    self._check_invoice_form_completeness()
+            else:
+                self.invoice_chassis_input.clear()
+            return True
+        finally:
+            db.close()
+
     def _on_chassis_selected(self, chassis: str) -> None:
         chassis = chassis.strip().upper()
         if not chassis:
@@ -7351,10 +8389,12 @@ class MainWindow(QMainWindow):
             bike = db.query(Motorcycle).filter(Motorcycle.chassis_number == chassis).first()
             logger.info(f"DEBUG [_on_chassis_selected] bike_found={bike is not None}")
             if bike:
+                if (bike.status or "").upper() != "IN_STOCK" and self._check_stuck_chassis_recovery(chassis):
+                    return
                 self.invoice_chassis_input.blockSignals(True)
                 self.invoice_chassis_input.setText(bike.chassis_number)
                 self.invoice_chassis_input.blockSignals(False)
-                
+
                 if bike.engine_number:
                     self.invoice_engine_input.setText(bike.engine_number)
                 
@@ -7528,6 +8568,80 @@ class MainWindow(QMainWindow):
         self._recalculate_invoice_totals()
         self._check_invoice_form_completeness()
 
+    def _open_recent_customers_dialog(self) -> None:
+        dialog = RecentCustomersDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        customer = dialog.selected_customer
+        if customer is None:
+            return
+        self._fill_buyer_fields_from_customer(customer)
+
+    def _fill_buyer_fields_from_customer(self, customer, *, skip_cnic: bool = False) -> None:
+        """Populates the buyer fields from an existing Customer row - used
+        by NTN autofill, the duplicate-CNIC toast's "Load Customer"
+        action, and the recent-customers picker. Mirrors
+        _on_invoice_cnic_changed's existing convention (not the
+        dealer-search one): no forced uppercasing, no blanket
+        blockSignals around name/father/phone/address, so the live
+        per-field format filters already wired on those inputs run the
+        same way they would for manually typed text - this introduces no
+        new formatting behavior beyond what the most-used existing
+        lookup (CNIC) already does.
+
+        self._is_dealer_selected is always computed from the customer's
+        actual type, never hardcoded True - unlike the two existing
+        dealer-only call sites (_on_dealer_business_selected,
+        _open_dealer_search_dialog), which are only safe doing that
+        because they're reached exclusively through dealer-filtered
+        lookups. This helper has no such guarantee, since NTN/CNIC/
+        recent-customer lookups can match an individual OR a dealer.
+
+        skip_cnic=True (used by NTN autofill only) leaves the CNIC field
+        untouched, since the user may have typed/matched a different
+        CNIC separately - silently overwriting it with whatever CNIC
+        this customer happens to have would produce a mismatched buyer
+        identity in the actual submitted invoice.
+        """
+        if customer.name:
+            self.invoice_buyer_name_input.setText(customer.name)
+        if customer.father_name:
+            self.invoice_buyer_father_input.setText(customer.father_name)
+        if customer.phone:
+            self.invoice_buyer_phone_input.setText(customer.phone)
+        if customer.address:
+            self.invoice_buyer_address_input.setText(customer.address)
+        if not skip_cnic and customer.cnic:
+            self.invoice_buyer_cnic_input.blockSignals(True)
+            self.invoice_buyer_cnic_input.setText(customer.cnic)
+            self.invoice_buyer_cnic_input.blockSignals(False)
+        self.invoice_buyer_ntn_input.blockSignals(True)
+        self.invoice_buyer_ntn_input.setText(customer.ntn or "")
+        self.invoice_buyer_ntn_input.blockSignals(False)
+
+        from app.db.models import CustomerType
+        self._is_dealer_selected = (customer.type == CustomerType.DEALER)
+        self._recalculate_invoice_totals()
+        self._check_invoice_form_completeness()
+
+    def _on_load_customer_toast_clicked(self, triggering_cnic: str) -> None:
+        """Handles the duplicate-CNIC toast's "Load Customer" action.
+        Re-reads the CNIC field NOW (not the value captured when the
+        toast was created) - the user may have kept typing after the
+        toast appeared, and loading stale data for a CNIC that no longer
+        matches what's in the field would silently produce a mismatched
+        buyer identity."""
+        current_cnic = self.invoice_buyer_cnic_input.text().strip()
+        if current_cnic != triggering_cnic:
+            return
+        db = SessionLocal()
+        try:
+            customer = db.query(Customer).filter(Customer.cnic == current_cnic).first()
+            if customer:
+                self._fill_buyer_fields_from_customer(customer)
+        finally:
+            db.close()
+
     def _on_invoice_ntn_changed(self, text: str) -> None:
         # Same fix as _on_invoice_cnic_changed: reset first, so a stale
         # "dealer" flag from a previously-selected dealer can't survive an
@@ -7549,11 +8663,10 @@ class MainWindow(QMainWindow):
         try:
             customer = db.query(Customer).filter(Customer.ntn == ntn).first()
             if customer:
-                # Update dealer status based on customer type
-                from app.db.models import CustomerType
-                self._is_dealer_selected = (customer.type == CustomerType.DEALER)
-                self._recalculate_invoice_totals()
-                self._check_invoice_form_completeness()
+                # skip_cnic=True: an NTN match should not silently overwrite
+                # whatever CNIC the user already typed/matched separately -
+                # see _fill_buyer_fields_from_customer's docstring.
+                self._fill_buyer_fields_from_customer(customer, skip_cnic=True)
         except Exception:
             pass
         finally:
@@ -7630,7 +8743,10 @@ class MainWindow(QMainWindow):
             db.close()
 
     def _check_invoice_form_completeness(self) -> None:
-        """Checks if all required fields are filled to enable the submit button."""
+        """Checks if all required fields are filled to enable the submit
+        button, and (see invoice_validation_hint_label's own comment at
+        its construction site for why it's a separate label) explains
+        what's still missing/invalid there while it's disabled."""
         # Required fields (NTN is intentionally excluded)
         cnic = self.invoice_buyer_cnic_input.text().strip()
         name = self.invoice_buyer_name_input.text().strip()
@@ -7641,84 +8757,166 @@ class MainWindow(QMainWindow):
         engine = self.invoice_engine_input.text().strip()
         model = self.invoice_model_combo.currentText().strip()
         color = self.invoice_color_combo.currentText().strip()
-        
+
         # Simple completeness check
         is_complete = all([cnic, name, father, phone, address, chassis, engine, model, color])
-        
+
         # Additional format checks for activation
         is_valid_cnic = bool(re.match(r"^\d{5}-\d{7}-\d$", cnic))
         is_valid_phone = bool(re.match(r"^03\d{9}$", phone))
-        
+
         self.invoice_submit_btn.setEnabled(is_complete and is_valid_cnic and is_valid_phone)
 
+        if hasattr(self, "invoice_validation_hint_label"):
+            missing: list[str] = []
+            if not cnic:
+                missing.append("CNIC")
+            elif not is_valid_cnic:
+                missing.append("CNIC format")
+            if not name:
+                missing.append("Buyer Name")
+            if not father:
+                missing.append("Father Name")
+            if not phone:
+                missing.append("Cell")
+            elif not is_valid_phone:
+                missing.append("Cell format")
+            if not address:
+                missing.append("Address")
+            if not model:
+                missing.append("Model")
+            if not color:
+                missing.append("Color")
+            if not chassis:
+                missing.append("Chassis Number")
+            if not engine:
+                missing.append("Engine Number")
+            self.invoice_validation_hint_label.setText(
+                f"Missing/invalid: {', '.join(missing)}" if missing else ""
+            )
+
     def _validate_invoice_form(self) -> bool:
+        """Same checks, same regexes, same pass/fail conditions as
+        before - refactored from sequential "stop at the first problem"
+        into "collect every problem, show them all in one dialog" (the
+        presentation is what changed, not what's validated or what's
+        allowed through).
+
+        One deliberate exception to "collect everything, show once": the
+        out-of-stock chassis case below can trigger
+        _check_stuck_chassis_recovery, an interactive dialog with its own
+        recovery actions - that has to show and return on its own, it can't
+        be folded into the single collected-errors message."""
+        errors: list[str] = []
+
         inv_num = self.invoice_number_input.text().strip()
         if not inv_num or inv_num == "ERROR":
-            self._show_error("Validation Error", "Invoice number is not valid.")
-            return False
+            errors.append("Invoice number is not valid.")
+
         buyer_cnic = self.invoice_buyer_cnic_input.text().strip()
         if not buyer_cnic:
-            self._show_error("Validation Error", "CNIC is required.")
-            return False
-        if not re.match(r"^\d{5}-\d{7}-\d$", buyer_cnic):
-            self._show_error("Validation Error", "CNIC format must be 12345-1234567-1.")
-            return False
+            errors.append("CNIC is required.")
+        elif not re.match(r"^\d{5}-\d{7}-\d$", buyer_cnic):
+            errors.append("CNIC format must be 12345-1234567-1.")
+
         buyer_name = self.invoice_buyer_name_input.text().strip()
         if not buyer_name:
-            self._show_error("Validation Error", "Buyer name is required.")
-            return False
+            errors.append("Buyer name is required.")
+
         phone = self.invoice_buyer_phone_input.text().strip()
         if not phone:
-            self._show_error("Validation Error", "Cell number is required.")
-            return False
-        if not re.match(r"^03\d{9}$", phone):
-            self._show_error("Validation Error", "Cell must be 03XXXXXXXXX.")
-            return False
+            errors.append("Cell number is required.")
+        elif not re.match(r"^03\d{9}$", phone):
+            errors.append("Cell must be 03XXXXXXXXX.")
+
         model_name = self.invoice_model_combo.currentText().strip()
         if not model_name:
-            self._show_error("Validation Error", "Model is required.")
-            return False
+            errors.append("Model is required.")
+
         color = self.invoice_color_combo.currentText().strip()
         if not color:
-            self._show_error("Validation Error", "Color is required.")
-            return False
+            errors.append("Color is required.")
+
         chassis = self.invoice_chassis_input.text().strip()
+        out_of_stock_note = None
         if not chassis:
-            self._show_error("Validation Error", "Chassis number is required.")
-            return False
-        chassis_upper = chassis.strip().upper()
-        db_check = SessionLocal()
-        try:
-            if invoice_service.is_chassis_uploaded_to_fbr(db_check, chassis_upper):
-                from app.db.models import Invoice, InvoiceItem, Motorcycle
-                inv = (
-                    db_check.query(Invoice)
-                    .join(InvoiceItem)
-                    .join(Motorcycle, InvoiceItem.motorcycle_id == Motorcycle.id)
-                    .filter(Motorcycle.chassis_number == chassis_upper, Invoice.is_fiscalized == True)
-                    .order_by(Invoice.datetime.desc())
-                    .first()
-                )
-                fbr_id = inv.fbr_invoice_number if inv else None
-                detail = f"\n\nFBR Invoice: {fbr_id}" if fbr_id else ""
-                self._show_error(
-                    "Duplicate Chassis Detected",
-                    f"Chassis number {chassis_upper} has already been uploaded to FBR and cannot be submitted again.{detail}",
-                )
+            errors.append("Chassis number is required.")
+        else:
+            chassis_upper = chassis.strip().upper()
+            db_check = SessionLocal()
+            try:
+                if invoice_service.is_chassis_uploaded_to_fbr(db_check, chassis_upper):
+                    from app.db.models import Invoice, InvoiceItem, Motorcycle
+                    inv = (
+                        db_check.query(Invoice)
+                        .join(InvoiceItem)
+                        .join(Motorcycle, InvoiceItem.motorcycle_id == Motorcycle.id)
+                        .filter(Motorcycle.chassis_number == chassis_upper, Invoice.is_fiscalized == True)
+                        .order_by(Invoice.datetime.desc())
+                        .first()
+                    )
+                    fbr_id = inv.fbr_invoice_number if inv else None
+                    detail = f" (FBR Invoice: {fbr_id})" if fbr_id else ""
+                    errors.append(
+                        f"Duplicate Chassis: {chassis_upper} has already been uploaded to FBR.{detail}"
+                    )
+                else:
+                    from app.db.models import Motorcycle
+                    bike = db_check.query(Motorcycle).filter(Motorcycle.chassis_number == chassis_upper).first()
+                    if not bike or (bike.status or "").upper() != "IN_STOCK":
+                        out_of_stock_note = "Out-of-stock chassis detected: will still submit to FBR and auto-create SOLD inventory on success."
+            finally:
+                db_check.close()
+
+            # Final, guaranteed gate (complements the proactive check already
+            # in _on_chassis_selected, which can be bypassed by pasting a
+            # chassis and tabbing away without ever triggering its
+            # completer-accept/returnPressed signals).
+            if out_of_stock_note is not None and self._check_stuck_chassis_recovery(chassis_upper):
                 return False
-            from app.db.models import Motorcycle
-            bike = db_check.query(Motorcycle).filter(Motorcycle.chassis_number == chassis_upper).first()
-            if not bike or (bike.status or "").upper() != "IN_STOCK":
-                self.invoice_fbr_label.setText("Out-of-stock chassis detected: will still submit to FBR and auto-create SOLD inventory on success.")
-        finally:
-            db_check.close()
+
         engine = self.invoice_engine_input.text().strip()
         if not engine:
-            self._show_error("Validation Error", "Engine number is required.")
-            return False
+            errors.append("Engine number is required.")
+        else:
+            engine_upper = engine.upper()
+            # Read fresh rather than reusing `chassis_upper` from the block
+            # above - that name only exists inside this function's `else`
+            # branch for a non-empty chassis, so reusing it would raise
+            # NameError whenever chassis is blank but engine isn't.
+            chassis_for_engine_check = self.invoice_chassis_input.text().strip().upper()
+            db_check_engine = SessionLocal()
+            try:
+                # Exclude the motorcycle matching the currently-typed
+                # chassis: selecting an existing in-stock bike auto-fills
+                # its own engine number (_on_chassis_selected), which would
+                # otherwise incorrectly flag as a "duplicate" of itself.
+                dup_engine = db_check_engine.query(Motorcycle).filter(
+                    Motorcycle.engine_number == engine_upper,
+                    Motorcycle.chassis_number != chassis_for_engine_check,
+                ).first()
+                if dup_engine:
+                    errors.append(
+                        f"Duplicate Engine Number: {engine_upper} is already registered "
+                        f"to chassis {dup_engine.chassis_number} (status: {dup_engine.status})."
+                    )
+            finally:
+                db_check_engine.close()
+
         if self.invoice_amount_spin.value() <= 0:
-            self._show_error("Validation Error", "Amount (Excl. Tax) must be greater than zero.")
+            errors.append("Amount (Excl. Tax) must be greater than zero.")
+
+        if errors:
+            self._show_error("Validation Errors", "\n".join(f"• {e}" for e in errors))
             return False
+
+        # Only reached once every blocking check above has passed - same
+        # guarantee the old early-return chain gave this informational
+        # (non-blocking) note, so it never shows alongside a validation
+        # failure that says required fields are still missing.
+        if out_of_stock_note:
+            self.invoice_fbr_label.setText(out_of_stock_note)
+
         return True
 
     def _show_error(self, title: str, message: str) -> None:
@@ -7816,6 +9014,46 @@ class MainWindow(QMainWindow):
                 self.invoice_fbr_stat_value.setText(str(count))
         except Exception as e:
             logger.error("Error updating FBR counter: %s", e)
+        finally:
+            db.close()
+
+    def _update_today_submitted_counter(self) -> None:
+        """Update the 'Submitted Today' counter next to the Environment badge."""
+        if not hasattr(self, "invoice_today_stat_value"):
+            return
+        db = SessionLocal()
+        try:
+            now = dt.datetime.now()
+            start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_of_day = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+            count = db.query(Invoice).filter(
+                Invoice.fbr_invoice_number != None,
+                Invoice.datetime >= start_of_day,
+                Invoice.datetime <= end_of_day,
+            ).count()
+            self.invoice_today_stat_value.setText(str(count))
+        except Exception as e:
+            logger.error("Error updating today's submitted counter: %s", e)
+        finally:
+            db.close()
+
+    def _update_month_submitted_counter(self) -> None:
+        """Update the 'Submitted This Month' counter adjacent to the Today counter."""
+        if not hasattr(self, "invoice_month_stat_value"):
+            return
+        db = SessionLocal()
+        try:
+            now = dt.datetime.now()
+            start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            end_of_day = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+            count = db.query(Invoice).filter(
+                Invoice.fbr_invoice_number != None,
+                Invoice.datetime >= start_of_month,
+                Invoice.datetime <= end_of_day,
+            ).count()
+            self.invoice_month_stat_value.setText(str(count))
+        except Exception as e:
+            logger.error("Error updating month's submitted counter: %s", e)
         finally:
             db.close()
     
@@ -7916,7 +9154,31 @@ class MainWindow(QMainWindow):
 
         if not self._validate_invoice_form():
             return
-        
+
+        # Final human checkpoint before an invoice goes to FBR - a
+        # consequential, hard-to-undo action. Read-only preview built from
+        # the same .text()/.currentText() calls the payload-assembly code
+        # below reads again a few lines later; nothing is mutated between
+        # the two reads, so this is just the same source of truth read
+        # twice, not a risk of drifting from what actually gets sent.
+        review_summary = (
+            f"Buyer Name: {self.invoice_buyer_name_input.text().strip()}\n"
+            f"CNIC: {self.invoice_buyer_cnic_input.text().strip()}\n"
+            f"Model: {self.invoice_model_combo.currentText().strip()}\n"
+            f"Color: {self.invoice_color_combo.currentText().strip()}\n"
+            f"Chassis: {self.invoice_chassis_input.text().strip().upper()}\n"
+            f"Total Amount: Rs. {self.invoice_total_spin.value():,.2f}\n"
+            f"Invoice Type: {self.invoice_type_combo.currentText().strip()}"
+        )
+        review_reply = QMessageBox.question(
+            self,
+            "Confirm Submission",
+            f"Please review before submitting to FBR:\n\n{review_summary}\n\nSubmit this invoice?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if review_reply != QMessageBox.StandardButton.Yes:
+            return
+
         # Disable button during submission to prevent double-clicks
         self.invoice_submit_btn.setEnabled(False)
         self.invoice_submit_btn.setText("⏳ Submitting...")
@@ -8057,6 +9319,8 @@ class MainWindow(QMainWindow):
             
             self._clear_invoice_form_after_submission()
             self._update_fbr_submitted_counter()
+            self._update_today_submitted_counter()
+            self._update_month_submitted_counter()
             self._update_invoice_upload_status()
             
             # Queue SMS if enabled
@@ -8113,7 +9377,7 @@ class MainWindow(QMainWindow):
         self.invoice_payment_mode_combo.setCurrentIndex(0)
         # Reset Advanced FBR Fields
         if hasattr(self, "invoice_type_combo"):
-            self.invoice_type_combo.setCurrentIndex(0)
+            self.invoice_type_combo.setCurrentIndex(3)  # Default to "11 - 3rd Schedule New"
         if hasattr(self, "invoice_ref_usin_input"):
             self.invoice_ref_usin_input.clear()
         self.invoice_chassis_input.clear()
@@ -8143,7 +9407,7 @@ class MainWindow(QMainWindow):
         self.invoice_payment_mode_combo.setCurrentIndex(0)
         # Reset Advanced FBR Fields
         if hasattr(self, "invoice_type_combo"):
-            self.invoice_type_combo.setCurrentIndex(0)
+            self.invoice_type_combo.setCurrentIndex(3)  # Default to "11 - 3rd Schedule New"
         if hasattr(self, "invoice_ref_usin_input"):
             self.invoice_ref_usin_input.clear()
         self.invoice_chassis_input.clear()
@@ -8160,6 +9424,22 @@ class MainWindow(QMainWindow):
         self.invoice_buyer_cnic_input.setFocus()
 
     def _on_invoice_reset_clicked(self) -> None:
+        has_data = any([
+            self.invoice_buyer_cnic_input.text().strip(),
+            self.invoice_buyer_name_input.text().strip(),
+            self.invoice_chassis_input.text().strip(),
+            self.invoice_engine_input.text().strip(),
+            self.invoice_amount_spin.value() > 0,
+        ])
+        if has_data:
+            reply = QMessageBox.question(
+                self,
+                "Confirm Reset",
+                "This will clear all entered invoice data. Continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
         self._reset_invoice_form()
         self._generate_invoice_number()
 
@@ -11604,7 +12884,16 @@ class MainWindow(QMainWindow):
             self.stack.updateGeometry()
         for page_key, btn in self._nav_buttons.items():
             btn.setChecked(page_key == key)
-        
+
+        # Top ribbon only: keep a persistent underline beneath whichever
+        # top-level menu contains the page that's actually showing. The
+        # menu bar's own :selected/:hover QSS state is purely mouse-
+        # position-driven and clears the instant the cursor moves on, so
+        # it can't double as a "this is where you are" indicator -
+        # _update_ribbon_active_indicator fixes that independently of it.
+        if hasattr(self, "ribbon_active_label"):
+            self._update_ribbon_active_indicator(key)
+
         # Trigger refresh if page has a refresh method
         if key == "dashboard":
             self._refresh_dashboard()
@@ -11634,6 +12923,8 @@ class MainWindow(QMainWindow):
             self._reload_spare_ledger()
         elif key == "invoice":
             self._update_fbr_submitted_counter()
+            self._update_today_submitted_counter()
+            self._update_month_submitted_counter()
             self._generate_invoice_number()
 
     def _sales_date_range(self):
