@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from spare_parts.db.models import SpHeldSale, SpHeldSaleItem
 from spare_parts.errors import SparePartsValidationError
 from spare_parts.services import parts_service
-from spare_parts.utils import to_decimal
+from spare_parts.utils import normalize_invoice_type, to_decimal
 from spare_parts.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -88,6 +88,7 @@ def _validate_draft_items(db: Session, items: list[dict]) -> list[dict]:
             part_id=part.id, qty=base_qty, sold_as=sold_as,
             pack_qty=qty_entered if sold_as == "PACK" else None,
             price_type=price_type,
+            invoice_type=normalize_invoice_type(raw.get("invoice_type")),
             unit_price=unit_price, discount=discount, line_total=line_total,
         ))
     return validated
@@ -106,6 +107,7 @@ def create_held_sale(
     paid=0,
     payment_method: str = "Cash",
     notes: str = "",
+    invoice_type: Optional[int] = None,
 ) -> SpHeldSale:
     sale_type = (sale_type or "RETAIL").upper()
     validated_items = _validate_draft_items(db, items)
@@ -120,6 +122,7 @@ def create_held_sale(
             tax_percent=to_decimal(tax_percent, "Tax %") if tax_percent is not None else Decimal("0"),
             paid=to_decimal(paid, "Paid amount"),
             payment_method=(payment_method or "Cash").strip() or "Cash",
+            invoice_type=normalize_invoice_type(invoice_type),
             notes=(notes or "").strip() or None,
             held_at=dt.datetime.utcnow(),
         )
@@ -149,6 +152,7 @@ def update_held_sale(
     paid=None,
     payment_method: Optional[str] = None,
     notes: Optional[str] = None,
+    invoice_type=...,  # sentinel: only overwritten if explicitly passed
 ) -> SpHeldSale:
     """Re-holding a card that was previously resumed from a draft updates
     that SAME draft record instead of creating a duplicate - see
@@ -186,6 +190,8 @@ def update_held_sale(
             held.payment_method = payment_method.strip() or "Cash"
         if notes is not None:
             held.notes = notes.strip() or None
+        if invoice_type is not ...:
+            held.invoice_type = normalize_invoice_type(invoice_type)
 
         held.held_at = dt.datetime.utcnow()
         db.commit()

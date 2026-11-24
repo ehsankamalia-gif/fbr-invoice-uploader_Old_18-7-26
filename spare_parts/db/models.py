@@ -339,6 +339,11 @@ class SpSale(SpareBase):
     paid = Column(Numeric(12, 2), nullable=False, default=0)
     due = Column(Numeric(12, 2), nullable=False, default=0)
     payment_method = Column(String(30), nullable=False, default="Cash")
+    # FBR InvoiceType code sent in this sale's payload (1 = New/Standard,
+    # 11 = 3rd Schedule New). NULL on sales saved before this column
+    # existed - fbr_payload_service treats NULL as 1, so their payloads
+    # are unchanged.
+    invoice_type = Column(Integer, nullable=True)
 
     # "POSTED" or "CANCELLED" - same cancel-and-reenter policy as
     # sp_purchases, see spare_parts.services.sales_service.cancel_sale.
@@ -394,6 +399,10 @@ class SpSaleItem(SpareBase):
     # carried a warranty - NULL if the part had none, or predates this
     # column. See reports_service.search_warranty.
     warranty_expires_at = Column(DateTime, nullable=True)
+    # FBR InvoiceType code for THIS line (1 / 11). NULL on lines saved
+    # before per-line types existed - the payload then falls back to the
+    # sale's own invoice_type, then to 1.
+    invoice_type = Column(Integer, nullable=True)
 
     sale = relationship("SpSale", back_populates="items")
     part = relationship("SpPart")
@@ -549,6 +558,8 @@ class SpHeldSale(SpareBase):
     tax_percent = Column(Numeric(5, 2), nullable=False, default=0)
     paid = Column(Numeric(12, 2), nullable=False, default=0)
     payment_method = Column(String(30), nullable=False, default="Cash")
+    # Kept so the chosen FBR invoice type survives Hold -> Resume.
+    invoice_type = Column(Integer, nullable=True)
     notes = Column(Text, nullable=True)
 
     held_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False)
@@ -576,6 +587,8 @@ class SpHeldSaleItem(SpareBase):
     # Resume instead of collapsing to the draft's one overall sale_type
     # (see spare_parts.ui.sale_card_widget.SaleCardWidget.load_from_held_sale).
     price_type = Column(String(20), nullable=False, default="RETAIL")
+    # Per-line FBR InvoiceType, kept so it survives Hold -> Resume.
+    invoice_type = Column(Integer, nullable=True)
     unit_price = Column(Numeric(12, 2), nullable=False)
     discount = Column(Numeric(12, 2), nullable=False, default=0)
     line_total = Column(Numeric(12, 2), nullable=False)

@@ -39,6 +39,7 @@ from spare_parts.services import customers_service, held_sales_service, parts_se
 from spare_parts.services.settings_service import get_settings
 from spare_parts.ui.customers_page import CustomerDialog
 from spare_parts.ui.widgets import NoScrollComboBox, NoScrollDoubleSpinBox, NoScrollSpinBox, trash_icon
+from spare_parts.utils import DEFAULT_SALE_INVOICE_TYPE, SALE_INVOICE_TYPES
 from spare_parts.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -324,7 +325,9 @@ _PART_SEARCH_POPUP_QSS = """
 """
 
 _WALK_IN_LABEL = "(Walk-in / No customer)"
-_ITEM_COLUMNS = ["Part", "Type", "Brand", "Sell As", "Qty", "Unit Price", "Discount", "Line Total", ""]
+_ITEM_COLUMNS = ["Part", "Type", "Invoice Type", "Brand", "Sell As", "Qty", "Unit Price", "Discount", "Line Total", ""]
+(_COL_PART, _COL_TYPE, _COL_INVOICE_TYPE, _COL_BRAND, _COL_SELL_AS,
+ _COL_QTY, _COL_PRICE, _COL_DISCOUNT, _COL_TOTAL, _COL_REMOVE) = range(len(_ITEM_COLUMNS))
 
 
 class SaleCardWidget(QWidget):
@@ -387,6 +390,7 @@ class SaleCardWidget(QWidget):
         self.payment_method_combo = NoScrollComboBox()
         self.payment_method_combo.addItems(["Cash", "Card", "Bank Transfer", "Credit"])
         header_row.addWidget(self.payment_method_combo)
+
         root.addLayout(header_row)
 
         ref_row = QHBoxLayout()
@@ -420,8 +424,9 @@ class SaleCardWidget(QWidget):
 
         self.items_table = QTableWidget(0, len(_ITEM_COLUMNS))
         self.items_table.setHorizontalHeaderLabels(_ITEM_COLUMNS)
-        self.items_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.items_table.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)
+        self.items_table.horizontalHeader().setSectionResizeMode(_COL_PART, QHeaderView.ResizeMode.Stretch)
+        self.items_table.horizontalHeader().setSectionResizeMode(_COL_INVOICE_TYPE, QHeaderView.ResizeMode.ResizeToContents)
+        self.items_table.horizontalHeader().setSectionResizeMode(_COL_REMOVE, QHeaderView.ResizeMode.ResizeToContents)
         self.items_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         # Shown (not hidden) so Qt's built-in 1, 2, 3... row numbering acts
         # as a serial-number column - it stays correct automatically as
@@ -509,6 +514,17 @@ class SaleCardWidget(QWidget):
         self.part_search_input.setFocus()
 
     # --- lookups -------------------------------------------------------------
+
+    def _make_invoice_type_combo(self, code=None) -> NoScrollComboBox:
+        """Per-line FBR InvoiceType picker (userData = FBR code); defaults
+        to 3rd Schedule New."""
+        combo = NoScrollComboBox()
+        for c, label in SALE_INVOICE_TYPES:
+            combo.addItem(label, c)
+        idx = combo.findData(code)
+        combo.setCurrentIndex(idx if idx >= 0 else combo.findData(DEFAULT_SALE_INVOICE_TYPE))
+        combo.setToolTip("FBR invoice type for this line (default: 3rd Schedule New).")
+        return combo
 
     def _load_default_tax_percent(self) -> None:
         db = get_spare_session()
@@ -627,7 +643,7 @@ class SaleCardWidget(QWidget):
         anywhere in the cart. Defaults to RETAIL for an empty cart."""
         types = set()
         for row in range(self.items_table.rowCount()):
-            type_combo = self.items_table.cellWidget(row, 1)
+            type_combo = self.items_table.cellWidget(row, _COL_TYPE)
             if type_combo is not None:
                 types.add(type_combo.currentText())
         if not types:
@@ -646,16 +662,16 @@ class SaleCardWidget(QWidget):
         added/removed (same pattern as _remove_line_item's button)."""
         row = None
         for r in range(self.items_table.rowCount()):
-            if self.items_table.cellWidget(r, 1) is type_combo:
+            if self.items_table.cellWidget(r, _COL_TYPE) is type_combo:
                 row = r
                 break
         if row is None:
             return
 
         is_wholesale = type_combo.currentText() == "WHOLESALE"
-        sell_as_combo = self.items_table.cellWidget(row, 3)
-        price_spin = self.items_table.cellWidget(row, 5)
-        part_item = self.items_table.item(row, 0)
+        sell_as_combo = self.items_table.cellWidget(row, _COL_SELL_AS)
+        price_spin = self.items_table.cellWidget(row, _COL_PRICE)
+        part_item = self.items_table.item(row, _COL_PART)
         if sell_as_combo is not None:
             sell_as_combo.setEnabled(is_wholesale)
             if not is_wholesale:
@@ -686,7 +702,7 @@ class SaleCardWidget(QWidget):
                 "customer before completing the sale.",
             )
         if is_wholesale and part and 1 < (part.min_wholesale_qty or 1):
-            qty_spin = self.items_table.cellWidget(row, 4)
+            qty_spin = self.items_table.cellWidget(row, _COL_QTY)
             qty_value = qty_spin.value() if qty_spin else 0
             if qty_value < part.min_wholesale_qty:
                 QMessageBox.information(
@@ -762,8 +778,8 @@ class SaleCardWidget(QWidget):
 
     def _find_unit_row_for_part(self, part_id: int) -> Optional[int]:
         for row in range(self.items_table.rowCount()):
-            part_item = self.items_table.item(row, 0)
-            sell_as_widget = self.items_table.cellWidget(row, 3)
+            part_item = self.items_table.item(row, _COL_PART)
+            sell_as_widget = self.items_table.cellWidget(row, _COL_SELL_AS)
             if not part_item or not sell_as_widget:
                 continue
             if (
@@ -779,10 +795,10 @@ class SaleCardWidget(QWidget):
         up what's committed to a part across every OTHER open card."""
         total = 0
         for row in range(self.items_table.rowCount()):
-            part_item = self.items_table.item(row, 0)
-            qty_widget = self.items_table.cellWidget(row, 4)
+            part_item = self.items_table.item(row, _COL_PART)
+            qty_widget = self.items_table.cellWidget(row, _COL_QTY)
             if part_item and qty_widget and part_item.data(Qt.ItemDataRole.UserRole) == part_id:
-                sell_as_widget = self.items_table.cellWidget(row, 3)
+                sell_as_widget = self.items_table.cellWidget(row, _COL_SELL_AS)
                 if sell_as_widget and sell_as_widget.currentData() == "PACK":
                     pack_size = int(sell_as_widget.property("pack_size") or 1)
                     total += qty_widget.value() * pack_size
@@ -812,10 +828,10 @@ class SaleCardWidget(QWidget):
     def _add_line_item(self, part) -> None:
         existing_row = self._find_unit_row_for_part(part.id)
         if existing_row is not None:
-            qty_widget = self.items_table.cellWidget(existing_row, 4)
+            qty_widget = self.items_table.cellWidget(existing_row, _COL_QTY)
             qty_widget.setValue(qty_widget.value() + 1)
             self._dirty = True
-            self.items_table.setCurrentCell(existing_row, 4)
+            self.items_table.setCurrentCell(existing_row, _COL_QTY)
             qty_widget.setFocus()
             qty_widget.selectAll()
             self._warn_if_oversold(part, self.qty_reserved_for_part(part.id))
@@ -829,7 +845,7 @@ class SaleCardWidget(QWidget):
         part_item = QTableWidgetItem(f"{part.part_no} - {part.name}")
         part_item.setFlags(part_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         part_item.setData(Qt.ItemDataRole.UserRole, part.id)
-        self.items_table.setItem(row, 0, part_item)
+        self.items_table.setItem(row, _COL_PART, part_item)
 
         type_combo = NoScrollComboBox()
         type_combo.addItems(["RETAIL", "WHOLESALE"])
@@ -840,11 +856,12 @@ class SaleCardWidget(QWidget):
         type_combo.currentTextChanged.connect(
             lambda _text, combo=type_combo: self._on_line_type_changed(combo)
         )
-        self.items_table.setCellWidget(row, 1, type_combo)
+        self.items_table.setCellWidget(row, _COL_TYPE, type_combo)
+        self.items_table.setCellWidget(row, _COL_INVOICE_TYPE, self._make_invoice_type_combo())
 
         brand_item = QTableWidgetItem(self._brand_name_by_id.get(part.brand_id, ""))
         brand_item.setFlags(brand_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-        self.items_table.setItem(row, 2, brand_item)
+        self.items_table.setItem(row, _COL_BRAND, brand_item)
 
         sell_as_combo = NoScrollComboBox()
         # Displayed as "Piece"/"Pack" - the stored sold_as value underneath
@@ -856,30 +873,30 @@ class SaleCardWidget(QWidget):
         sell_as_combo.setProperty("min_wholesale_qty", int(part.min_wholesale_qty or 1))
         sell_as_combo.setEnabled(is_wholesale)
         sell_as_combo.currentTextChanged.connect(self._recalc_totals)
-        self.items_table.setCellWidget(row, 3, sell_as_combo)
+        self.items_table.setCellWidget(row, _COL_SELL_AS, sell_as_combo)
 
         qty_spin = NoScrollSpinBox()
         qty_spin.setRange(1, 1_000_000)
         qty_spin.setValue(1)
         qty_spin.valueChanged.connect(self._recalc_totals)
-        self.items_table.setCellWidget(row, 4, qty_spin)
+        self.items_table.setCellWidget(row, _COL_QTY, qty_spin)
 
         price_spin = NoScrollDoubleSpinBox()
         price_spin.setRange(0, 99_999_999)
         price_spin.setDecimals(2)
         price_spin.setValue(float(self._current_unit_price(part, is_wholesale)))
         price_spin.valueChanged.connect(self._recalc_totals)
-        self.items_table.setCellWidget(row, 5, price_spin)
+        self.items_table.setCellWidget(row, _COL_PRICE, price_spin)
 
         discount_spin = NoScrollDoubleSpinBox()
         discount_spin.setRange(0, 99_999_999)
         discount_spin.setDecimals(2)
         discount_spin.valueChanged.connect(self._recalc_totals)
-        self.items_table.setCellWidget(row, 6, discount_spin)
+        self.items_table.setCellWidget(row, _COL_DISCOUNT, discount_spin)
 
         line_total_item = QTableWidgetItem("0.00")
         line_total_item.setFlags(line_total_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-        self.items_table.setItem(row, 7, line_total_item)
+        self.items_table.setItem(row, _COL_TOTAL, line_total_item)
 
         remove_btn = QPushButton()
         remove_btn.setIcon(trash_icon(14))
@@ -890,7 +907,7 @@ class SaleCardWidget(QWidget):
         remove_btn.setStyleSheet(_REMOVE_LINE_ICON_QSS)
         remove_btn.setAutoDefault(False)
         remove_btn.clicked.connect(lambda: self._remove_line_item(remove_btn))
-        self.items_table.setCellWidget(row, 8, remove_btn)
+        self.items_table.setCellWidget(row, _COL_REMOVE, remove_btn)
 
         self._dirty = True
         self._recalc_totals()
@@ -909,7 +926,7 @@ class SaleCardWidget(QWidget):
 
     def _remove_line_item(self, btn) -> None:
         for row in range(self.items_table.rowCount()):
-            if self.items_table.cellWidget(row, 8) is btn:
+            if self.items_table.cellWidget(row, _COL_REMOVE) is btn:
                 self.items_table.removeRow(row)
                 break
         self._dirty = True
@@ -932,10 +949,10 @@ class SaleCardWidget(QWidget):
     def _recalc_totals(self) -> None:
         subtotal = Decimal("0")
         for row in range(self.items_table.rowCount()):
-            sell_as_widget = self.items_table.cellWidget(row, 3)
-            qty_widget = self.items_table.cellWidget(row, 4)
-            price_widget = self.items_table.cellWidget(row, 5)
-            discount_widget = self.items_table.cellWidget(row, 6)
+            sell_as_widget = self.items_table.cellWidget(row, _COL_SELL_AS)
+            qty_widget = self.items_table.cellWidget(row, _COL_QTY)
+            price_widget = self.items_table.cellWidget(row, _COL_PRICE)
+            discount_widget = self.items_table.cellWidget(row, _COL_DISCOUNT)
             if not (sell_as_widget and qty_widget and price_widget and discount_widget):
                 continue
             sold_as = sell_as_widget.currentData()
@@ -946,7 +963,7 @@ class SaleCardWidget(QWidget):
             line_total = (unit_price * base_qty) - discount
             if line_total < 0:
                 line_total = Decimal("0")
-            item = self.items_table.item(row, 7)
+            item = self.items_table.item(row, _COL_TOTAL)
             if item:
                 item.setText(f"{line_total:,.2f}")
             subtotal += line_total
@@ -1018,18 +1035,20 @@ class SaleCardWidget(QWidget):
     def _collect_items_payload(self) -> list[dict]:
         items = []
         for row in range(self.items_table.rowCount()):
-            part_item = self.items_table.item(row, 0)
-            type_widget = self.items_table.cellWidget(row, 1)
-            sell_as_widget = self.items_table.cellWidget(row, 3)
-            qty_widget = self.items_table.cellWidget(row, 4)
-            price_widget = self.items_table.cellWidget(row, 5)
-            discount_widget = self.items_table.cellWidget(row, 6)
+            part_item = self.items_table.item(row, _COL_PART)
+            type_widget = self.items_table.cellWidget(row, _COL_TYPE)
+            invoice_type_widget = self.items_table.cellWidget(row, _COL_INVOICE_TYPE)
+            sell_as_widget = self.items_table.cellWidget(row, _COL_SELL_AS)
+            qty_widget = self.items_table.cellWidget(row, _COL_QTY)
+            price_widget = self.items_table.cellWidget(row, _COL_PRICE)
+            discount_widget = self.items_table.cellWidget(row, _COL_DISCOUNT)
             items.append(dict(
                 part_id=part_item.data(Qt.ItemDataRole.UserRole),
                 # Only held_sales_service reads this key (sales_service's
                 # own validator ignores unknown keys) - it's how a mixed
                 # card's exact per-line mix survives Hold -> Resume.
                 price_type=type_widget.currentText() if type_widget else "RETAIL",
+                invoice_type=invoice_type_widget.currentData() if invoice_type_widget else None,
                 sold_as=sell_as_widget.currentData(),
                 qty_entered=qty_widget.value(),
                 unit_price=price_widget.value(),
@@ -1142,7 +1161,7 @@ class SaleCardWidget(QWidget):
                         paid=self.paid_spin.value(),
                         payment_method=self.payment_method_combo.currentText(),
                         notes=self.notes_input.text(),
-                    )
+                        )
                 else:
                     held = held_sales_service.create_held_sale(
                         db,
@@ -1156,7 +1175,7 @@ class SaleCardWidget(QWidget):
                         paid=self.paid_spin.value(),
                         payment_method=self.payment_method_combo.currentText(),
                         notes=self.notes_input.text(),
-                    )
+                        )
             finally:
                 db.close()
             self.held_sale_id = held.id
@@ -1238,7 +1257,7 @@ class SaleCardWidget(QWidget):
                 part_cell = QTableWidgetItem(f"{part.part_no} - {part.name}")
                 part_cell.setFlags(part_cell.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 part_cell.setData(Qt.ItemDataRole.UserRole, part.id)
-                self.items_table.setItem(row, 0, part_cell)
+                self.items_table.setItem(row, _COL_PART, part_cell)
 
                 type_combo = NoScrollComboBox()
                 type_combo.addItems(["RETAIL", "WHOLESALE"])
@@ -1246,11 +1265,16 @@ class SaleCardWidget(QWidget):
                 type_combo.currentTextChanged.connect(
                     lambda _text, combo=type_combo: self._on_line_type_changed(combo)
                 )
-                self.items_table.setCellWidget(row, 1, type_combo)
+                self.items_table.setCellWidget(row, _COL_TYPE, type_combo)
+                # Drafts held before per-line invoice types existed have none -> the default.
+                self.items_table.setCellWidget(
+                    row, _COL_INVOICE_TYPE,
+                    self._make_invoice_type_combo(item.invoice_type or held.invoice_type),
+                )
 
                 brand_item = QTableWidgetItem(self._brand_name_by_id.get(part.brand_id, ""))
                 brand_item.setFlags(brand_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                self.items_table.setItem(row, 2, brand_item)
+                self.items_table.setItem(row, _COL_BRAND, brand_item)
 
                 sell_as_combo = NoScrollComboBox()
                 sell_as_combo.addItem("Piece", "UNIT")
@@ -1260,31 +1284,31 @@ class SaleCardWidget(QWidget):
                 sell_as_combo.setProperty("min_wholesale_qty", int(part.min_wholesale_qty or 1))
                 sell_as_combo.setEnabled(is_wholesale_line)
                 sell_as_combo.currentTextChanged.connect(self._recalc_totals)
-                self.items_table.setCellWidget(row, 3, sell_as_combo)
+                self.items_table.setCellWidget(row, _COL_SELL_AS, sell_as_combo)
 
                 qty_spin = NoScrollSpinBox()
                 qty_spin.setRange(1, 1_000_000)
                 qty_spin.setValue(item.pack_qty if item.sold_as == "PACK" and item.pack_qty else item.qty)
                 qty_spin.valueChanged.connect(self._recalc_totals)
-                self.items_table.setCellWidget(row, 4, qty_spin)
+                self.items_table.setCellWidget(row, _COL_QTY, qty_spin)
 
                 price_spin = NoScrollDoubleSpinBox()
                 price_spin.setRange(0, 99_999_999)
                 price_spin.setDecimals(2)
                 price_spin.setValue(float(use_price))
                 price_spin.valueChanged.connect(self._recalc_totals)
-                self.items_table.setCellWidget(row, 5, price_spin)
+                self.items_table.setCellWidget(row, _COL_PRICE, price_spin)
 
                 discount_spin = NoScrollDoubleSpinBox()
                 discount_spin.setRange(0, 99_999_999)
                 discount_spin.setDecimals(2)
                 discount_spin.setValue(float(item.discount or 0))
                 discount_spin.valueChanged.connect(self._recalc_totals)
-                self.items_table.setCellWidget(row, 6, discount_spin)
+                self.items_table.setCellWidget(row, _COL_DISCOUNT, discount_spin)
 
                 line_total_item = QTableWidgetItem("0.00")
                 line_total_item.setFlags(line_total_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                self.items_table.setItem(row, 7, line_total_item)
+                self.items_table.setItem(row, _COL_TOTAL, line_total_item)
 
                 remove_btn = QPushButton()
                 remove_btn.setIcon(trash_icon(14))
@@ -1295,7 +1319,7 @@ class SaleCardWidget(QWidget):
                 remove_btn.setStyleSheet(_REMOVE_LINE_ICON_QSS)
                 remove_btn.setAutoDefault(False)
                 remove_btn.clicked.connect(lambda: self._remove_line_item(remove_btn))
-                self.items_table.setCellWidget(row, 8, remove_btn)
+                self.items_table.setCellWidget(row, _COL_REMOVE, remove_btn)
         finally:
             db.close()
 

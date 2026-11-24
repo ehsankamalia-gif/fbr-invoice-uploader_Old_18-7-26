@@ -261,7 +261,10 @@ def create_invoice(data: dict) -> Invoice:
             # NTN/type/is_deleted, matching desktop invoice_service.py.
             if data.get('buyer_ntn'):
                 customer.ntn = (data.get('buyer_ntn') or '').upper()
-            if buyer_type == Customer.DEALER:
+            # A converted party (converted_to_customer_at set) is never
+            # re-promoted by the form; only a deliberate conversion can
+            # change its type (same rule as the desktop app).
+            if buyer_type == Customer.DEALER and not customer.converted_to_customer_at:
                 customer.type = Customer.DEALER
             customer.is_deleted = False
             customer.save()
@@ -304,6 +307,8 @@ def create_invoice(data: dict) -> Invoice:
             total_amount=total_amount,
             discount=discount,
             payment_mode=data.get('payment_mode') or 'Cash',
+            # Frozen snapshot of the buyer's type at creation (matches desktop).
+            invoice_party_type=(customer.type or Customer.INDIVIDUAL),
             is_fiscalized=False,
             sync_status=Invoice.PENDING,
             fbr_response_message='Created via customer portal. Waiting for upload.',

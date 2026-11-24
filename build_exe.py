@@ -34,7 +34,7 @@ DATA_FILES = [
 
 COLLECT_ALL = [
     "PyQt6",
-    "customtkinter",
+    "qtawesome",
     "tzdata",
     "fastapi",
     "uvicorn",

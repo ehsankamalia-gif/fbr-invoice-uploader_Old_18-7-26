@@ -9,12 +9,6 @@ except ImportError as e:
     print(f"✗ Failed to import Pillow: {e}")
     
 try:
-    import customtkinter as ctk
-    print("✓ CustomTkinter imported successfully")
-except ImportError as e:
-    print(f"✗ Failed to import CustomTkinter: {e}")
-    
-try:
     import qrcode
     print("✓ QRCode imported successfully")
 except ImportError as e:

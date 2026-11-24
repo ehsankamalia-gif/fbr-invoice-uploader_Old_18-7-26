@@ -105,6 +105,9 @@ class Customer(models.Model):
     address = models.CharField(max_length=255, null=True)
     type = models.CharField(max_length=20, choices=TYPE_CHOICES, default=INDIVIDUAL)
     is_deleted = models.BooleanField(default=False)
+    # Set by the desktop app's Dealer -> Customer conversion; the column is
+    # added to the shared table by the desktop app's migration (v25).
+    converted_to_customer_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField()
 
     class Meta:
@@ -210,6 +213,9 @@ class Invoice(models.Model):
     total_amount = models.FloatField()
     discount = models.FloatField(default=0.0)
     payment_mode = models.CharField(max_length=20, default='Cash')
+    # Snapshot of the buyer's type (INDIVIDUAL/DEALER) at creation time; never
+    # recomputed. Same column the desktop app writes.
+    invoice_party_type = models.CharField(max_length=20, null=True, blank=True)
     fbr_invoice_number = models.CharField(max_length=50, null=True, blank=True)
     is_fiscalized = models.BooleanField(default=False)
     sync_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=PENDING)

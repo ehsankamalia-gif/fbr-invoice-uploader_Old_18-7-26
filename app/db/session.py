@@ -36,7 +36,8 @@ from app.db.models import (
     ReportTemplate,
     ReportSchedule,
     ReportRun,
-    PrintTemplateLayout
+    PrintTemplateLayout,
+    PartyTypeHistory,
 )
 import logging
 
@@ -396,6 +397,7 @@ def run_migrations():
                 # databases as a historical record, but there is nothing left
                 # for their code to do, so the functions themselves were deleted.
                 (24, "Revert multi-company support entirely: drop company_id and restore original single-column unique constraints", _migration_v24_single_company_revert),
+                (25, "Dealer/customer conversion: invoice_party_type snapshot, converted_to_customer_at, party_type_history", _migration_v25_party_conversion),
             ]
 
             for version, description, func in migrations:
@@ -807,6 +809,64 @@ def _migration_v16_add_sequential_upload_fields(conn) -> bool:
         return True
     except Exception as e:
         logger.error(f"Migration v16 failed: {e}", exc_info=True)
+        return False
+
+def _migration_v25_party_conversion(conn) -> bool:
+    """Adds the columns/table behind Dealer -> Customer conversion and freezes
+    the classification of every existing invoice.
+
+    verify_schema_integrity() normally has already added the new columns/table
+    (they're declared in models.py) by the time this runs; the checks below make
+    this safe either way. The backfill copies each invoice's buyer's CURRENT
+    type into invoices.invoice_party_type - this is the one-time moment that
+    makes all existing dealer invoices permanently 'DEALER'. It only touches
+    rows still NULL, so re-running it never overwrites a snapshot.
+
+    Note: MySQL commits DDL (ALTER/CREATE) implicitly, so only the backfill is
+    transactional. Back the database up first (scripts/sql/v25_party_conversion.sql).
+    """
+    try:
+        for table, col, ddl in (
+            ("customers", "converted_to_customer_at", "DATETIME NULL"),
+            ("invoices", "invoice_party_type", "VARCHAR(20) NULL"),
+        ):
+            try:
+                conn.execute(text(f"SELECT {col} FROM {table} LIMIT 1"))
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                logger.info(f"Adding column {col} to {table}...")
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}"))
+                try:
+                    conn.commit()
+                except Exception:
+                    pass
+
+        PartyTypeHistory.__table__.create(bind=conn, checkfirst=True)
+        try:
+            conn.commit()
+        except Exception:
+            pass
+
+        conn.execute(text(
+            "UPDATE invoices SET invoice_party_type = "
+            "(SELECT c.type FROM customers c WHERE c.id = invoices.customer_id) "
+            "WHERE invoice_party_type IS NULL AND customer_id IS NOT NULL"
+        ))
+        conn.execute(text(
+            "UPDATE invoices SET invoice_party_type = 'INDIVIDUAL' "
+            "WHERE invoice_party_type IS NULL AND customer_id IS NULL"
+        ))
+        conn.commit()
+        return True
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error(f"Migration v25 failed: {e}", exc_info=True)
         return False
 
 def _migration_v17_make_cnic_non_nullable(conn) -> bool:

@@ -72,9 +72,25 @@ class Customer(Base):
     type = Column(String(20), default=CustomerType.INDIVIDUAL)
     is_deleted = Column(Boolean, default=False)
 
+    # Set when a Dealer is converted to a Customer (see
+    # app/services/party_conversion_service.py); cleared if converted back.
+    converted_to_customer_at = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime, default=dt.datetime.utcnow)
 
     invoices = relationship("Invoice", back_populates="customer")
+
+class PartyTypeHistory(Base):
+    """Audit trail of Dealer <-> Customer conversions."""
+    __tablename__ = "party_type_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    party_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
+    old_type = Column(String(20), nullable=False)
+    new_type = Column(String(20), nullable=False)
+    changed_at = Column(DateTime, default=pk_now, nullable=False)
+    changed_by = Column(String(100), nullable=True)
+
 
 class ProductModel(Base):
     __tablename__ = "product_models"
@@ -111,7 +127,13 @@ class Invoice(Base):
     discount = Column(Float, default=0.0)
     
     payment_mode = Column(String(20), default="Cash")
-    
+
+    # Snapshot of the buyer's type (INDIVIDUAL / DEALER) taken when the invoice
+    # was created. Never recomputed from the customer's current type, so
+    # converting a dealer to a customer leaves old invoices classified as-is.
+    # NULL only on rows written by code that predates this column.
+    invoice_party_type = Column(String(20), nullable=True, index=True)
+
     fbr_invoice_number = Column(String(50), nullable=True)
     is_fiscalized = Column(Boolean, default=False)
     sync_status = Column(String(20), default="PENDING")

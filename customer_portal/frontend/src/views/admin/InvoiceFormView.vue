@@ -253,7 +253,7 @@ function startNewInvoice() {
 </script>
 
 <template>
-  <div>
+  <div class="invoice-form">
     <div class="mb-8 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
       <div>
         <h1 class="text-3xl font-bold text-gray-800 mb-2"><i class="fas fa-file-invoice mr-3"></i>Create Invoice</h1>
@@ -301,13 +301,13 @@ function startNewInvoice() {
       </div>
     </div>
 
-    <div v-else class="bg-white rounded-xl p-8 card-shadow max-w-4xl">
-      <p class="text-sm text-gray-500 mb-6">Next invoice number: <strong>{{ nextInvoiceNumber }}</strong></p>
+    <div v-else class="invoice-card bg-white rounded-xl p-8 card-shadow max-w-4xl">
+      <p class="invoice-meta mb-6"><i class="fas fa-hashtag"></i>Next invoice number: <strong>{{ nextInvoiceNumber }}</strong></p>
 
       <p v-if="errorMessage" class="mb-6 p-4 bg-red-50 text-red-700 rounded-lg text-sm">{{ errorMessage }}</p>
 
       <form @submit.prevent="submit">
-        <h3 class="text-sm uppercase font-semibold text-gray-500 mb-4">Buyer</h3>
+        <h3 class="section-title"><i class="fas fa-user"></i>Buyer</h3>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
           <FormField
             label="CNIC" required placeholder="33302-0085847-5" maxlength="15"
@@ -348,7 +348,7 @@ function startNewInvoice() {
           />
         </div>
 
-        <h3 class="text-sm uppercase font-semibold text-gray-500 mb-4">Motorcycle</h3>
+        <h3 class="section-title"><i class="fas fa-motorcycle"></i>Motorcycle</h3>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
           <SearchableSelect
             label="Chassis Number" required allow-custom
@@ -388,7 +388,7 @@ function startNewInvoice() {
           />
         </div>
 
-        <h3 class="text-sm uppercase font-semibold text-gray-500 mb-4">Pricing</h3>
+        <h3 class="section-title"><i class="fas fa-coins"></i>Pricing</h3>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
           <div>
             <label class="block text-sm font-semibold text-gray-700 mb-2">Quantity</label>
@@ -413,16 +413,16 @@ function startNewInvoice() {
           <FormField label="Discount" type="number" placeholder="0.00" v-model="form.discount" />
         </div>
 
-        <p class="text-lg font-semibold text-gray-800 mb-6">Total Amount: Rs. {{ totalAmount }}</p>
+        <p class="total-bar mb-6"><span>Total Amount</span><strong>Rs. {{ totalAmount }}</strong></p>
 
         <div class="flex justify-end space-x-4 mt-8 pt-6 border-t border-gray-100">
-          <router-link :to="{ name: 'admin-invoices' }" class="px-6 py-3 bg-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-300 transition">
+          <router-link :to="{ name: 'admin-invoices' }" class="btn-cancel px-6 py-3 bg-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-300 transition">
             Cancel
           </router-link>
           <button
             type="submit" :disabled="saving || !isFormValid"
             :title="!isFormValid ? 'Fill in all required fields correctly first' : ''"
-            class="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white font-semibold rounded-lg hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+            class="btn-submit px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white font-semibold rounded-lg hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
           >
             <i class="fas fa-paper-plane mr-2"></i>{{ saving ? 'Uploading to FBR...' : 'Create & Upload' }}
           </button>
@@ -431,3 +431,204 @@ function startNewInvoice() {
     </div>
   </div>
 </template>
+
+<style scoped>
+/*
+ * Look of the Create Invoice form only. Everything is scoped to .invoice-form
+ * (and reaches into FormField / SearchableSelect via :deep) so the shared
+ * components - and every other portal form - are left exactly as they were.
+ */
+
+/* ---- card + headings ---- */
+.invoice-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -12px rgba(15, 23, 42, 0.12);
+}
+
+.invoice-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.95rem;
+  font-size: 0.8125rem;
+  color: #64748b;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+}
+.invoice-meta i { color: #94a3b8; font-size: 0.75rem; }
+.invoice-meta strong { color: #0f172a; font-weight: 700; letter-spacing: 0.02em; }
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin: 0 0 1.25rem;
+  padding-bottom: 0.7rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #1e3a8a;
+  border-bottom: 1px solid #e2e8f0;
+}
+.section-title i {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  font-size: 0.8rem;
+  color: #2563eb;
+  background: #eff6ff;
+  border-radius: 8px;
+}
+
+/* ---- labels ---- */
+.invoice-form :deep(label) {
+  display: block;
+  margin-bottom: 0.4rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: #334155;
+}
+.invoice-form :deep(label .text-red-500) { color: #dc2626; font-weight: 700; }
+
+/* ---- text inputs, number inputs, selects, textareas ---- */
+/* :where() keeps the "not a checkbox/radio" guard from adding specificity, so
+   the readonly / error / hover / focus rules below can override these. */
+.invoice-form :deep(input:where(:not([type='checkbox'], [type='radio']))),
+.invoice-form :deep(select),
+.invoice-form :deep(textarea) {
+  width: 100%;
+  min-height: 46px;
+  padding: 0.65rem 0.95rem;
+  font-size: 0.9375rem;
+  line-height: 1.4;
+  color: #0f172a;
+  background-color: #ffffff;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 10px;
+  box-shadow: 0 1px 1px rgba(15, 23, 42, 0.03);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+.invoice-form :deep(input::placeholder),
+.invoice-form :deep(textarea::placeholder) { color: #9aa5b4; }
+
+.invoice-form :deep(input:where(:not([type='checkbox'], [type='radio'])):hover),
+.invoice-form :deep(select:hover),
+.invoice-form :deep(textarea:hover) { border-color: #94a3b8; }
+
+.invoice-form :deep(input:where(:not([type='checkbox'], [type='radio'])):focus),
+.invoice-form :deep(select:focus),
+.invoice-form :deep(textarea:focus) {
+  border-color: #2563eb;
+  background-color: #ffffff;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.14);
+}
+
+/* dropdown arrow for <select> */
+.invoice-form :deep(select) {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 2.6rem;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 20 20' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 7.5l5 5 5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.9rem center;
+  background-size: 16px;
+}
+
+/* read-only (calculated) fields */
+.invoice-form :deep(input[readonly]) {
+  color: #64748b;
+  background-color: #f1f5f9;
+  border-style: dashed;
+  box-shadow: none;
+  cursor: default;
+}
+.invoice-form :deep(input[readonly]:hover) { border-color: #cbd5e1; }
+.invoice-form :deep(input[readonly]:focus) { box-shadow: none; border-color: #cbd5e1; }
+
+/* ---- validation ---- */
+.invoice-form :deep(p.text-red-600) {
+  margin-top: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: #dc2626;
+}
+.invoice-form :deep(input:has(+ p.text-red-600)),
+.invoice-form :deep(select:has(+ p.text-red-600)),
+.invoice-form :deep(textarea:has(+ p.text-red-600)),
+.invoice-form :deep(.relative:has(+ p.text-red-600) input) {
+  border-color: #f87171;
+  background-color: #fef2f2;
+}
+.invoice-form :deep(input:has(+ p.text-red-600):focus),
+.invoice-form :deep(select:has(+ p.text-red-600):focus),
+.invoice-form :deep(textarea:has(+ p.text-red-600):focus),
+.invoice-form :deep(.relative:has(+ p.text-red-600) input:focus) {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.14);
+}
+
+/* ---- Chassis Number search dropdown ---- */
+.invoice-form :deep(.absolute.z-20) {
+  margin-top: 6px;
+  overflow-x: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 16px 32px -12px rgba(15, 23, 42, 0.25);
+}
+.invoice-form :deep(.absolute.z-20 .cursor-pointer) {
+  padding: 0.6rem 1rem;
+  font-size: 0.875rem;
+  color: #334155;
+  border-bottom: 1px solid #f1f5f9;
+}
+.invoice-form :deep(.absolute.z-20 .cursor-pointer:last-child) { border-bottom: none; }
+.invoice-form :deep(.absolute.z-20 .cursor-pointer:hover),
+.invoice-form :deep(.absolute.z-20 .cursor-pointer.bg-blue-50) { color: #1d4ed8; background: #eff6ff; }
+
+/* ---- total ---- */
+.total-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  background: linear-gradient(135deg, #eff6ff 0%, #e0ecff 100%);
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+}
+.total-bar span { font-size: 0.8125rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #1e40af; }
+.total-bar strong { font-size: 1.5rem; font-weight: 800; color: #1e3a8a; font-variant-numeric: tabular-nums; }
+
+/* ---- buttons ---- */
+.btn-cancel,
+.btn-submit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  padding: 0 1.6rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  border-radius: 10px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+.btn-cancel { color: #334155; background: #ffffff; border: 1.5px solid #cbd5e1; }
+.btn-cancel:hover { background: #f1f5f9; border-color: #94a3b8; }
+.btn-submit {
+  color: #ffffff;
+  background-image: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  border: none;
+  box-shadow: 0 6px 14px -6px rgba(37, 99, 235, 0.7);
+}
+.btn-submit:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 10px 20px -8px rgba(37, 99, 235, 0.75); }
+.btn-submit:focus-visible,
+.btn-cancel:focus-visible { outline: none; box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.25); }
+.btn-submit:disabled { opacity: 0.55; box-shadow: none; }
+</style>

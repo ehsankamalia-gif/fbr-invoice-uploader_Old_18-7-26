@@ -376,6 +376,32 @@ def _migration_v17_quotations(conn: Connection, is_sqlite: bool) -> bool:
         return False
 
 
+def _migration_v18_invoice_type(conn: Connection, is_sqlite: bool) -> bool:
+    """sp_sales.invoice_type / sp_held_sales.invoice_type - the FBR
+    InvoiceType code chosen at the sale counter. Existing rows stay NULL
+    (the FBR payload treats NULL as type 1, exactly as before)."""
+    try:
+        _add_column_if_missing(conn, is_sqlite, "sp_sales", "invoice_type", "INTEGER")
+        _add_column_if_missing(conn, is_sqlite, "sp_held_sales", "invoice_type", "INTEGER")
+        return True
+    except Exception as e:
+        logger.error(f"Migration v18 failed: {e}", exc_info=True)
+        return False
+
+
+def _migration_v19_line_invoice_type(conn: Connection, is_sqlite: bool) -> bool:
+    """Per-line FBR InvoiceType: sp_sale_items.invoice_type and
+    sp_held_sale_items.invoice_type. Existing lines stay NULL (the payload
+    then uses the sale's own invoice_type, else 1, exactly as before)."""
+    try:
+        _add_column_if_missing(conn, is_sqlite, "sp_sale_items", "invoice_type", "INTEGER")
+        _add_column_if_missing(conn, is_sqlite, "sp_held_sale_items", "invoice_type", "INTEGER")
+        return True
+    except Exception as e:
+        logger.error(f"Migration v19 failed: {e}", exc_info=True)
+        return False
+
+
 # (version, description, function) - function receives (conn, is_sqlite)
 # and returns True on success. Append new tuples here for later phases;
 # never edit an already-applied migration's behavior.
@@ -417,6 +443,10 @@ MIGRATIONS: list[tuple[int, str, callable]] = [
      _migration_v16_stock_take),
     (17, "sp_quotations, sp_quotation_items + sp_settings.quotation_no_prefix for Quotations",
      _migration_v17_quotations),
+    (18, "sp_sales.invoice_type + sp_held_sales.invoice_type (FBR InvoiceType chosen at the sale counter)",
+     _migration_v18_invoice_type),
+    (19, "sp_sale_items.invoice_type + sp_held_sale_items.invoice_type (per-line FBR InvoiceType)",
+     _migration_v19_line_invoice_type),
 ]
 
 

@@ -507,6 +507,7 @@ DEFAULT_TEMPLATE = {
         {"type": "kpi", "metric": "avg_invoice_amount", "title": "Avg Invoice"},
         {"type": "chart", "metric": "daily_sales", "title": "Daily Sales"},
         {"type": "chart", "metric": "status_breakdown", "title": "Status Breakdown"},
+        {"type": "chart", "metric": "party_breakdown", "title": "Dealer vs Customer Invoices"},
         {"type": "table", "metric": "invoices", "title": "Invoices"},
     ],
 }
@@ -562,6 +563,26 @@ def _compute_metrics(db: Session, start_dt: Optional[datetime], end_dt: Optional
     )
     status_breakdown = [{"status": str(s or ""), "count": int(c or 0)} for s, c in status_rows]
 
+    # Dealer vs Customer split. Groups by each invoice's own frozen
+    # invoice_party_type, NOT the buyer's current type, so a converted
+    # dealer's earlier invoices stay under Dealer. COALESCE falls back to the
+    # current type only for rows written before the snapshot existed.
+    party_expr = func.coalesce(Invoice.invoice_party_type, Customer.type)
+    party_rows = (
+        q.with_entities(party_expr, func.count(Invoice.id), func.coalesce(func.sum(Invoice.total_amount), 0.0))
+        .outerjoin(Customer, Invoice.customer_id == Customer.id)
+        .group_by(party_expr)
+        .all()
+    )
+    party_totals = {"Dealer": [0, 0.0], "Customer": [0, 0.0]}
+    for p, c, a in party_rows:
+        key = "Dealer" if str(p or "").upper() == "DEALER" else "Customer"
+        party_totals[key][0] += int(c or 0)
+        party_totals[key][1] += float(a or 0.0)
+    party_breakdown = [
+        {"party_type": k, "count": v[0], "amount": v[1]} for k, v in party_totals.items()
+    ]
+
     invoices = (
         q.order_by(desc(Invoice.datetime))
         .limit(200)
@@ -589,13 +610,35 @@ def _compute_metrics(db: Session, start_dt: Optional[datetime], end_dt: Optional
         "avg_invoice_amount": float(avg_invoice_amount),
         "daily_sales": daily_sales,
         "status_breakdown": status_breakdown,
+        "party_breakdown": party_breakdown,
         "invoices": invoice_rows,
     }
+
+
+_PARTY_WIDGET = {"type": "chart", "metric": "party_breakdown", "title": "Dealer vs Customer Invoices"}
+
+
+def _add_party_widget_if_missing(db: Session, tmpl: ReportTemplate) -> None:
+    """The built-in Default Dashboard saved before the Dealer/Customer split
+    existed lacks its widget; add it once so existing installs show it too.
+    Custom templates are never touched."""
+    if tmpl is None or tmpl.name != "Default Dashboard":
+        return
+    definition = dict(tmpl.definition or {})
+    widgets = list(definition.get("widgets") or [])
+    if widgets and not any(w.get("metric") == "party_breakdown" for w in widgets):
+        idx = next((i for i, w in enumerate(widgets) if w.get("metric") == "status_breakdown"), len(widgets) - 1)
+        widgets.insert(idx + 1, dict(_PARTY_WIDGET))
+        definition["widgets"] = widgets
+        tmpl.definition = definition
+        db.commit()
+        db.refresh(tmpl)
 
 
 def _load_or_create_default_template(db: Session) -> ReportTemplate:
     tmpl = db.query(ReportTemplate).filter(ReportTemplate.name == "Default Dashboard").first()
     if tmpl:
+        _add_party_widget_if_missing(db, tmpl)
         return tmpl
     tmpl = ReportTemplate(name="Default Dashboard", description="Default reporting dashboard", definition=DEFAULT_TEMPLATE, is_active=True)
     db.add(tmpl)
@@ -614,6 +657,7 @@ def _ensure_template_has_widgets(db: Session, tmpl: Optional[ReportTemplate]) ->
     """
     if tmpl is None:
         return _load_or_create_default_template(db)
+    _add_party_widget_if_missing(db, tmpl)
     widgets = ((tmpl.definition or {}).get("widgets") or [])
     if len(widgets) == 0:
         if not tmpl.definition:
@@ -1196,6 +1240,13 @@ def _render_dashboard_html() -> str:
               const labels = dailySales.map(d => d.status || 'UNKNOWN');
               const values = dailySales.map(d => d.count || 0);
               Plotly.newPlot(id, [{ labels, values, type: 'pie' }], { margin: { t: 10, r: 10, l: 10, b: 10 } }, { displayModeBar: false, responsive: true });
+              return;
+            }
+            if (Array.isArray(dailySales) && dailySales.length && dailySales[0].party_type !== undefined) {
+              const labels = dailySales.map(d => d.party_type);
+              const values = dailySales.map(d => d.count || 0);
+              const amounts = dailySales.map(d => Number(d.amount || 0).toLocaleString());
+              Plotly.newPlot(id, [{ labels, values, type: 'pie', customdata: amounts, hovertemplate: '%{label}: %{value} invoices<br>Rs. %{customdata}<extra></extra>' }], { margin: { t: 10, r: 10, l: 10, b: 10 } }, { displayModeBar: false, responsive: true });
               return;
             }
             Plotly.newPlot(id, [], { margin: { t: 10, r: 10, l: 10, b: 10 } }, { displayModeBar: false, responsive: true });
@@ -2087,10 +2138,11 @@ def _render_lookup_html() -> str:
                         <th role="button" class="text-nowrap mono" data-sort="chassis_number">Chassis Number</th>
                         <th role="button" class="text-nowrap mono" data-sort="engine_number">Engine Number</th>
                         <th role="button" class="text-nowrap" data-sort="date">Date</th>
+                        <th class="text-nowrap">Party Type</th>
                       </tr>
                     </thead>
                     <tbody id="resultsBody">
-                      <tr><td colspan="8" class="text-muted p-3">No results found.</td></tr>
+                      <tr><td colspan="9" class="text-muted p-3">No results found.</td></tr>
                     </tbody>
                   </table>
                 </div>
@@ -2320,6 +2372,7 @@ def _render_lookup_html() -> str:
               { key: 'chassis_number', label: 'Chassis Number', mono: true },
               { key: 'engine_number', label: 'Engine Number', mono: true },
               { key: 'date',          label: 'Date' },
+              { key: 'party_type',    label: 'Party Type' },
             ];
             const headerHtml = `<tr>${cols.map(c => `<th class="text-start border-bottom border-2 border-black">${c.label}</th>`).join('')}</tr>`;
             let bodyHtml = '';
@@ -2731,7 +2784,7 @@ def _render_lookup_html() -> str:
           document.getElementById('resultsCount').textContent = String(count);
 
           if (!items.length) {
-            body.innerHTML = `<tr><td colspan="8" class="text-muted p-3">No results found.</td></tr>`;
+            body.innerHTML = `<tr><td colspan="9" class="text-muted p-3">No results found.</td></tr>`;
           } else {
             const rows = items.map((r) => `
               <tr class="row-click" role="button" tabindex="0" aria-label="View invoice ${escapeHtml(r.invoice_number || '')}">
@@ -2743,6 +2796,7 @@ def _render_lookup_html() -> str:
                 <td class="mono">${escapeHtml(r.chassis_number || '')}</td>
                 <td class="mono">${escapeHtml(r.engine_number || '')}</td>
                 <td>${escapeHtml(r.date || '')}</td>
+                <td>${escapeHtml(r.party_type || '')}</td>
               </tr>
             `).join('');
             body.innerHTML = rows;
@@ -3546,6 +3600,10 @@ def lookup_search(
             Invoice.total_sale_value.label("sale_value"),
             Invoice.total_quantity.label("quantity"),
             Invoice.status_updated_at.label("status_updated_at"),
+            # The invoice's own snapshot, NOT the customer's current type - so a
+            # converted dealer's old invoices keep showing as Dealer. Falls back
+            # to the current type only for rows written before the snapshot existed.
+            func.coalesce(Invoice.invoice_party_type, Customer.type).label("party_type"),
         )
         .select_from(Invoice)
         .join(Customer, Invoice.customer_id == Customer.id, isouter=True)
@@ -3615,6 +3673,7 @@ def lookup_search(
                 "usin": effective_usin,
                 "sale_value": float(getattr(r, "sale_value", 0) or 0),
                 "quantity": float(getattr(r, "quantity", 0) or 0),
+                "party_type": "Dealer" if str(getattr(r, "party_type", "") or "").upper() == "DEALER" else "Customer",
             }
         )
 

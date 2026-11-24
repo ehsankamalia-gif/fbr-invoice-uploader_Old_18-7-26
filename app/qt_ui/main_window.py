@@ -52,6 +52,7 @@ from PyQt6.QtWidgets import (
     QCompleter,
     QDialog,
     QDialogButtonBox,
+    QInputDialog,
     QHeaderView,
     QApplication,
     QFrame,
@@ -118,6 +119,7 @@ from app.qt_ui.settings_modals import (
     ChangePasswordDialog
 )
 from app.qt_ui.auto_scroll_manager import AutoScrollManager
+from app.qt_ui import invoice_style
 from app.core.signals import booking_signals
 from app.core.logger import logger
 from app.core.version_manager import VersionManager
@@ -462,6 +464,46 @@ class InvoiceSubmissionWorker(QThread):
             self.error.emit(str(e))
         finally:
             db.close()
+
+
+class PartyConversionWorker(QThread):
+    """Runs a Dealer <-> Customer conversion off the UI thread."""
+    finished = pyqtSignal(dict)
+    error = pyqtSignal(str)
+
+    def __init__(self, cnic: str, changed_by: str, to_dealer: bool = False, business_name: str | None = None):
+        super().__init__()
+        self.cnic = cnic
+        self.changed_by = changed_by
+        self.to_dealer = to_dealer
+        self.business_name = business_name
+
+    def run(self):
+        from app.services import party_conversion_service as pcs
+        db = SessionLocal()
+        try:
+            party = db.query(Customer).filter(Customer.cnic == self.cnic).first()
+            if party is None:
+                raise pcs.PartyConversionError("Dealer record not found.")
+            party_id = party.id
+        except Exception as e:
+            db.close()
+            self.error.emit(str(e))
+            return
+        db.close()
+        try:
+            if self.to_dealer:
+                result = pcs.convert_customer_to_dealer(
+                    party_id, self.changed_by, business_name=self.business_name
+                )
+            else:
+                result = pcs.convert_dealer_to_customer(party_id, self.changed_by)
+            self.finished.emit(result)
+        except pcs.PartyConversionError as e:
+            self.error.emit(str(e))
+        except Exception as e:
+            logger.error(f"Dealer conversion failed: {e}", exc_info=True)
+            self.error.emit(f"The conversion could not be completed and nothing was changed.\n\n{e}")
 
 @dataclass
 class CapturedDataRow:
@@ -1049,7 +1091,7 @@ class MainWindow(QMainWindow):
                 active_env = settings_service.get_active_environment()
                 self.invoice_env_value_label.setText(active_env.upper())
                 color = "#e67e22" if active_env.upper() == "SANDBOX" else "#27ae60"
-                self.invoice_env_badge.setStyleSheet(f"QFrame {{ border: 2px solid {color}; border-radius: 8px; background-color: white; }}")
+                self.invoice_env_badge.setStyleSheet(invoice_style.env_badge_qss(color))
 
             if hasattr(self, "invoice_number_input"):
                 from app.services.settings_service import should_regenerate_invoice_number
@@ -3968,6 +4010,10 @@ class MainWindow(QMainWindow):
 
     def _create_invoice_page(self) -> QWidget:
         page = QWidget(self)
+        # All look-and-feel of this page lives in app/qt_ui/invoice_style.py and
+        # is scoped to #invoicePage, so no other screen is affected.
+        page.setObjectName("invoicePage")
+        page.setStyleSheet(invoice_style.build_invoice_page_qss())
         root_layout = QVBoxLayout(page)
         root_layout.setContentsMargins(30, 30, 30, 30)
         root_layout.setSpacing(20)
@@ -3982,112 +4028,25 @@ class MainWindow(QMainWindow):
         header_layout.addWidget(header)
         header_layout.addStretch(1)
 
-        # FBR Stat Widget (Professional Design)
-        fbr_stat_widget = QFrame(header_widget)
-        fbr_stat_widget.setObjectName("fbrStatBox")
-        fbr_stat_widget.setStyleSheet("""
-            #fbrStatBox {
-                background-color: #e74c3c;
-                border-radius: 8px;
-                min-width: 140px;
-            }
-        """)
-        fbr_stat_layout = QVBoxLayout(fbr_stat_widget)
-        fbr_stat_layout.setContentsMargins(15, 10, 15, 10)
-        fbr_stat_layout.setSpacing(2)
-
-        fbr_stat_label = QLabel("FBR SUBMITTED")
-        fbr_stat_label.setStyleSheet("font-weight: bold; font-size: 10px; color: rgba(255,255,255,0.8); text-transform: uppercase;")
-        fbr_stat_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.invoice_fbr_stat_value = QLabel("0")
-        self.invoice_fbr_stat_value.setStyleSheet("font-weight: bold; font-size: 24px; color: white;")
-        self.invoice_fbr_stat_value.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        fbr_stat_layout.addWidget(fbr_stat_label)
-        fbr_stat_layout.addWidget(self.invoice_fbr_stat_value)
+        # Header KPI cards (one consistent family - see invoice_style.build_stat_card).
+        # The value labels keep their original attribute names; other code only
+        # calls .setText(...) on them.
+        fbr_stat_widget, self.invoice_fbr_stat_value = invoice_style.build_stat_card(
+            header_widget, "fbrStatBox", "FBR SUBMITTED", "fa5s.cloud-upload-alt", "#27ae60")
         header_layout.addWidget(fbr_stat_widget)
 
-        # Environment Badge (Green Rectangle Area)
-        self.invoice_env_badge = QFrame(header_widget)
-        self.invoice_env_badge.setFixedSize(160, 60)
-        self.invoice_env_badge.setStyleSheet("""
-            QFrame {
-                border: 2px solid #27ae60;
-                border-radius: 8px;
-                background-color: white;
-            }
-        """)
-        env_badge_layout = QVBoxLayout(self.invoice_env_badge)
-        env_badge_layout.setContentsMargins(10, 5, 10, 5)
-        env_badge_layout.setSpacing(2)
+        self.invoice_env_badge, self.invoice_env_value_label = invoice_style.build_env_card(header_widget)
 
-        env_label_title = QLabel("ENVIRONMENT")
-        env_label_title.setStyleSheet("font-weight: bold; font-size: 10px; color: #7f8c8d; text-transform: uppercase;")
-        env_label_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.invoice_env_value_label = QLabel("UNKNOWN")
-        self.invoice_env_value_label.setStyleSheet("font-weight: bold; font-size: 18px; color: #2c3e50;")
-        self.invoice_env_value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        env_badge_layout.addWidget(env_label_title)
-        env_badge_layout.addWidget(self.invoice_env_value_label)
-
-        # "Submitted Today" Counter - sits directly left of the Environment
-        # badge so the cashier sees today's progress right next to which
-        # FBR environment it's going to. Read-only count, same style
-        # language as the FBR SUBMITTED box (flat color + bold value) but
-        # its own color so the two aren't mistaken for the same stat.
-        self.invoice_today_stat_widget = QFrame(header_widget)
-        self.invoice_today_stat_widget.setObjectName("todayStatBox")
-        self.invoice_today_stat_widget.setStyleSheet("""
-            #todayStatBox {
-                background-color: #2980b9;
-                border-radius: 8px;
-                min-width: 140px;
-            }
-        """)
-        today_stat_layout = QVBoxLayout(self.invoice_today_stat_widget)
-        today_stat_layout.setContentsMargins(15, 10, 15, 10)
-        today_stat_layout.setSpacing(2)
-
-        today_stat_label = QLabel("SUBMITTED TODAY")
-        today_stat_label.setStyleSheet("font-weight: bold; font-size: 10px; color: rgba(255,255,255,0.8); text-transform: uppercase;")
-        today_stat_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.invoice_today_stat_value = QLabel("0")
-        self.invoice_today_stat_value.setStyleSheet("font-weight: bold; font-size: 24px; color: white;")
-        self.invoice_today_stat_value.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        today_stat_layout.addWidget(today_stat_label)
-        today_stat_layout.addWidget(self.invoice_today_stat_value)
-
-        # "Submitted This Month" Counter - sits directly adjacent (right) to
-        # the Today counter, same style language, own color so all three
-        # badges (Today / Month / All-time) stay visually distinct.
-        self.invoice_month_stat_widget = QFrame(header_widget)
-        self.invoice_month_stat_widget.setObjectName("monthStatBox")
-        self.invoice_month_stat_widget.setStyleSheet("""
-            #monthStatBox {
-                background-color: #8e44ad;
-                border-radius: 8px;
-                min-width: 140px;
-            }
-        """)
-        month_stat_layout = QVBoxLayout(self.invoice_month_stat_widget)
-        month_stat_layout.setContentsMargins(15, 10, 15, 10)
-        month_stat_layout.setSpacing(2)
-
-        month_stat_label = QLabel("SUBMITTED THIS MONTH")
-        month_stat_label.setStyleSheet("font-weight: bold; font-size: 10px; color: rgba(255,255,255,0.8); text-transform: uppercase;")
-        month_stat_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.invoice_month_stat_value = QLabel("0")
-        self.invoice_month_stat_value.setStyleSheet("font-weight: bold; font-size: 24px; color: white;")
-        self.invoice_month_stat_value.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        month_stat_layout.addWidget(month_stat_label)
-        month_stat_layout.addWidget(self.invoice_month_stat_value)
+        # "Submitted Today" / "Submitted This Month" - read-only counts shown next
+        # to the environment so the cashier sees today's progress and which FBR
+        # environment it is going to.
+        self.invoice_today_stat_widget, self.invoice_today_stat_value = invoice_style.build_stat_card(
+            header_widget, "todayStatBox", "SUBMITTED TODAY", "fa5s.calendar-day", "#2980b9")
+        self.invoice_month_stat_widget, self.invoice_month_stat_value = invoice_style.build_stat_card(
+            header_widget, "monthStatBox", "SUBMITTED THIS MONTH", "fa5s.calendar-alt", "#8e44ad")
+        invoice_style.equalize_cards(
+            fbr_stat_widget, self.invoice_env_badge,
+            self.invoice_today_stat_widget, self.invoice_month_stat_widget)
 
         # Insert before the FBR stat widget
         header_layout.insertWidget(2, self.invoice_env_badge)
@@ -4109,6 +4068,7 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(self.invoice_scroll_area, 1)
 
         container = QWidget()
+        container.setObjectName("invoiceFormContainer")
         self.invoice_scroll_area.setWidget(container)
         container_layout = QVBoxLayout(container)
         container_layout.setContentsMargins(0, 0, 10, 0)
@@ -4137,33 +4097,13 @@ class MainWindow(QMainWindow):
         self.invoice_number_input = QLineEdit()
         self.invoice_number_input.setReadOnly(True)
         self.invoice_number_input.setPlaceholderText("Generating...")
-        self.invoice_number_input.setStyleSheet("border-top-right-radius: 0px; border-bottom-right-radius: 0px; border-right: none;")
+        self.invoice_number_input.setStyleSheet(invoice_style.JOINED_LINEEDIT_QSS)
         
         generate_btn = QPushButton("↺")
         generate_btn.setFixedSize(40, 36)
         generate_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         generate_btn.setToolTip("Generate New Number")
-        generate_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f8f9fa;
-                color: #2c3e50;
-                border: 1px solid #ced4da;
-                border-top-left-radius: 0px;
-                border-bottom-left-radius: 0px;
-                border-top-right-radius: 4px;
-                border-bottom-right-radius: 4px;
-                font-size: 20px;
-                font-weight: bold;
-                padding: 0;
-            }
-            QPushButton:hover {
-                background-color: #e9ecef;
-                color: #3498db;
-            }
-            QPushButton:pressed {
-                background-color: #dee2e6;
-            }
-        """)
+        generate_btn.setStyleSheet(invoice_style.joined_button_qss(20))
         generate_btn.clicked.connect(self._generate_invoice_number)  # type: ignore[arg-type]
         inv_num_layout.addWidget(self.invoice_number_input)
         inv_num_layout.addWidget(generate_btn)
@@ -4177,24 +4117,14 @@ class MainWindow(QMainWindow):
         # QR Code Placeholder
         self.invoice_qr_label = QLabel()
         self.invoice_qr_label.setFixedSize(100, 100)
-        self.invoice_qr_label.setStyleSheet("border: 1px dashed #ced4da; border-radius: 4px; background: #fdfdfd;")
+        self.invoice_qr_label.setStyleSheet(invoice_style.QR_PLACEHOLDER_QSS)
         self.invoice_qr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.invoice_qr_label.setText("QR CODE")
         qr_fbr_layout.addWidget(self.invoice_qr_label)
 
         # FBR Invoice Number Display (Red Rectangle Area)
         self.invoice_fbr_number_display = QLabel("")
-        self.invoice_fbr_number_display.setStyleSheet("""
-            QLabel {
-                font-weight: bold;
-                font-size: 14px;
-                color: #c0392b;
-                border: 1px solid #e0e0e0;
-                border-radius: 4px;
-                padding: 10px;
-                background-color: #fcfcfc;
-            }
-        """)
+        self.invoice_fbr_number_display.setStyleSheet(invoice_style.FBR_NUMBER_DISPLAY_QSS)
         self.invoice_fbr_number_display.setMinimumWidth(250)
         self.invoice_fbr_number_display.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         qr_fbr_layout.addWidget(self.invoice_fbr_number_display)
@@ -4316,7 +4246,7 @@ class MainWindow(QMainWindow):
         buyer_name_layout.setSpacing(0)
         self.invoice_buyer_name_input = AutocompleteLineEdit()
         self.invoice_buyer_name_input.setPlaceholderText("Full Name (F2 to search dealers)")
-        self.invoice_buyer_name_input.setStyleSheet("border-top-right-radius: 0px; border-bottom-right-radius: 0px; border-right: none;")
+        self.invoice_buyer_name_input.setStyleSheet(invoice_style.JOINED_LINEEDIT_QSS)
         buyer_name_layout.addWidget(self.invoice_buyer_name_input)
         
         # Allow only alphabetics and spaces for name
@@ -4331,27 +4261,7 @@ class MainWindow(QMainWindow):
         search_dealer_btn.setFixedSize(40, 36)
         search_dealer_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         search_dealer_btn.setToolTip("Search Dealers (F2)")
-        search_dealer_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f8f9fa;
-                color: #2c3e50;
-                border: 1px solid #ced4da;
-                border-top-left-radius: 0px;
-                border-bottom-left-radius: 0px;
-                border-top-right-radius: 4px;
-                border-bottom-right-radius: 4px;
-                font-size: 18px;
-                font-weight: bold;
-                padding: 0;
-            }
-            QPushButton:hover {
-                background-color: #e9ecef;
-                color: #3498db;
-            }
-            QPushButton:pressed {
-                background-color: #dee2e6;
-            }
-        """)
+        search_dealer_btn.setStyleSheet(invoice_style.joined_button_qss(18))
         search_dealer_btn.clicked.connect(self._open_dealer_search_dialog)
         buyer_name_layout.addWidget(search_dealer_btn)
 
@@ -4359,25 +4269,7 @@ class MainWindow(QMainWindow):
         recent_customers_btn.setFixedSize(40, 36)
         recent_customers_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         recent_customers_btn.setToolTip("Recent Customers (F3)")
-        recent_customers_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f8f9fa;
-                color: #2c3e50;
-                border: 1px solid #ced4da;
-                border-radius: 4px;
-                font-size: 18px;
-                font-weight: bold;
-                padding: 0;
-                margin-left: 6px;
-            }
-            QPushButton:hover {
-                background-color: #e9ecef;
-                color: #3498db;
-            }
-            QPushButton:pressed {
-                background-color: #dee2e6;
-            }
-        """)
+        recent_customers_btn.setStyleSheet(invoice_style.STANDALONE_ICON_BUTTON_QSS)
         recent_customers_btn.clicked.connect(self._open_recent_customers_dialog)
         buyer_name_layout.addWidget(recent_customers_btn)
 
@@ -4500,7 +4392,7 @@ class MainWindow(QMainWindow):
         group_fbr = QFrame()
         group_fbr.setObjectName("formGroup")
         group_fbr_outer = QVBoxLayout(group_fbr)
-        group_fbr_outer.setContentsMargins(20, 15, 20, 20)
+        group_fbr_outer.setContentsMargins(28, 20, 28, 24)
         group_fbr_outer.setSpacing(0)
 
         # A clickable header (styled identically to the plain QLabel groupTitle
@@ -4511,23 +4403,7 @@ class MainWindow(QMainWindow):
         self.invoice_fbr_advanced_toggle.setCheckable(True)
         self.invoice_fbr_advanced_toggle.setChecked(False)  # Collapsed by default
         self.invoice_fbr_advanced_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.invoice_fbr_advanced_toggle.setStyleSheet("""
-            QPushButton#groupTitleToggle {
-                background: transparent;
-                border: none;
-                text-align: left;
-                font-weight: bold;
-                color: #34495e;
-                font-size: 14px;
-                text-transform: uppercase;
-                letter-spacing: 1px;
-                padding: 0;
-                margin-bottom: 5px;
-            }
-            QPushButton#groupTitleToggle:hover {
-                color: #2c3e50;
-            }
-        """)
+        self.invoice_fbr_advanced_toggle.setStyleSheet(invoice_style.ADVANCED_TOGGLE_QSS)
         group_fbr_outer.addWidget(self.invoice_fbr_advanced_toggle)
 
         gfbr_content = QWidget()
@@ -4601,10 +4477,20 @@ class MainWindow(QMainWindow):
         group3_layout.addWidget(QLabel("Total Price (Incl. Tax)"), 2, 2)
         self.invoice_total_spin = QDoubleSpinBox()
         self.invoice_total_spin.setRange(0, 99999999)
-        self.invoice_total_spin.setStyleSheet("font-weight: bold; color: #2c3e50; font-size: 15px;")
+        self.invoice_total_spin.setStyleSheet(invoice_style.TOTAL_SPIN_QSS)
         group3_layout.addWidget(self.invoice_total_spin, 2, 3)
 
         container_layout.addWidget(self.invoice_pricing_group)
+
+        # One shared grid across all form cards (aligned label/input columns).
+        invoice_style.polish_form_layouts(
+            group1_layout, group2_layout, group_fbr_layout, group3_layout,
+            card_margins={
+                group1_layout: (28, 26, 28, 24),
+                group2_layout: (28, 26, 28, 24),
+                group3_layout: (28, 26, 28, 24),
+            },
+        )
 
         # Bottom Button Bar
         button_bar = QWidget(page)
@@ -4807,7 +4693,7 @@ class MainWindow(QMainWindow):
         active_env = settings_service.get_active_environment()
         self.invoice_env_value_label.setText(active_env.upper())
         color = "#e67e22" if active_env.upper() == "SANDBOX" else "#27ae60"
-        self.invoice_env_badge.setStyleSheet(f"QFrame {{ border: 2px solid {color}; border-radius: 8px; background-color: white; }}")
+        self.invoice_env_badge.setStyleSheet(invoice_style.env_badge_qss(color))
 
         return page
 
@@ -9161,22 +9047,21 @@ class MainWindow(QMainWindow):
         # below reads again a few lines later; nothing is mutated between
         # the two reads, so this is just the same source of truth read
         # twice, not a risk of drifting from what actually gets sent.
-        review_summary = (
-            f"Buyer Name: {self.invoice_buyer_name_input.text().strip()}\n"
-            f"CNIC: {self.invoice_buyer_cnic_input.text().strip()}\n"
-            f"Model: {self.invoice_model_combo.currentText().strip()}\n"
-            f"Color: {self.invoice_color_combo.currentText().strip()}\n"
-            f"Chassis: {self.invoice_chassis_input.text().strip().upper()}\n"
-            f"Total Amount: Rs. {self.invoice_total_spin.value():,.2f}\n"
-            f"Invoice Type: {self.invoice_type_combo.currentText().strip()}"
-        )
-        review_reply = QMessageBox.question(
+        from app.qt_ui.confirm_submission_dialog import ConfirmSubmissionDialog
+        review_rows = [
+            ("Buyer Name", self.invoice_buyer_name_input.text().strip()),
+            ("CNIC", self.invoice_buyer_cnic_input.text().strip()),
+            ("Model", self.invoice_model_combo.currentText().strip()),
+            ("Color", self.invoice_color_combo.currentText().strip()),
+            ("Chassis", self.invoice_chassis_input.text().strip().upper()),
+            ("Invoice Type", self.invoice_type_combo.currentText().strip()),
+        ]
+        review_dialog = ConfirmSubmissionDialog(
+            review_rows,
+            f"Rs. {self.invoice_total_spin.value():,.2f}",
             self,
-            "Confirm Submission",
-            f"Please review before submitting to FBR:\n\n{review_summary}\n\nSubmit this invoice?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
-        if review_reply != QMessageBox.StandardButton.Yes:
+        if review_dialog.exec() != QDialog.DialogCode.Accepted:
             return
 
         # Disable button during submission to prevent double-clicks
@@ -9709,10 +9594,16 @@ class MainWindow(QMainWindow):
         delete_btn.setStyleSheet("background-color: #e74c3c; color: white; border: none; font-weight: bold; padding: 10px 20px; border-radius: 8px;")
         delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         delete_btn.clicked.connect(self._on_delete_customer_clicked)
-        
+
+        self.customers_convert_btn = QPushButton("⇄ Convert to Dealer")
+        self.customers_convert_btn.setStyleSheet("background-color: #8e44ad; color: white; border: none; font-weight: bold; padding: 10px 20px; border-radius: 8px;")
+        self.customers_convert_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.customers_convert_btn.clicked.connect(self._on_convert_customer_clicked)
+
         action_bar.addStretch(1)
         action_bar.addWidget(add_btn)
         action_bar.addWidget(edit_btn)
+        action_bar.addWidget(self.customers_convert_btn)
         action_bar.addWidget(delete_btn)
         layout.addLayout(action_bar)
 
@@ -9831,6 +9722,8 @@ class MainWindow(QMainWindow):
         self.dealers_table_view.setAlternatingRowColors(True)
         self.dealers_table_view.setShowGrid(False)
         self.dealers_table_view.doubleClicked.connect(self._on_dealer_row_double_clicked)
+        self.dealers_table_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.dealers_table_view.customContextMenuRequested.connect(self._on_dealer_context_menu)
         # Install Auto Scroll Manager
         self.dealers_table_auto_scroll = AutoScrollManager(self)
         self.dealers_table_auto_scroll.install_on_widget(self.dealers_table_view)
@@ -9861,10 +9754,16 @@ class MainWindow(QMainWindow):
         delete_btn.setObjectName("deleteButton")
         delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         delete_btn.clicked.connect(self._on_delete_dealer_clicked)
-        
+
+        self.dealers_convert_btn = QPushButton("⇄ Convert to Customer")
+        self.dealers_convert_btn.setObjectName("actionButton")
+        self.dealers_convert_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.dealers_convert_btn.clicked.connect(self._on_convert_dealer_clicked)
+
         action_bar.addStretch(1)
         action_bar.addWidget(add_btn)
         action_bar.addWidget(edit_btn)
+        action_bar.addWidget(self.dealers_convert_btn)
         action_bar.addWidget(delete_btn)
         layout.addLayout(action_bar)
 
@@ -14393,6 +14292,10 @@ class MainWindow(QMainWindow):
                         phone=c.phone or "",
                         address=c.address or "",
                         ntn=c.ntn or "",
+                        party_type=(
+                            "Dealer" if str(c.type or "").upper() == "DEALER"
+                            else ("Customer (converted)" if c.converted_to_customer_at else "Customer")
+                        ),
                     )
                 )
         finally:
@@ -14699,6 +14602,149 @@ class MainWindow(QMainWindow):
         )
         self._open_edit_customer_dialog(temp_row)
         self._reload_dealers() # Refresh after edit
+
+    def _on_dealer_context_menu(self, pos: QPoint) -> None:
+        index = self.dealers_table_view.indexAt(pos)
+        if not index.isValid():
+            return
+        self.dealers_table_view.selectRow(index.row())
+        menu = QMenu(self)
+        menu.addAction("Edit Dealer", self._on_edit_dealer_clicked)
+        menu.addAction("Convert to Customer", self._on_convert_dealer_clicked)
+        menu.exec(self.dealers_table_view.viewport().mapToGlobal(pos))
+
+    def _on_convert_dealer_clicked(self) -> None:
+        if getattr(self, "_party_conversion_worker", None) is not None and self._party_conversion_worker.isRunning():
+            return
+        selection = self.dealers_table_view.selectionModel().selectedRows()
+        if not selection:
+            QMessageBox.warning(self, "Selection Required", "Please select a dealer to convert.")
+            return
+
+        row_data = self.dealers_table_model._rows[selection[0].row()]
+        display_name = row_data.business_name or row_data.contact_name
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Convert to Customer")
+        box.setText(f"Convert dealer \"{display_name}\" to a customer?")
+        box.setInformativeText(
+            "• All invoices uploaded before now stay unchanged and remain dealer invoices.\n"
+            "• Only invoices uploaded from now on will be treated as customer invoices.\n"
+            "• The record keeps the same name, CNIC/NTN and contact details, and moves "
+            "from the Dealers list to the Customers list.\n\n"
+            "This is recorded in the conversion history."
+        )
+        convert_btn = box.addButton("Convert to Customer", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        box.exec()
+        if box.clickedButton() is not convert_btn:
+            return
+
+        changed_by = (
+            auth_session.current_full_name()
+            or auth_session.current_mobile_number()
+            or "unknown"
+        )
+        self.dealers_convert_btn.setEnabled(False)
+        self.dealers_convert_btn.setText("⏳ Converting...")
+        self._party_conversion_worker = PartyConversionWorker(row_data.cnic, changed_by)
+        self._party_conversion_worker.finished.connect(self._on_party_conversion_done)
+        self._party_conversion_worker.error.connect(self._on_party_conversion_failed)
+        self._party_conversion_worker.start()
+
+    def _on_convert_customer_clicked(self) -> None:
+        if getattr(self, "_party_conversion_worker", None) is not None and self._party_conversion_worker.isRunning():
+            return
+        selection = self.customers_table_view.selectionModel().selectedRows()
+        if not selection:
+            QMessageBox.warning(self, "Selection Required", "Please select a customer to convert.")
+            return
+
+        row_data = self.customers_table_model._rows[selection[0].row()]
+        if row_data.party_type == "Dealer":
+            QMessageBox.information(self, "Already a Dealer", f"{row_data.name} is already a dealer.")
+            return
+
+        # A dealer needs a business name; reuse the stored one if there is one.
+        db = SessionLocal()
+        try:
+            existing = db.query(Customer.business_name).filter(Customer.cnic == row_data.cnic).first()
+            business_name = (existing[0] if existing else "") or ""
+        finally:
+            db.close()
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Convert to Dealer")
+        box.setText(f"Convert customer \"{row_data.name}\" to a dealer?")
+        box.setInformativeText(
+            "• All invoices uploaded before now stay unchanged and remain customer invoices.\n"
+            "• Only invoices uploaded from now on will be treated as dealer invoices.\n"
+            "• The record keeps the same name, CNIC/NTN and contact details, and moves "
+            "to the Dealers list.\n\n"
+            "This is recorded in the conversion history."
+        )
+        go_btn = box.addButton("Convert to Dealer", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        box.exec()
+        if box.clickedButton() is not go_btn:
+            return
+
+        if not business_name.strip():
+            text, ok = QInputDialog.getText(
+                self, "Business Name", "Enter the dealer's business name (required):"
+            )
+            business_name = (text or "").strip()
+            if not ok or not business_name:
+                return
+
+        changed_by = (
+            auth_session.current_full_name()
+            or auth_session.current_mobile_number()
+            or "unknown"
+        )
+        self.customers_convert_btn.setEnabled(False)
+        self.customers_convert_btn.setText("⏳ Converting...")
+        self._party_conversion_worker = PartyConversionWorker(
+            row_data.cnic, changed_by, to_dealer=True, business_name=business_name
+        )
+        self._party_conversion_worker.finished.connect(self._on_party_conversion_done)
+        self._party_conversion_worker.error.connect(self._on_party_conversion_failed)
+        self._party_conversion_worker.start()
+
+    def _reset_convert_button(self) -> None:
+        self.dealers_convert_btn.setEnabled(True)
+        self.dealers_convert_btn.setText("⇄ Convert to Customer")
+        if hasattr(self, "customers_convert_btn"):
+            self.customers_convert_btn.setEnabled(True)
+            self.customers_convert_btn.setText("⇄ Convert to Dealer")
+
+    def _on_party_conversion_done(self, result: dict) -> None:
+        self._reset_convert_button()
+        self._reload_dealers()
+        self._reload_customers()
+        if result.get("new_type") == "DEALER":
+            QMessageBox.information(
+                self,
+                "Converted",
+                f"{result.get('name', 'The customer')} is now a dealer.\n\n"
+                "Earlier invoices remain customer invoices; new invoices will be dealer invoices.",
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "Converted",
+                f"{result.get('name', 'The dealer')} is now a customer.\n\n"
+                "Earlier invoices remain dealer invoices; new invoices will be customer invoices.",
+            )
+
+    def _on_party_conversion_failed(self, message: str) -> None:
+        self._reset_convert_button()
+        self._reload_dealers()
+        QMessageBox.critical(self, "Conversion Failed", message)
 
     def _on_delete_dealer_clicked(self) -> None:
         selection = self.dealers_table_view.selectionModel().selectedRows()
@@ -15038,6 +15084,7 @@ class CustomerRow:
         phone: str,
         address: str,
         ntn: str,
+        party_type: str = "",
     ) -> None:
         self.name = name
         self.father_name = father_name
@@ -15045,6 +15092,7 @@ class CustomerRow:
         self.phone = phone
         self.address = address
         self.ntn = ntn
+        self.party_type = party_type
 
 
 class DealerRow:
@@ -15294,7 +15342,7 @@ class InventoryTableModel(QAbstractTableModel):
 
 
 class CustomersTableModel(QAbstractTableModel):
-    headers = ["Name", "Father Name", "CNIC", "Phone", "Address", "NTN"]
+    headers = ["Name", "Father Name", "CNIC", "Phone", "Address", "NTN", "Type"]
 
     def __init__(self) -> None:
         super().__init__()
@@ -15325,10 +15373,12 @@ class CustomersTableModel(QAbstractTableModel):
                 return row.address
             if col == 5:
                 return row.ntn
-        
+            if col == 6:
+                return row.party_type
+
         if role == Qt.ItemDataRole.TextAlignmentRole:
             return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-            
+
         return None
 
     def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.ItemDataRole.DisplayRole):

@@ -313,3 +313,150 @@ def test_fbr_payload_service_is_independent_of_app_fbr_code():
             stripped = line.strip()
             if stripped.startswith(("import ", "from ")) and forbidden in stripped:
                 pytest.fail(f"Found forbidden import referencing {forbidden!r}: {stripped!r}")
+
+
+# --- Invoice type (chosen at the sale counter) ----------------------------------
+
+def test_payload_uses_the_sales_invoice_type_in_header_and_items(db_session, part):
+    sale = sales_service.create_sale(
+        db_session, sale_type="RETAIL", customer_id=None,
+        items=[dict(part_id=part.id, qty_entered=1, unit_price=100)],
+        paid=9999, invoice_type=11,
+    )
+    assert sale.invoice_type == 11
+    payload = fbr_payload_service.build_sale_payload(db_session, sale)
+    assert payload["InvoiceType"] == 11
+    assert all(i["InvoiceType"] == 11 for i in payload["Items"])
+    # 11 is an accepted FBR code (other errors here are just the unset POS ID).
+    assert not any("InvoiceType" in e for e in fbr_payload_service.validate_payload(payload))
+
+
+def test_payload_invoice_type_new_is_1(db_session, part):
+    sale = sales_service.create_sale(
+        db_session, sale_type="RETAIL", customer_id=None,
+        items=[dict(part_id=part.id, qty_entered=1, unit_price=100)],
+        paid=9999, invoice_type=1,
+    )
+    payload = fbr_payload_service.build_sale_payload(db_session, sale)
+    assert payload["InvoiceType"] == 1 and payload["Items"][0]["InvoiceType"] == 1
+
+
+def test_sale_without_invoice_type_still_sends_1(db_session, part):
+    """Sales saved before the field existed (NULL) keep their old payload."""
+    sale = _make_sale(db_session, part)
+    assert sale.invoice_type is None
+    payload = fbr_payload_service.build_sale_payload(db_session, sale)
+    assert payload["InvoiceType"] == 1 and payload["Items"][0]["InvoiceType"] == 1
+
+
+@pytest.mark.parametrize("bad", [2, 3, 12, 99, "abc"])
+def test_create_sale_rejects_unavailable_invoice_type(db_session, part, bad):
+    with pytest.raises(SparePartsValidationError):
+        sales_service.create_sale(
+            db_session, sale_type="RETAIL", customer_id=None,
+            items=[dict(part_id=part.id, qty_entered=1, unit_price=100)],
+            paid=9999, invoice_type=bad,
+        )
+
+
+def test_signature_covers_the_invoice_type(db_session, part):
+    settings = settings_service.get_settings(db_session)
+    env = settings_service.get_fbr_environment(db_session, settings.fbr_environment)
+    env.secret_key = "k"
+    db_session.commit()
+    s1 = sales_service.create_sale(
+        db_session, sale_type="RETAIL", customer_id=None,
+        items=[dict(part_id=part.id, qty_entered=1, unit_price=100)], paid=9999, invoice_type=1)
+    p = fbr_payload_service.build_sale_payload(db_session, s1)
+    sig = p.pop("Signature")
+    assert sig == fbr_payload_service._sign_payload(p, "k")
+
+
+def test_held_sale_keeps_invoice_type_across_hold_and_update(db_session, part):
+    from spare_parts.services import held_sales_service
+    held = held_sales_service.create_held_sale(
+        db_session, sale_type="RETAIL",
+        items=[dict(part_id=part.id, qty_entered=1, unit_price=100)], invoice_type=11,
+    )
+    assert held.invoice_type == 11
+    held = held_sales_service.update_held_sale(db_session, held.id, invoice_type=1)
+    assert held.invoice_type == 1
+    # not passing it leaves it alone
+    held = held_sales_service.update_held_sale(db_session, held.id, notes="x")
+    assert held.invoice_type == 1
+
+
+# --- Per-line invoice type ------------------------------------------------------
+
+def test_each_line_carries_its_own_invoice_type(db_session, part, part2):
+    sale = sales_service.create_sale(
+        db_session, sale_type="RETAIL", customer_id=None,
+        items=[
+            dict(part_id=part.id, qty_entered=1, unit_price=100, invoice_type=11),
+            dict(part_id=part2.id, qty_entered=1, unit_price=50, invoice_type=1),
+        ],
+        paid=9999,
+    )
+    assert [i.invoice_type for i in sale.items] == [11, 1]
+    assert sale.invoice_type == 11  # header summary = first line
+    payload = fbr_payload_service.build_sale_payload(db_session, sale)
+    assert [i["InvoiceType"] for i in payload["Items"]] == [11, 1]
+    assert payload["InvoiceType"] == 11  # header mirrors the first line
+
+
+def test_line_without_type_falls_back_to_sale_type_then_1(db_session, part, part2):
+    sale = sales_service.create_sale(
+        db_session, sale_type="RETAIL", customer_id=None,
+        items=[dict(part_id=part.id, qty_entered=1, unit_price=100),
+               dict(part_id=part2.id, qty_entered=1, unit_price=50, invoice_type=1)],
+        paid=9999, invoice_type=11,
+    )
+    payload = fbr_payload_service.build_sale_payload(db_session, sale)
+    assert [i["InvoiceType"] for i in payload["Items"]] == [11, 1]
+
+
+def test_update_sale_keeps_line_invoice_types(db_session, part):
+    sale = sales_service.create_sale(
+        db_session, sale_type="RETAIL", customer_id=None,
+        items=[dict(part_id=part.id, qty_entered=1, unit_price=100, invoice_type=11)], paid=9999,
+    )
+    sale = sales_service.update_sale(
+        db_session, sale.id,
+        items=[dict(part_id=part.id, qty_entered=2, unit_price=100, invoice_type=1)], paid=9999,
+    )
+    assert [i.invoice_type for i in sale.items] == [1]
+    sale = sales_service.update_sale(
+        db_session, sale.id,
+        items=[dict(part_id=part.id, qty_entered=3, unit_price=100)], paid=9999,
+    )
+    assert [i.invoice_type for i in sale.items] == [sale.invoice_type]  # kept, not dropped
+
+
+def test_held_lines_keep_their_invoice_type(db_session, part, part2):
+    from spare_parts.services import held_sales_service
+    held = held_sales_service.create_held_sale(
+        db_session, sale_type="RETAIL",
+        items=[dict(part_id=part.id, qty_entered=1, unit_price=100, invoice_type=1),
+               dict(part_id=part2.id, qty_entered=1, unit_price=50, invoice_type=11)],
+    )
+    assert sorted(i.invoice_type for i in held.items) == [1, 11]
+    with pytest.raises(SparePartsValidationError):
+        held_sales_service.create_held_sale(
+            db_session, sale_type="RETAIL",
+            items=[dict(part_id=part.id, qty_entered=1, unit_price=100, invoice_type=3)],
+        )
+
+
+def test_migration_v19_adds_line_columns():
+    from sqlalchemy import text
+    from spare_parts.db import migrations as m
+    eng = create_engine("sqlite://")
+    SpareBase.metadata.create_all(bind=eng)
+    with eng.begin() as c:
+        c.execute(text("ALTER TABLE sp_sale_items DROP COLUMN invoice_type"))
+        c.execute(text("ALTER TABLE sp_held_sale_items DROP COLUMN invoice_type"))
+    with eng.connect() as c:
+        assert m._migration_v19_line_invoice_type(c, True) is True
+        assert m._migration_v19_line_invoice_type(c, True) is True  # idempotent
+        c.execute(text("SELECT invoice_type FROM sp_sale_items")).fetchall()
+        c.execute(text("SELECT invoice_type FROM sp_held_sale_items")).fetchall()

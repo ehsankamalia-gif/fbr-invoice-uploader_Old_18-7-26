@@ -253,6 +253,10 @@ class _StartupDialog(QDialog):
 def main() -> None:
     # Show splash screen as early as possible
     app = QApplication(sys.argv)
+    # One shared look (design tokens + application stylesheet + font icons);
+    # must run before any widget is created. Set APP_DISABLE_THEME=1 to skip.
+    from app.qt_ui.theme import apply_theme
+    apply_theme(app)
     startup = _StartupDialog(app)
     startup.show()
     app.processEvents()

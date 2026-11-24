@@ -54,9 +54,11 @@ _PAYMENT_MODE_MAP = {
 }
 _DEFAULT_PAYMENT_MODE = 1  # Cash
 
-# A completed, POSTED sale is always FBR InvoiceType 1 ("New"/Standard).
-# Sale returns (which would be type 3, "Credit Note") aren't covered by
-# this function - see build_sale_payload's docstring.
+# FBR InvoiceType for a POSTED sale: chosen per line at the sale counter
+# (sp_sale_items.invoice_type - 1 "New" or 11 "3rd Schedule New"). A line
+# with none falls back to the sale's own (sp_sales.invoice_type), then to 1,
+# so sales saved before this existed send exactly what they used to. Sale returns (which would be type 3, "Credit Note") aren't
+# covered by this function - see build_sale_payload's docstring.
 _INVOICE_TYPE_NEW = 1
 
 # SpPart has no per-part PCT/HS code field (see spare_parts/db/models.py),
@@ -125,6 +127,8 @@ def build_sale_payload(db: Session, sale: SpSale) -> dict:
     settings = settings_service.get_settings(db)
     env_settings = settings_service.get_fbr_environment(db, settings.fbr_environment)
 
+    sale_invoice_type = sale.invoice_type or _INVOICE_TYPE_NEW
+
     pos_id_raw = (env_settings.pos_id or "").strip()
     pos_id: int | str = int(pos_id_raw) if pos_id_raw.isdigit() else pos_id_raw
 
@@ -162,7 +166,8 @@ def build_sale_payload(db: Session, sale: SpSale) -> dict:
             "TaxCharged": float(item_tax),
             "Discount": float(_round2(item.discount)),
             "FurtherTax": 0.0,
-            "InvoiceType": _INVOICE_TYPE_NEW,
+            # This line's own type; older lines (NULL) use the sale's.
+            "InvoiceType": item.invoice_type or sale_invoice_type,
             "RefUSIN": None,
         })
         total_quantity += Decimal(str(item.qty or 0))
@@ -184,7 +189,10 @@ def build_sale_payload(db: Session, sale: SpSale) -> dict:
         "FurtherTax": 0.0,
         "TotalBillAmount": float(_round2(sale.total)),
         "PaymentMode": _payment_mode_code(sale.payment_method),
-        "InvoiceType": _INVOICE_TYPE_NEW,
+        # The header type mirrors the first line's (same rule the main
+        # invoice module follows), so header and items never disagree
+        # on a single-type sale.
+        "InvoiceType": items[0]["InvoiceType"] if items else sale_invoice_type,
         "Items": items,
     }
 

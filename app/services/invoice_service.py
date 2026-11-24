@@ -175,9 +175,12 @@ class InvoiceService:
             if invoice_in.buyer_ntn: customer.ntn = (invoice_in.buyer_ntn or "").upper()
             
             # If we explicitly pass DEALER type, ensure it stays/becomes DEALER
-            if invoice_in.buyer_type == CustomerType.DEALER:
+            # A converted party (converted_to_customer_at set) is never
+            # re-promoted by a stale form flag; only a deliberate conversion
+            # can change its type.
+            if invoice_in.buyer_type == CustomerType.DEALER and not customer.converted_to_customer_at:
                 customer.type = CustomerType.DEALER
-                
+
             # Reactivate if they were deleted
             customer.is_deleted = False
         else:
@@ -190,7 +193,7 @@ class InvoiceService:
                 customer = existing_by_cnic
                 # Do NOT overwrite permanent customer details
                 if invoice_in.buyer_ntn: customer.ntn = (invoice_in.buyer_ntn or "").upper()
-                if invoice_in.buyer_type == CustomerType.DEALER:
+                if invoice_in.buyer_type == CustomerType.DEALER and not customer.converted_to_customer_at:
                     customer.type = CustomerType.DEALER
                 customer.is_deleted = False
             else:
@@ -229,8 +232,11 @@ class InvoiceService:
             total_amount=total_amount,
             discount=invoice_in.discount,
             payment_mode=invoice_in.payment_mode,
+            # Snapshot of the buyer's type right now. Frozen for the life of the
+            # invoice - a later dealer->customer conversion must not change it.
+            invoice_party_type=str(getattr(customer.type, "value", customer.type) or CustomerType.INDIVIDUAL.value).upper(),
             items=db_items,
-            
+
             # Initial Status
             is_fiscalized=False,
             sync_status="PENDING",

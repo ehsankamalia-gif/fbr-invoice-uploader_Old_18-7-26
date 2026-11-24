@@ -17,7 +17,7 @@ from spare_parts.db.models import SpSale, SpSaleItem, SpSaleReturn
 from spare_parts.errors import SparePartsValidationError
 from spare_parts.services import customers_service, parts_service, stock_service
 from spare_parts.services.settings_service import get_settings
-from spare_parts.utils import to_decimal
+from spare_parts.utils import normalize_invoice_type, to_decimal
 from spare_parts.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -86,6 +86,7 @@ def _validate_items(db: Session, items: list[dict]) -> tuple[list[dict], Decimal
             unit_price=unit_price, discount=line_discount, line_total=line_total,
             cost_price=Decimal(str(part.cost_price or 0)),
             warranty_days=int(part.warranty_days or 0),
+            invoice_type=normalize_invoice_type(raw.get("invoice_type")),
         ))
         subtotal += line_total
 
@@ -105,6 +106,7 @@ def create_sale(
     paid=0,
     payment_method: str = "Cash",
     notes: str = "",
+    invoice_type: Optional[int] = None,
 ) -> SpSale:
     """items: list of {part_id, qty_entered, sold_as ("UNIT"/"PACK"), unit_price, discount}.
 
@@ -121,6 +123,9 @@ def create_sale(
     sale_type = (sale_type or "").upper()
     if sale_type not in VALID_SALE_TYPES:
         raise SparePartsValidationError("Sale type must be RETAIL or WHOLESALE.")
+    # FBR InvoiceType for this sale's payload; None = not chosen, which the
+    # payload treats as 1 (New) - see fbr_payload_service.
+    invoice_type = normalize_invoice_type(invoice_type)
 
     customer = None
     if customer_id:
@@ -131,6 +136,14 @@ def create_sale(
         raise SparePartsValidationError("Wholesale sales require a customer.")
 
     validated_items, subtotal = _validate_items(db, items)
+    # A line without its own type uses the sale-level one. The header type
+    # (what the FBR payload's top-level InvoiceType mirrors) is the explicit
+    # one if given, else the first line's.
+    for _it in validated_items:
+        _it["invoice_type"] = _it["invoice_type"] or invoice_type
+    header_invoice_type = invoice_type or (
+        validated_items[0]["invoice_type"] if validated_items else None
+    )
 
     header_discount = to_decimal(discount, "Discount")
     if header_discount < 0:
@@ -171,6 +184,7 @@ def create_sale(
             paid=paid_amount,
             due=due,
             payment_method=(payment_method or "Cash").strip() or "Cash",
+            invoice_type=header_invoice_type,
             status="POSTED",
             notes=(notes or "").strip() or None,
         )
@@ -188,6 +202,7 @@ def create_sale(
                 discount=item["discount"],
                 line_total=item["line_total"],
                 cost_price=item["cost_price"],
+                invoice_type=item["invoice_type"],
                 warranty_expires_at=(
                     sale.sale_date + dt.timedelta(days=item["warranty_days"])
                     if item["warranty_days"] > 0 else None
@@ -304,6 +319,8 @@ def update_sale(
                 discount=item["discount"],
                 line_total=item["line_total"],
                 cost_price=item["cost_price"],
+                # A line edited without a type keeps the sale's own.
+                invoice_type=item["invoice_type"] or sale.invoice_type,
                 # Recomputed from the part's CURRENT warranty_days, same
                 # accepted-drift tradeoff as cost_price above - editing an
                 # old sale doesn't retroactively know what warranty_days
