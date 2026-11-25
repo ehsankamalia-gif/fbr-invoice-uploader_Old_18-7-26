@@ -1410,6 +1410,7 @@ class MainWindow(QMainWindow):
         self._update_fbr_submitted_counter() # Initial load of counter state
         self._update_today_submitted_counter()
         self._update_month_submitted_counter()
+        self._update_pending_counter()
 
         # The ribbon's active-menu underline needs the menu bar's real
         # laid-out geometry, which isn't final yet this early (before the
@@ -4067,6 +4068,15 @@ class MainWindow(QMainWindow):
         header_layout.insertWidget(2, self.invoice_today_stat_widget)
         # Then insert the Month counter directly adjacent (right) of Today
         header_layout.insertWidget(3, self.invoice_month_stat_widget)
+
+        # Round PENDING ball at the right end: invoices saved locally that FBR has not accepted
+        # yet. Click -> list with attempts, next retry and the last message.
+        self.invoice_pending_ball = invoice_style.build_pending_ball(header_widget)
+        header_layout.addSpacing(8)
+        header_layout.addWidget(self.invoice_pending_ball)
+        invoice_style.make_clickable(
+            self.invoice_pending_ball, lambda: self._show_submitted_invoices("pending"),
+            "Pending: saved invoices not yet accepted by FBR - click to view them")
 
         root_layout.addWidget(header_widget)
 
@@ -8947,6 +8957,19 @@ class MainWindow(QMainWindow):
             logger.error("Could not show the %s invoice list: %s", scope, e, exc_info=True)
             self._show_error("Could Not Load Invoices", f"The invoice list could not be loaded.\n\n{e}")
 
+    def _update_pending_counter(self) -> None:
+        """Update the round Pending ball (same rule as its popup list, see invoice_list_dialog)."""
+        if not hasattr(self, "invoice_pending_ball"):
+            return
+        db = SessionLocal()
+        try:
+            from app.qt_ui import invoice_list_dialog
+            self.invoice_pending_ball.setCount(invoice_list_dialog.count_pending(db))
+        except Exception as e:
+            logger.error("Error updating pending counter: %s", e)
+        finally:
+            db.close()
+
     def _update_fbr_submitted_counter(self) -> None:
         """Update the FBR Submitted counter in the UI."""
         db = SessionLocal()
@@ -9001,6 +9024,8 @@ class MainWindow(QMainWindow):
     
     def _update_invoice_upload_status(self) -> None:
         """Update the invoice upload status indicator with pending count."""
+        # keeps the round Pending ball current as the background queue uploads invoices
+        self._update_pending_counter()
         try:
             from app.services.sync_service import sync_service
             queue_status = sync_service.get_upload_queue_status()
@@ -9256,6 +9281,7 @@ class MainWindow(QMainWindow):
             self._update_fbr_submitted_counter()
             self._update_today_submitted_counter()
             self._update_month_submitted_counter()
+            self._update_pending_counter()
             self._update_invoice_upload_status()
             
             # Queue SMS if enabled
@@ -12878,6 +12904,7 @@ class MainWindow(QMainWindow):
             self._update_fbr_submitted_counter()
             self._update_today_submitted_counter()
             self._update_month_submitted_counter()
+            self._update_pending_counter()
             self._generate_invoice_number()
 
     def _sales_date_range(self):

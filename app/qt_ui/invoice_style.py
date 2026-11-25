@@ -520,3 +520,139 @@ def polish_form_layouts(*grids, card_margins=None) -> None:
             # no hint column in this card: reserve the same gutter on the right
             m = grid.contentsMargins()
             grid.setContentsMargins(m.left(), m.top(), m.right() + gutter, m.bottom())
+
+
+# ---- the round "Pending" ball ---------------------------------------------------------------
+# Bright yellow while invoices are waiting (draws the eye), calm green at zero (nothing
+# waiting). Yellow is light, so its text is dark brown (white would vanish); the green ball keeps
+# white text. The colour stops are chosen so the text stays readable (a test checks them).
+BALL_PENDING = dict(light="#fff7ae", mid="#ffd51f", rim="#e0a200", text="#4a2f00")
+BALL_CLEAR = dict(light="#6ee7b0", mid="#17a46b", rim="#0a6b47", text="#ffffff")
+BALL_SIZE = 86
+
+
+def _make_pending_ball_class():
+    from PyQt6.QtCore import QPointF, QRectF, Qt
+    from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QRadialGradient, QLinearGradient
+    from PyQt6.QtWidgets import QGraphicsDropShadowEffect, QWidget
+
+    class PendingBall(QWidget):
+        """A round, glossy counter. setCount(n) updates it; wire the click with make_clickable()."""
+
+        def __init__(self, parent=None, count: int = 0):
+            super().__init__(parent)
+            self.setObjectName("pendingBall")
+            self.setFixedSize(BALL_SIZE, BALL_SIZE)
+            self._count = max(0, int(count))
+            self._hover = False
+            shadow = QGraphicsDropShadowEffect(self)
+            shadow.setBlurRadius(18)
+            shadow.setOffset(0, 4)
+            shadow.setColor(QColor(90, 60, 0, 95))
+            self.setGraphicsEffect(shadow)
+
+        # -- data
+        def count(self) -> int:
+            return self._count
+
+        def setCount(self, n) -> None:  # noqa: N802
+            n = max(0, int(n))
+            if n != self._count:
+                self._count = n
+                self.update()
+
+        def setText(self, text) -> None:  # noqa: N802 - same call the other stat cards take
+            try:
+                self.setCount(int(str(text).replace(",", "")))
+            except ValueError:
+                pass
+
+        def palette_stops(self) -> dict:
+            return BALL_PENDING if self._count > 0 else BALL_CLEAR
+
+        def display_text(self) -> str:
+            return str(self._count) if self._count < 1000 else "999+"
+
+        # -- hover / focus lift
+        def enterEvent(self, event):  # noqa: N802
+            self._hover = True
+            self.update()
+            super().enterEvent(event)
+
+        def leaveEvent(self, event):  # noqa: N802
+            self._hover = False
+            self.update()
+            super().leaveEvent(event)
+
+        def focusInEvent(self, event):  # noqa: N802
+            super().focusInEvent(event)
+            self.update()
+
+        def focusOutEvent(self, event):  # noqa: N802
+            super().focusOutEvent(event)
+            self.update()
+
+        def paintEvent(self, event):  # noqa: N802
+            p = QPainter(self)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            p.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+            s = self.palette_stops()
+            lift = 1.0 if (self._hover or self.hasFocus()) else 0.0
+            inset = 4.0 - 2.0 * lift                      # the ball swells slightly on hover
+            ball = QRectF(inset, inset, self.width() - 2 * inset, self.height() - 2 * inset)
+
+            body = QRadialGradient(QPointF(ball.left() + ball.width() * 0.36, ball.top() + ball.height() * 0.30),
+                                   ball.width() * 0.82)
+            body.setColorAt(0.0, QColor(_tint(s["light"], 0.18 * lift) if lift else s["light"]))
+            body.setColorAt(0.52, QColor(s["mid"]))
+            body.setColorAt(1.0, QColor(s["rim"]))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(body)
+            p.drawEllipse(ball)
+
+            # thin bright edge, then the glossy highlight on the upper half
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QPen(QColor(255, 255, 255, 90), 1.4))
+            p.drawEllipse(ball.adjusted(1, 1, -1, -1))
+            gloss_rect = QRectF(ball.left() + ball.width() * 0.17, ball.top() + ball.height() * 0.07,
+                                ball.width() * 0.66, ball.height() * 0.42)
+            gloss = QLinearGradient(gloss_rect.topLeft(), gloss_rect.bottomLeft())
+            gloss.setColorAt(0.0, QColor(255, 255, 255, 135))
+            gloss.setColorAt(1.0, QColor(255, 255, 255, 0))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(gloss)
+            p.drawEllipse(gloss_rect)
+
+            # number (big) + caption (small), white with a soft shadow for legibility
+            text = self.display_text()
+            big = QFont(self.font())
+            big.setBold(True)
+            big.setPixelSize(26 if len(text) <= 2 else 22 if len(text) == 3 else 18)
+            small = QFont(self.font())
+            small.setBold(True)
+            small.setPixelSize(9)
+            small.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.0)
+            num_rect = QRectF(ball.left(), ball.top() + ball.height() * 0.20, ball.width(), ball.height() * 0.42)
+            cap_rect = QRectF(ball.left(), ball.top() + ball.height() * 0.60, ball.width(), ball.height() * 0.18)
+            ink = QColor(s["text"])
+            halo = QColor(0, 0, 0, 80) if ink.lightness() > 128 else QColor(255, 255, 255, 120)
+            for font, rect, label in ((big, num_rect, text), (small, cap_rect, "PENDING")):
+                p.setFont(font)
+                p.setPen(halo)
+                p.drawText(rect.translated(0, 1), Qt.AlignmentFlag.AlignCenter, label)
+                p.setPen(ink)
+                p.drawText(rect, Qt.AlignmentFlag.AlignCenter, label)
+            p.end()
+
+    return PendingBall
+
+
+_PendingBall = None
+
+
+def build_pending_ball(parent=None, count: int = 0):
+    """The round Pending counter (created lazily so importing this module needs no GUI)."""
+    global _PendingBall
+    if _PendingBall is None:
+        _PendingBall = _make_pending_ball_class()
+    return _PendingBall(parent, count)

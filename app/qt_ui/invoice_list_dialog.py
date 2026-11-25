@@ -3,16 +3,18 @@
 Clicking "Submitted Today", "Submitted This Month" or "FBR Submitted" opens this list. It
 applies EXACTLY the rules the card's own counter uses (an invoice counts when it has an FBR
 invoice number, within the card's date range), so the number on the card always equals the
-number of rows here. Read-only: it never changes an invoice.
+number of rows here. The round PENDING ball opens the same dialog in its "pending" form: the
+invoices saved locally that FBR has not accepted yet (same rule as the Dashboard's Pending
+card), with attempts, next retry and the last message. Read-only: it never changes an invoice.
 """
 from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 from PyQt6.QtCore import QPoint, Qt
-from PyQt6.QtGui import QGuiApplication
+from PyQt6.QtGui import QColor, QGuiApplication
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -39,10 +41,28 @@ SCOPES = {
                   empty="No invoices have been submitted to FBR this month."),
     "all": dict(title="FBR Submitted", accent="#17934d", icon="fa5s.cloud-upload-alt",
                 empty="No invoices have been submitted to FBR yet."),
+    "pending": dict(title="Pending Upload", accent="#b4540a", icon="fa5s.clock",
+                    empty="Nothing is pending - every invoice has been uploaded to FBR."),
 }
 
 COLUMNS = ["#", "Invoice No.", "Date & Time", "Buyer", "CNIC", "Model / Chassis", "Amount (Rs.)", "FBR Invoice ID"]
 _COL_NO, _COL_INV, _COL_DATE, _COL_BUYER, _COL_CNIC, _COL_BIKE, _COL_AMOUNT, _COL_FBR = range(8)
+
+# Column layout per scope, by key (the submitted lists keep the original columns exactly).
+HEADERS = {
+    "no": "#", "inv": "Invoice No.", "date": "Date & Time", "buyer": "Buyer", "cnic": "CNIC",
+    "bike": "Model / Chassis", "amount": "Amount (Rs.)", "fbr": "FBR Invoice ID",
+    "attempts": "Attempts", "status": "Status", "reason": "Last message", "action": "Action",
+}
+_SUBMITTED_KEYS = ["no", "inv", "date", "buyer", "cnic", "bike", "amount", "fbr"]
+_PENDING_KEYS = ["no", "inv", "date", "buyer", "bike", "amount", "attempts", "status", "reason"]
+
+
+def column_keys(scope: str, with_action: bool = False) -> list[str]:
+    keys = list(_PENDING_KEYS if scope == "pending" else _SUBMITTED_KEYS)
+    if with_action and scope == "pending":
+        keys.append("action")          # a Retry button on every row
+    return keys
 
 
 @dataclass
@@ -56,6 +76,12 @@ class InvoiceRow:
     chassis: str
     amount: float
     fbr_invoice_number: str
+    # only filled for the "pending" list
+    attempts: int = 0
+    max_attempts: int = 5
+    next_attempt: Optional[dt.datetime] = None      # UTC, as stored by the upload queue
+    reason: str = ""
+    is_processing: bool = False
 
     @property
     def bike(self) -> str:
@@ -72,7 +98,7 @@ def scope_bounds(scope: str, now: Optional[dt.datetime] = None):
         return now.replace(hour=0, minute=0, second=0, microsecond=0), end_of_day
     if scope == "month":
         return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0), end_of_day
-    if scope == "all":
+    if scope in ("all", "pending"):
         return None, None
     raise ValueError(f"unknown scope {scope!r}")
 
@@ -113,6 +139,87 @@ def fetch_submitted_invoices(db, scope: str, now: Optional[dt.datetime] = None) 
     return rows
 
 
+def pending_filter():
+    """SQL condition for "still waiting for FBR": no FBR invoice number and not marked FAILED
+    (FAILED ones have their own Retry list). The header ball AND this list both use it, so the
+    number on the ball always equals the number of rows."""
+    from sqlalchemy import and_, or_
+    from app.db.models import Invoice
+
+    return and_(Invoice.fbr_invoice_number == None,  # noqa: E711
+                or_(Invoice.sync_status == None, Invoice.sync_status != "FAILED"))  # noqa: E711
+
+
+def count_pending(db) -> int:
+    from app.db.models import Invoice
+
+    return db.query(Invoice).filter(pending_filter()).count()
+
+
+def fetch_pending_invoices(db) -> list[InvoiceRow]:
+    """Invoices waiting for FBR, oldest first (the order the upload queue sends them)."""
+    from app.db.models import Customer, Invoice, InvoiceItem, Motorcycle, ProductModel
+
+    q = (
+        db.query(
+            Invoice.id, Invoice.invoice_number, Invoice.datetime, Invoice.total_amount,
+            Customer.name, Customer.cnic, ProductModel.model_name, Motorcycle.chassis_number,
+            Invoice.upload_attempts, Invoice.max_upload_attempts, Invoice.next_upload_attempt,
+            Invoice.fbr_response_message, Invoice.is_processing,
+        )
+        .outerjoin(Customer, Invoice.customer_id == Customer.id)
+        .outerjoin(InvoiceItem, InvoiceItem.invoice_id == Invoice.id)
+        .outerjoin(Motorcycle, InvoiceItem.motorcycle_id == Motorcycle.id)
+        .outerjoin(ProductModel, Motorcycle.product_model_id == ProductModel.id)
+        .filter(pending_filter())
+        .order_by(Invoice.datetime.asc(), Invoice.id.asc())
+    )
+    rows: list[InvoiceRow] = []
+    seen: set[int] = set()
+    for (inv_id, number, when, total, name, cnic, model, chassis, attempts, max_attempts, next_at,
+         message, processing) in q.all():
+        if inv_id in seen:
+            continue
+        seen.add(inv_id)
+        rows.append(InvoiceRow(
+            invoice_id=inv_id, invoice_number=number or "", when=when, buyer=name or "", cnic=cnic or "",
+            model=model or "", chassis=chassis or "", amount=float(total or 0), fbr_invoice_number="",
+            attempts=int(attempts or 0), max_attempts=int(max_attempts or 5), next_attempt=next_at,
+            reason=message or "", is_processing=bool(processing),
+        ))
+    return rows
+
+
+def fetch_invoices(db, scope: str, now: Optional[dt.datetime] = None) -> list[InvoiceRow]:
+    return fetch_pending_invoices(db) if scope == "pending" else fetch_submitted_invoices(db, scope, now)
+
+
+# Status shown for a pending invoice, from what the upload queue stores:
+STATE_STOPPED, STATE_UPLOADING, STATE_WAITING, STATE_QUEUED = "stopped", "uploading", "waiting", "queued"
+
+
+def pending_state(row: InvoiceRow, utc_now: Optional[dt.datetime] = None) -> tuple[str, str]:
+    """(state, plain-language text) for a pending invoice. The queue stores its retry time in
+    UTC; it is shown in local time."""
+    utc_now = utc_now or dt.datetime.utcnow()
+    if row.is_processing:
+        return STATE_UPLOADING, "Uploading now"
+    if row.attempts >= row.max_attempts:
+        return STATE_STOPPED, "Stopped after %d tries - needs Retry" % row.attempts
+    if row.next_attempt and row.next_attempt > utc_now:
+        local = row.next_attempt + (dt.datetime.now() - dt.datetime.utcnow())
+        return STATE_WAITING, "Waiting - next try %s" % local.strftime("%I:%M %p").lstrip("0")
+    return STATE_QUEUED, "Queued - uploads automatically"
+
+
+def pending_hint(state: str, text: str) -> str:
+    """Tooltip for the status cell (the cell itself stays short)."""
+    if state == STATE_STOPPED:
+        return ("Automatic retries are used up. Open this invoice from the invoice list and click "
+                "'Retry FBR Upload' once the internet / FBR settings are fine.")
+    return text
+
+
 # ---- formatting -------------------------------------------------------------------------
 def format_amount(value: float) -> str:
     return f"{value:,.2f}"
@@ -128,6 +235,8 @@ def subtitle_for(scope: str, now: Optional[dt.datetime] = None) -> str:
         return now.strftime("%A, %d %B %Y")
     if scope == "month":
         return now.strftime("%B %Y")
+    if scope == "pending":
+        return "Saved locally - not yet accepted by FBR"
     return "All invoices uploaded to FBR"
 
 
@@ -177,6 +286,12 @@ def _qss(accent: str) -> str:
         padding: 10px 28px; font-size: 14px; font-weight: 700;
     }}
     QPushButton#listClose:hover {{ background-color: #2b5f92; }}
+    QPushButton#rowRetry {{
+        background-color: #fff4d0; color: #6b4200; border: 1px solid #e0a200; border-radius: 8px;
+        padding: 0 14px; font-size: 13px; font-weight: 700;
+    }}
+    QPushButton#rowRetry:hover {{ background-color: #ffe27a; }}
+    QPushButton#rowRetry:disabled {{ color: #a3aebb; background-color: #f4f6fa; border-color: #dce3ea; }}
     QPushButton#listCopy {{
         background-color: #ffffff; color: #263445; border: 1px solid #c8d1db; border-radius: 9px;
         padding: 10px 18px; font-size: 13px; font-weight: 600;
@@ -188,16 +303,26 @@ def _qss(accent: str) -> str:
 
 class InvoiceListDialog(QDialog):
     def __init__(self, parent: Optional[QWidget], scope: str, rows: list[InvoiceRow],
-                 now: Optional[dt.datetime] = None):
+                 now: Optional[dt.datetime] = None,
+                 on_retry: Optional[Callable[[int], None]] = None,
+                 reload: Optional[Callable[[], list[InvoiceRow]]] = None):
+        """`on_retry(invoice_id)` (pending list only) adds a Retry button to every row that calls it;
+        `reload()` then returns the fresh rows so the list shows the new status."""
         super().__init__(parent)
         meta = SCOPES[scope]
         self.scope = scope
         self.rows = rows
+        self._retry_buttons = {}
+        self.on_retry = on_retry if scope == "pending" else None
+        self.reload = reload
+        self.keys = column_keys(scope, with_action=self.on_retry is not None)
+        self.col = {k: i for i, k in enumerate(self.keys)}
+        self._utc_now = None          # tests can pin the clock used for the pending status text
         self.setObjectName("invoiceListDialog")
         self.setWindowTitle(f"{meta['title']} — Invoices")
         self.setModal(True)
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
-        self.resize(1200, 660)
+        self.resize(1380 if self.on_retry is not None else 1200, 660)
         self.setMinimumSize(920, 420)
         self.setStyleSheet(_qss(meta["accent"]))
 
@@ -241,32 +366,40 @@ class InvoiceListDialog(QDialog):
         body.setSpacing(12)
         self.search = QLineEdit()
         self.search.setObjectName("listSearch")
-        self.search.setPlaceholderText("Search invoice no., buyer, CNIC, chassis or FBR invoice ID…")
+        self.search.setPlaceholderText(
+            "Search invoice no., buyer, chassis, status or message…" if scope == "pending"
+            else "Search invoice no., buyer, CNIC, chassis or FBR invoice ID…")
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(self._apply_filter)
         body.addWidget(self.search)
 
-        self.table = QTableWidget(0, len(COLUMNS))
+        self.table = QTableWidget(0, len(self.keys))
         self.table.setObjectName("listTable")
-        self.table.setHorizontalHeaderLabels(COLUMNS)
+        self.table.setHorizontalHeaderLabels([HEADERS[k] for k in self.keys])
         self.table.setAlternatingRowColors(True)
         self.table.setShowGrid(False)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.verticalHeader().setVisible(False)
-        self.table.verticalHeader().setDefaultSectionSize(40)
+        self.table.verticalHeader().setDefaultSectionSize(48 if self.on_retry is not None else 40)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._context_menu)
         self.table.itemSelectionChanged.connect(self._on_selection)
         hh = self.table.horizontalHeader()
         hh.setStretchLastSection(False)
         hh.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        for col, mode in ((_COL_BUYER, QHeaderView.ResizeMode.Stretch), (_COL_BIKE, QHeaderView.ResizeMode.Stretch),
-                          (_COL_FBR, QHeaderView.ResizeMode.ResizeToContents)):
-            hh.setSectionResizeMode(col, mode)
-        for col, width in ((_COL_NO, 48), (_COL_INV, 100), (_COL_DATE, 168), (_COL_CNIC, 138), (_COL_AMOUNT, 112)):
-            self.table.setColumnWidth(col, width)
+        c = self.col
+        stretch = ["buyer", "bike"] + (["reason"] if scope == "pending" else [])
+        for key in stretch:
+            hh.setSectionResizeMode(c[key], QHeaderView.ResizeMode.Stretch)
+        if "fbr" in c:
+            hh.setSectionResizeMode(c["fbr"], QHeaderView.ResizeMode.ResizeToContents)
+        widths = {"no": 48, "inv": 100, "date": 168, "cnic": 138, "amount": 112, "attempts": 84, "status": 244,
+                  "action": 104}
+        for key, width in widths.items():
+            if key in c:
+                self.table.setColumnWidth(c[key], width)
         body.addWidget(self.table, 1)
 
         self.empty_label = QLabel(meta["empty"])
@@ -286,7 +419,7 @@ class InvoiceListDialog(QDialog):
         self.summary_label = QLabel("")
         self.summary_label.setObjectName("listSummary")
         f.addWidget(self.summary_label, 1)
-        self.copy_button = QPushButton("Copy FBR ID")
+        self.copy_button = QPushButton(self._copy_label())
         self.copy_button.setObjectName("listCopy")
         self.copy_button.setAutoDefault(False)
         self.copy_button.setEnabled(False)
@@ -305,45 +438,114 @@ class InvoiceListDialog(QDialog):
         self._apply_filter()
         # "#" always counts the rows you can SEE, in the order you see them
         # (a Qt table keeps 'hidden' per row POSITION, so re-apply the filter after every sort)
-        self.table.horizontalHeader().sortIndicatorChanged.connect(lambda *_: self._apply_filter())
+        self.table.horizontalHeader().sortIndicatorChanged.connect(lambda *_: (self._apply_filter(), self._place_retry_buttons()))
 
     # ---- content -----------------------------------------------------------------------
+    _STATE_COLOURS = {STATE_STOPPED: "#b42318", STATE_UPLOADING: "#1d6fb8",
+                      STATE_WAITING: "#a15c07", STATE_QUEUED: "#2f6f4f"}
+
     def _populate(self) -> None:
         t = self.table
+        c = self.col
         t.setSortingEnabled(False)
         t.setRowCount(len(self.rows))
-        mono_cols = (_COL_INV, _COL_CNIC, _COL_FBR)
+        mono_keys = {"inv", "cnic", "fbr"}
         for r, row in enumerate(self.rows):
             cells = {
-                _COL_NO: (str(r + 1), r + 1),
-                _COL_INV: (row.invoice_number, row.invoice_number),
-                _COL_DATE: (format_when(row.when), row.when or dt.datetime.min),
-                _COL_BUYER: (row.buyer, row.buyer.lower()),
-                _COL_CNIC: (row.cnic, row.cnic),
-                _COL_BIKE: (row.bike, row.bike.lower()),
-                _COL_AMOUNT: (format_amount(row.amount), row.amount),
-                _COL_FBR: (row.fbr_invoice_number, row.fbr_invoice_number),
+                "no": (str(r + 1), r + 1),
+                "inv": (row.invoice_number, row.invoice_number),
+                "date": (format_when(row.when), row.when or dt.datetime.min),
+                "buyer": (row.buyer, row.buyer.lower()),
+                "cnic": (row.cnic, row.cnic),
+                "bike": (row.bike, row.bike.lower()),
+                "amount": (format_amount(row.amount), row.amount),
+                "fbr": (row.fbr_invoice_number, row.fbr_invoice_number),
             }
-            for col, (text, key) in cells.items():
+            state, state_text = STATE_QUEUED, ""
+            if self.scope == "pending":
+                state, state_text = pending_state(row, self._utc_now)
+                cells["attempts"] = (f"{row.attempts} / {row.max_attempts}", row.attempts)
+                cells["status"] = (state_text, state_text.lower())
+                cells["reason"] = (row.reason, row.reason.lower())
+            cells["action"] = ("", "")
+            for key in self.keys:
+                text, sort_key = cells[key]
                 item = _SortItem(text)
-                item.setData(Qt.ItemDataRole.UserRole, key)
-                if col == _COL_AMOUNT:
+                item.setData(Qt.ItemDataRole.UserRole, sort_key)
+                if key == "amount":
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                elif col == _COL_NO:
+                elif key in ("no", "attempts"):
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 else:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-                if col in mono_cols:
+                if key in mono_keys:
                     font = item.font()
                     font.setFamily("Consolas")
                     item.setFont(font)
-                t.setItem(r, col, item)
-            t.item(r, _COL_INV).setData(Qt.ItemDataRole.UserRole + 1, r)     # index into self.rows
+                if key == "status":
+                    item.setForeground(QColor(self._STATE_COLOURS[state]))
+                    font = item.font()
+                    font.setBold(True)
+                    item.setFont(font)
+                    item.setToolTip(pending_hint(state, state_text))
+                if key == "reason" and row.reason:
+                    item.setToolTip(row.reason)
+                t.setItem(r, c[key], item)
+            t.item(r, c["inv"]).setData(Qt.ItemDataRole.UserRole + 1, r)     # index into self.rows
         t.setSortingEnabled(True)
-        t.sortItems(_COL_DATE, Qt.SortOrder.DescendingOrder)
+        # submitted: newest first; pending: oldest first (the order the queue uploads them)
+        t.sortItems(c["date"], Qt.SortOrder.AscendingOrder if self.scope == "pending" else Qt.SortOrder.DescendingOrder)
+        self._place_retry_buttons()
+
+    # ---- retry (pending list) ----------------------------------------------------------------
+    def retry_button(self, table_row: int):
+        return self._retry_buttons.get(table_row)
+
+    def _place_retry_buttons(self) -> None:
+        """One Retry button per row. Rebuilt after every sort/reload so each button always sits
+        on - and retries - the invoice shown in its own row."""
+        self._retry_buttons = {}
+        if self.on_retry is None:
+            return
+        t = self.table
+        col = self.col["action"]
+        for r in range(t.rowCount()):
+            row = self._row_for(r)
+            t.removeCellWidget(r, col)
+            if row is None:
+                continue
+            button = QPushButton("Retry")
+            button.setObjectName("rowRetry")
+            button.setAutoDefault(False)
+            button.setFixedHeight(32)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            uploading = pending_state(row, self._utc_now)[0] == STATE_UPLOADING
+            button.setEnabled(not uploading)
+            button.setToolTip("Uploading right now" if uploading else
+                              f"Reset the attempts and upload invoice {row.invoice_number} to FBR again")
+            button.clicked.connect(lambda _checked=False, iid=row.invoice_id: self._retry(iid))
+            holder = QWidget()
+            lay = QHBoxLayout(holder)
+            lay.setContentsMargins(8, 0, 8, 0)
+            lay.addWidget(button)
+            t.setCellWidget(r, col, holder)
+            self._retry_buttons[r] = button
+
+    def _retry(self, invoice_id: int) -> None:
+        if self.on_retry is None:
+            return
+        self.on_retry(invoice_id)
+        if self.reload is not None:
+            self.set_rows(self.reload())
+
+    def set_rows(self, rows: list[InvoiceRow]) -> None:
+        """Replace the rows (keeps the search text) - used after a retry."""
+        self.rows = rows
+        self._populate()
+        self._apply_filter()
 
     def _row_for(self, table_row: int) -> Optional[InvoiceRow]:
-        item = self.table.item(table_row, _COL_INV)
+        item = self.table.item(table_row, self.col["inv"])
         if item is None:
             return None
         idx = item.data(Qt.ItemDataRole.UserRole + 1)
@@ -353,7 +555,7 @@ class InvoiceListDialog(QDialog):
         """Number the visible rows 1..n in their current (sorted) order."""
         n = 0
         for r in range(self.table.rowCount()):
-            item = self.table.item(r, _COL_NO)
+            item = self.table.item(r, self.col["no"])
             if item is None:
                 continue
             if self.table.isRowHidden(r):
@@ -369,7 +571,8 @@ class InvoiceListDialog(QDialog):
         for r in range(self.table.rowCount()):
             row = self._row_for(r)
             hay = " ".join([row.invoice_number, row.buyer, row.cnic, row.chassis, row.model,
-                            row.fbr_invoice_number]).lower() if row else ""
+                            row.fbr_invoice_number, row.reason,
+                            pending_state(row, self._utc_now)[1] if self.scope == "pending" else ""]).lower() if row else ""
             visible = not needle or needle in hay
             self.table.setRowHidden(r, not visible)
             if visible and row:
@@ -396,7 +599,10 @@ class InvoiceListDialog(QDialog):
 
     def _on_selection(self) -> None:
         self.copy_button.setEnabled(self.selected_row() is not None)
-        self.copy_button.setText("Copy FBR ID")
+        self.copy_button.setText(self._copy_label())
+
+    def _copy_label(self) -> str:
+        return "Copy Invoice No." if self.scope == "pending" else "Copy FBR ID"
 
     def _copy(self, text: str) -> None:
         QGuiApplication.clipboard().setText(text)
@@ -404,7 +610,7 @@ class InvoiceListDialog(QDialog):
     def _copy_fbr_id(self) -> None:
         row = self.selected_row()
         if row is not None:
-            self._copy(row.fbr_invoice_number)
+            self._copy(row.invoice_number if self.scope == "pending" else row.fbr_invoice_number)
             self.copy_button.setText("Copied ✓")
 
     def _context_menu(self, pos: QPoint) -> None:
@@ -417,7 +623,11 @@ class InvoiceListDialog(QDialog):
             return
         menu = QMenu(self)
         menu.addAction("Copy invoice number", lambda: self._copy(row.invoice_number))
-        menu.addAction("Copy FBR invoice ID", lambda: self._copy(row.fbr_invoice_number))
+        if self.scope == "pending":
+            if row.reason:
+                menu.addAction("Copy last message", lambda: self._copy(row.reason))
+        else:
+            menu.addAction("Copy FBR invoice ID", lambda: self._copy(row.fbr_invoice_number))
         menu.exec(self.table.viewport().mapToGlobal(pos))
 
 
@@ -426,9 +636,13 @@ def show_invoice_list(parent, scope: str, now: Optional[dt.datetime] = None) -> 
     caller, which reports them (see MainWindow._show_submitted_invoices)."""
     from app.db.session import SessionLocal
 
-    db = SessionLocal()
-    try:
-        rows = fetch_submitted_invoices(db, scope, now)
-    finally:
-        db.close()
-    InvoiceListDialog(parent, scope, rows, now).exec()
+    def load() -> list[InvoiceRow]:
+        db = SessionLocal()
+        try:
+            return fetch_invoices(db, scope, now)
+        finally:
+            db.close()
+
+    # the pending list can re-queue an invoice (the window's existing "Retry FBR Upload" action)
+    on_retry = getattr(parent, "_retry_invoice_upload", None) if scope == "pending" else None
+    InvoiceListDialog(parent, scope, load(), now, on_retry=on_retry, reload=load).exec()

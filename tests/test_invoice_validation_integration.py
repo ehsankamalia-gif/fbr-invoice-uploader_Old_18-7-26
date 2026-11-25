@@ -400,3 +400,42 @@ def test_each_cards_number_equals_the_length_of_its_list(window):
     assert int(window.invoice_month_stat_value.text()) == counts["month"]
     assert int(window.invoice_fbr_stat_value.text()) == counts["all"]
     assert counts["all"] == 4 and counts["all"] >= counts["month"] >= counts["today"]
+
+
+# ---- the round Pending ball ------------------------------------------------------------------
+def test_clicking_the_pending_ball_opens_the_pending_list(window, opened_lists):
+    ball = window.invoice_pending_ball
+    QTest.mouseClick(ball, Qt.MouseButton.LeftButton)
+    QTest.keyClick(ball, Qt.Key.Key_Return)
+    assert opened_lists == ["pending", "pending"]
+    assert ball.cursor().shape() == Qt.CursorShape.PointingHandCursor
+    assert ball.toolTip().startswith("Pending")
+
+
+def test_the_pending_ball_number_equals_the_length_of_its_list(window):
+    from app.qt_ui import invoice_list_dialog as ild
+
+    _seed_invoices()                       # P-5 never reached FBR and is still PENDING
+    window._update_pending_counter()
+    db = dbs.SessionLocal()
+    try:
+        expected = len(ild.fetch_pending_invoices(db))
+    finally:
+        db.close()
+    assert expected == 1 and window.invoice_pending_ball.count() == expected
+
+
+def test_the_ball_follows_the_background_queue_refresh(window):
+    """The 5-second status refresh keeps the ball current as invoices upload."""
+    from app.db.models import Invoice
+
+    _seed_invoices()
+    window._update_invoice_upload_status()
+    assert window.invoice_pending_ball.count() == 1
+    db = dbs.SessionLocal()
+    inv = db.query(Invoice).filter_by(invoice_number="P-5").one()
+    inv.fbr_invoice_number, inv.sync_status = "FBR-5", "SYNCED"          # the queue just uploaded it
+    db.commit()
+    db.close()
+    window._update_invoice_upload_status()
+    assert window.invoice_pending_ball.count() == 0
