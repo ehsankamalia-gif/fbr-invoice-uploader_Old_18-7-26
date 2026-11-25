@@ -59,6 +59,11 @@ def _arrow_files() -> dict[str, str]:
     (QSS can only reference image FILES) and returns their forward-slash
     paths. Empty dict if the temp folder isn't writable - the stylesheet then
     simply leaves those arrows to the Fusion style."""
+    # Preferred: the arrow images committed in the repo (app/assets/icons/ui/).
+    bundled = {n: _icons.ui_asset(f"chevron-{n}.svg") for n in ("down", "up")}
+    if all(p.exists() for p in bundled.values()):
+        return {n: p.as_posix() for n, p in bundled.items()}
+    # Fallback only if those files are somehow missing: generate them in the temp folder.
     colour = TOKENS["text_muted"].replace("#", "%23")
     shapes = {
         "down": "M5 7.5l5 5 5-5",
@@ -272,10 +277,13 @@ _EMOJI_ICONS = {
 _VARIATION_SELECTOR = "️"
 _COLOR_RE = re.compile(r"(?:^|[;{\s])color\s*:\s*([^;}\s]+)", re.IGNORECASE)
 
-try:  # QtAwesome is optional: without it buttons simply keep their emoji.
-    import qtawesome as _qta
-except Exception:  # pragma: no cover
-    _qta = None
+# Icons come from SVG files committed in the repository (app/assets/icons/fa5-solid) via
+# app/qt_ui/icons.py - NOT from the qtawesome package, whose fonts live in the git-ignored venv.
+# `_qta` keeps its old name so every module that imports it (`_qta.icon(name, color=...)`)
+# works unchanged.
+from app.qt_ui import icons as _icons
+
+_qta = _icons.IconBackend()
 
 
 def _icon_colour(button: QAbstractButton) -> str:

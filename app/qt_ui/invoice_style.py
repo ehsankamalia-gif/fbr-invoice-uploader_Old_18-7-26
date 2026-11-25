@@ -25,7 +25,52 @@ _FOCUS = "#3b82c4"        # calmer blue than the previous #2f80ed
 _FOCUS_DARK = "#326fa8"
 _FOCUS_DARKER = "#2b5f90"
 _PAGE_BG = "#edf1f5"
+# Each form section has its own colour family so the sections are told apart at a
+# glance: a very soft tint for the card body (kept pale so the page stays easy on
+# the eyes and the off-white fields still stand out) and a deeper gradient for the
+# heading banner. White banner text is >= 4.5:1 at both gradient ends (tested).
+SECTIONS = {
+    # Invoice & Customer Information
+    "customer": dict(card="#eef5fc", border="#cfe0f1", start="#1f4068", end="#3474b0", hover="#4283c0"),
+    # Product & Payment Details
+    "product":  dict(card="#ecf7f1", border="#cde8da", start="#0f4c3a", end="#1b7f5b", hover="#2a9070"),
+    # Advanced FBR Fields (optional)
+    "advanced": dict(card="#f4effa", border="#e0d4ef", start="#43275f", end="#7442a6", hover="#8353b5"),
+    # Pricing Summary
+    "pricing":  dict(card="#fdf4e8", border="#f1dfc3", start="#7a3f05", end="#ae5909", hover="#be6a17"),
+}
+DEFAULT_SECTION = "customer"
+
+
+def tag_section(frame, name: str) -> None:
+    """Mark a form-section card so the stylesheet gives it its own colours.
+    Call before the page is first shown."""
+    if name not in SECTIONS:
+        raise ValueError(f"unknown form section {name!r}")
+    frame.setProperty("section", name)
 _DISABLED_BG = "#eef1f5"
+
+
+def _banner_gradient(section: str = DEFAULT_SECTION, hover: bool = False) -> str:
+    c = SECTIONS[section]
+    end = c["hover"] if hover else c["end"]
+    return f"qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {c['start']}, stop:1 {end})"
+
+
+def _section_qss() -> str:
+    """One rule set per section: card body tint + border, heading banner, and the
+    banner on the collapsible Advanced header (a button)."""
+    out = []
+    for name, c in SECTIONS.items():
+        grad, grad_hover = _banner_gradient(name), _banner_gradient(name, hover=True)
+        card = f'#invoicePage QFrame#formGroup[section="{name}"]'
+        out.append(f"""
+    {card} {{ background-color: {c['card']}; border: 1px solid {c['border']}; }}
+    {card} QLabel#groupTitle {{ background: {grad}; }}
+    {card} QPushButton#groupTitleToggle {{ background: {grad}; }}
+    {card} QPushButton#groupTitleToggle:hover {{ background: {grad_hover}; }}
+    {card} QPushButton#groupTitleToggle:pressed {{ background: {grad}; }}""")
+    return "\n".join(out)
 
 
 def build_invoice_page_qss() -> str:
@@ -63,10 +108,14 @@ def build_invoice_page_qss() -> str:
         background: transparent; border: none;
     }}
     #invoicePage QFrame#formGroup QLabel#groupTitle {{
-        font-size: 14px; font-weight: 700; letter-spacing: 0.6px; color: {_HEADING};
-        padding: 3px 0px 3px 12px; margin-bottom: 8px;
-        border: none; border-left: 4px solid {_FOCUS};
+        font-size: 14px; font-weight: 800; letter-spacing: 1.2px; color: #ffffff;
+        padding: 11px 18px; margin-bottom: 8px;
+        border: none; border-radius: 10px;
+        background: {_banner_gradient()};
     }}
+
+    /* ---- per-section colours (card tint + heading banner) ---- */
+    {_section_qss()}
 
     /* ---- inputs ---- */
     #invoicePage QLineEdit, #invoicePage QComboBox,
@@ -134,6 +183,24 @@ def build_invoice_page_qss() -> str:
     }}
     #invoicePage QPushButton#resetButton:hover {{ background-color: #f3f6f9; border-color: {_FIELD_BORDER_HOVER}; }}
     #invoicePage QPushButton#resetButton:pressed {{ background-color: #e7ecf1; }}
+
+    /* ---- inline validation states (set by app/qt_ui/form_validation.py) ---- */
+    #invoicePage QLineEdit[vstate="invalid"], #invoicePage QComboBox[vstate="invalid"],
+    #invoicePage QDoubleSpinBox[vstate="invalid"] {{
+        border: 1px solid #d64545; background-color: #fff6f6;
+    }}
+    #invoicePage QLineEdit[vstate="invalid"]:focus, #invoicePage QComboBox[vstate="invalid"]:focus,
+    #invoicePage QDoubleSpinBox[vstate="invalid"]:focus {{
+        border: 1px solid #c0392b; background-color: #ffffff;
+    }}
+    #invoicePage QLineEdit[vstate="valid"], #invoicePage QComboBox[vstate="valid"],
+    #invoicePage QDoubleSpinBox[vstate="valid"] {{
+        border: 1px solid #7cc4a1;
+    }}
+    #invoicePage QLineEdit[vstate="valid"]:focus, #invoicePage QComboBox[vstate="valid"]:focus,
+    #invoicePage QDoubleSpinBox[vstate="valid"]:focus {{
+        border: 1px solid {_FOCUS};
+    }}
     """
 
 
@@ -166,22 +233,29 @@ def _tint(hex_colour: str, amount: float) -> str:
     )
 
 
-def _gradient(accent: str) -> str:
+def _gradient(accent: str, lift: bool = False) -> str:
     # A touch lighter at the top-left, the pure accent shaded a little at the
     # bottom-right: reads as a lit, rich colour rather than a flat/muddy one.
-    return (
-        "qlineargradient(x1:0, y1:0, x2:1, y2:1, "
-        f"stop:0 {_tint(accent, 0.10)}, stop:1 {_shade(accent, 0.82)})"
+    # `lift` is the brighter version used while a clickable card is hovered / focused.
+    start = _tint(accent, 0.24 if lift else 0.10)
+    end = _shade(accent, 0.92 if lift else 0.82)
+    return f"qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {start}, stop:1 {end})"
+
+
+def stat_card_qss(object_name: str, accent: str = "#2e86c1", clickable: bool = False) -> str:
+    hover = (
+        f"""
+        #{object_name}:hover, #{object_name}:focus {{
+            background: {_gradient(accent, lift=True)};
+        }}"""
+        if clickable else ""
     )
-
-
-def stat_card_qss(object_name: str, accent: str = "#2e86c1") -> str:
     return f"""
         #{object_name} {{
             background: {_gradient(accent)};
             border: none;
             border-radius: 14px;
-        }}
+        }}{hover}
     """
 
 
@@ -216,7 +290,7 @@ def _icon_tile(icon_name: str, accent: str = "#ffffff"):
     return tile
 
 
-def _card_shell(parent, object_name: str, accent: str):
+def _card_shell(parent, object_name: str, accent: str, clickable: bool = False):
     from PyQt6.QtWidgets import QFrame, QHBoxLayout, QSizePolicy
 
     frame = QFrame(parent)
@@ -226,7 +300,7 @@ def _card_shell(parent, object_name: str, accent: str):
     frame.setFixedHeight(_CARD_H)
     frame.setMinimumWidth(168)
     frame.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-    frame.setStyleSheet(stat_card_qss(object_name, accent))
+    frame.setStyleSheet(stat_card_qss(object_name, accent, clickable))
     row = QHBoxLayout(frame)
     row.setContentsMargins(13, 0, 16, 0)
     row.setSpacing(11)
@@ -240,13 +314,15 @@ def equalize_cards(*frames) -> None:
         f.setMinimumWidth(width)
 
 
-def build_stat_card(parent, object_name: str, title: str, icon_name: str, accent: str, value: str = "0"):
+def build_stat_card(parent, object_name: str, title: str, icon_name: str, accent: str, value: str = "0",
+                    clickable: bool = False):
     """Returns (card_frame, value_label). Callers keep updating the value with
-    value_label.setText(...) exactly as before."""
+    value_label.setText(...) exactly as before. clickable=True only adds the hover
+    lift; wire the click itself with make_clickable()."""
     from PyQt6.QtCore import Qt
     from PyQt6.QtWidgets import QLabel, QVBoxLayout
 
-    frame, row = _card_shell(parent, object_name, accent)
+    frame, row = _card_shell(parent, object_name, accent, clickable)
     row.addWidget(_icon_tile(icon_name))
 
     col = QVBoxLayout()
@@ -263,6 +339,33 @@ def build_stat_card(parent, object_name: str, title: str, icon_name: str, accent
     col.addStretch(1)
     row.addLayout(col, 1)
     return frame, value_label
+
+
+def make_clickable(frame, callback, tooltip: str = "") -> None:
+    """Make a card behave like a button: pointing-hand cursor, tooltip, a click inside
+    it (on the card or any label on it) or Enter/Space when focused calls `callback`.
+    Interaction only - it changes nothing about the card's content."""
+    from PyQt6.QtCore import QEvent, QObject, Qt
+
+    class _Filter(QObject):
+        def eventFilter(self, obj, event):  # noqa: N802
+            t = event.type()
+            if t == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
+                if frame.rect().contains(event.position().toPoint()):
+                    callback()
+                    return True
+            elif t == QEvent.Type.KeyPress and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+                callback()
+                return True
+            return False
+
+    flt = _Filter(frame)
+    frame.installEventFilter(flt)
+    frame._click_filter = flt                      # keep the Python object alive (PyQt would drop it)
+    frame.setCursor(Qt.CursorShape.PointingHandCursor)
+    frame.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+    if tooltip:
+        frame.setToolTip(tooltip)
 
 
 def env_badge_qss(colour: str) -> str:
@@ -360,19 +463,18 @@ FBR_NUMBER_DISPLAY_QSS = f"""
     }}
 """
 
-ADVANCED_TOGGLE_QSS = f"""
-    QPushButton#groupTitleToggle {{
-        background: transparent; border: none; text-align: left;
-        font-weight: 700; color: {_HEADING}; font-size: 14px; letter-spacing: 0.6px;
-        padding: 0; margin-bottom: 5px;
-    }}
-    QPushButton#groupTitleToggle:hover {{ color: {_FOCUS}; }}
+ADVANCED_TOGGLE_QSS = """
+    QPushButton#groupTitleToggle {
+        text-align: left; border: none; border-radius: 10px;
+        padding: 11px 18px; margin: 0px 28px 5px 0px;   /* 28px = the right gutter the other cards have */
+        font-weight: 800; font-size: 14px; letter-spacing: 1.2px; color: #ffffff;
+    }
 """
 
 # Total Price (Incl. Tax): the figure the cashier checks last, so it stands out.
 TOTAL_SPIN_QSS = (
-    f"font-weight: 700; color: {_HEADING}; font-size: 17px; "
-    "background-color: #eaf2fb; border: 1px solid #b7cde6;"
+    "font-weight: 700; color: #6b3a06; font-size: 17px; "          # sits on the amber Pricing card
+    "background-color: #fff3dc; border: 1px solid #e8c47f;"
 )
 
 

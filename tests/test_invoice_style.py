@@ -236,3 +236,82 @@ def test_label_style_is_darker_than_secondary_text_and_not_pure_black():
     assert _luminance(invoice_style._LABEL) < _luminance(invoice_style._INK_SOFT)   # reads as a label
     assert _contrast_with_white(invoice_style._LABEL) >= 7                          # WCAG AAA on white cards
     assert invoice_style._LABEL.lower() != "#000000"
+
+
+# ---- section heading banners ------------------------------------------------------
+def test_section_headings_are_bold_white_gradient_banners():
+    css = invoice_style.build_invoice_page_qss()
+    block = css[css.index("QLabel#groupTitle"):]
+    block = block[:block.index("}")]
+    assert "qlineargradient" in block
+    assert "font-weight: 800" in block and "color: #ffffff" in block
+    assert "border-radius" in block
+
+
+def test_collapsible_advanced_header_gets_its_banner_from_the_page_stylesheet():
+    css = invoice_style.build_invoice_page_qss()
+    for name in invoice_style.SECTIONS:
+        assert f'QFrame#formGroup[section="{name}"] QPushButton#groupTitleToggle' in css
+    # the inline button style only carries structure + white bold text (no colour of its own,
+    # otherwise it would override its section's colour)
+    toggle = invoice_style.ADVANCED_TOGGLE_QSS
+    assert "background" not in toggle
+    assert "color: #ffffff" in toggle and "font-weight: 800" in toggle
+
+
+def test_white_heading_text_is_readable_on_both_ends_of_every_banner():
+    for name, c in invoice_style.SECTIONS.items():
+        assert _contrast_with_white(c["start"]) >= 4.5, name
+        assert _contrast_with_white(c["end"]) >= 4.5, name
+        assert _contrast_with_white(c["hover"]) >= 3.0, name        # hover only brightens a little
+
+
+def test_banner_stylesheets_parse_cleanly(qapp):
+    assert _parse_warnings(qapp, invoice_style.ADVANCED_TOGGLE_QSS) == []
+    assert _parse_warnings(qapp, invoice_style.build_invoice_page_qss()) == []
+
+
+# ---- each section has its own colour ------------------------------------------------
+def test_there_are_four_distinct_section_colour_schemes():
+    s = invoice_style.SECTIONS
+    assert set(s) == {"customer", "product", "advanced", "pricing"}
+    assert len({c["card"] for c in s.values()}) == 4
+    assert len({c["end"] for c in s.values()}) == 4
+    assert len({invoice_style._banner_gradient(n) for n in s}) == 4
+
+
+def test_section_cards_are_pale_so_the_page_stays_easy_on_the_eyes():
+    for name, c in invoice_style.SECTIONS.items():
+        assert _luminance(c["card"]) > 0.87, name          # very light tint, never a heavy fill
+        assert c["card"].lower() != "#ffffff"              # but visibly not plain white
+
+
+def test_page_stylesheet_has_a_rule_set_per_section():
+    css = invoice_style.build_invoice_page_qss()
+    for name, c in invoice_style.SECTIONS.items():
+        assert f'QFrame#formGroup[section="{name}"]' in css
+        assert c["card"] in css and c["border"] in css
+        assert f'QFrame#formGroup[section="{name}"] QLabel#groupTitle' in css
+
+
+def test_tag_section_marks_the_frame_and_rejects_unknown_names(qapp):
+    frame = QFrame()
+    invoice_style.tag_section(frame, "pricing")
+    assert frame.property("section") == "pricing"
+    with pytest.raises(ValueError):
+        invoice_style.tag_section(frame, "nonsense")
+
+
+def test_section_colours_actually_apply_to_a_tagged_card(qapp):
+    """A card tagged 'product' really gets the green tint (property selector works)."""
+    page = QWidget()
+    page.setObjectName("invoicePage")
+    card = QFrame(page)
+    card.setObjectName("formGroup")
+    invoice_style.tag_section(card, "product")
+    page.setStyleSheet(invoice_style.build_invoice_page_qss())
+    page.resize(200, 100)
+    page.show()
+    qapp.processEvents()
+    pixel = card.grab().toImage().pixelColor(5, 5).name()
+    assert pixel == invoice_style.SECTIONS["product"]["card"]

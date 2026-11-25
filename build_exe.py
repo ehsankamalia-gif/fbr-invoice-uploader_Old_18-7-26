@@ -46,6 +46,7 @@ HIDDEN_IMPORTS = [
     "PyQt6.QtCore",
     "PyQt6.QtGui",
     "PyQt6.QtWidgets",
+    "PyQt6.QtSvg",
     "PyQt6.QtWebEngineWidgets",
     "PyQt6.sip",
     "sqlite3",

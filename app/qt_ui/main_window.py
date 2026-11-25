@@ -120,6 +120,9 @@ from app.qt_ui.settings_modals import (
 )
 from app.qt_ui.auto_scroll_manager import AutoScrollManager
 from app.qt_ui import invoice_style
+from app.qt_ui import completer_style
+from app.qt_ui import form_validation
+from app.qt_ui import notice_dialog
 from app.core.signals import booking_signals
 from app.core.logger import logger
 from app.core.version_manager import VersionManager
@@ -4032,7 +4035,7 @@ class MainWindow(QMainWindow):
         # The value labels keep their original attribute names; other code only
         # calls .setText(...) on them.
         fbr_stat_widget, self.invoice_fbr_stat_value = invoice_style.build_stat_card(
-            header_widget, "fbrStatBox", "FBR SUBMITTED", "fa5s.cloud-upload-alt", "#17934d")
+            header_widget, "fbrStatBox", "FBR SUBMITTED", "fa5s.cloud-upload-alt", "#17934d", clickable=True)
         header_layout.addWidget(fbr_stat_widget)
 
         self.invoice_env_badge, self.invoice_env_value_label = invoice_style.build_env_card(header_widget)
@@ -4041,12 +4044,22 @@ class MainWindow(QMainWindow):
         # to the environment so the cashier sees today's progress and which FBR
         # environment it is going to.
         self.invoice_today_stat_widget, self.invoice_today_stat_value = invoice_style.build_stat_card(
-            header_widget, "todayStatBox", "SUBMITTED TODAY", "fa5s.calendar-day", "#2578b5")
+            header_widget, "todayStatBox", "SUBMITTED TODAY", "fa5s.calendar-day", "#2578b5", clickable=True)
         self.invoice_month_stat_widget, self.invoice_month_stat_value = invoice_style.build_stat_card(
-            header_widget, "monthStatBox", "SUBMITTED THIS MONTH", "fa5s.calendar-alt", "#8340a0")
+            header_widget, "monthStatBox", "SUBMITTED THIS MONTH", "fa5s.calendar-alt", "#8340a0", clickable=True)
         invoice_style.equalize_cards(
             fbr_stat_widget, self.invoice_env_badge,
             self.invoice_today_stat_widget, self.invoice_month_stat_widget)
+        # Clicking a count card opens the list of invoices behind that number.
+        invoice_style.make_clickable(
+            self.invoice_today_stat_widget, lambda: self._show_submitted_invoices("today"),
+            "Click to view the invoices submitted today")
+        invoice_style.make_clickable(
+            self.invoice_month_stat_widget, lambda: self._show_submitted_invoices("month"),
+            "Click to view the invoices submitted this month")
+        invoice_style.make_clickable(
+            fbr_stat_widget, lambda: self._show_submitted_invoices("all"),
+            "Click to view all invoices submitted to FBR")
 
         # Insert before the FBR stat widget
         header_layout.insertWidget(2, self.invoice_env_badge)
@@ -4077,6 +4090,7 @@ class MainWindow(QMainWindow):
         # --- Group 1: Invoice & Customer Info ---
         group1 = QFrame()
         group1.setObjectName("formGroup")
+        invoice_style.tag_section(group1, "customer")
         group1_layout = QGridLayout(group1)
         group1_layout.setContentsMargins(20, 25, 20, 20)
         group1_layout.setHorizontalSpacing(20)
@@ -4328,6 +4342,7 @@ class MainWindow(QMainWindow):
         # --- Group 2: Product & Payment ---
         group2 = QFrame()
         group2.setObjectName("formGroup")
+        invoice_style.tag_section(group2, "product")
         group2_layout = QGridLayout(group2)
         group2_layout.setContentsMargins(20, 25, 20, 20)
         group2_layout.setHorizontalSpacing(20)
@@ -4391,6 +4406,7 @@ class MainWindow(QMainWindow):
         # either way, so this cannot change what gets sent to FBR) ---
         group_fbr = QFrame()
         group_fbr.setObjectName("formGroup")
+        invoice_style.tag_section(group_fbr, "advanced")
         group_fbr_outer = QVBoxLayout(group_fbr)
         group_fbr_outer.setContentsMargins(28, 20, 28, 24)
         group_fbr_outer.setSpacing(0)
@@ -4445,6 +4461,7 @@ class MainWindow(QMainWindow):
         # --- Group 3: Pricing & Summary ---
         self.invoice_pricing_group = QFrame()
         self.invoice_pricing_group.setObjectName("formGroup")
+        invoice_style.tag_section(self.invoice_pricing_group, "pricing")
         group3_layout = QGridLayout(self.invoice_pricing_group)
         group3_layout.setContentsMargins(20, 25, 20, 20)
         group3_layout.setHorizontalSpacing(20)
@@ -4517,6 +4534,10 @@ class MainWindow(QMainWindow):
         self.invoice_validation_hint_label.setStyleSheet("color: #e67e22; font-size: 11px;")
         self.invoice_validation_hint_label.setWordWrap(True)
         button_layout.addWidget(self.invoice_validation_hint_label)
+        # Superseded by the inline validation (red fields + summary banner + the
+        # Submit button's tooltip). Kept (the code still fills it in) but hidden so
+        # the bottom bar isn't a four-line orange block that repeats the banner.
+        self.invoice_validation_hint_label.setVisible(False)
 
         button_layout.addStretch(1)
         
@@ -4567,6 +4588,7 @@ class MainWindow(QMainWindow):
         self.invoice_dealer_completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
         self.invoice_dealer_completer.setMaxVisibleItems(10)
         self.invoice_buyer_name_input.setCompleter(self.invoice_dealer_completer)
+        completer_style.style_completer(self.invoice_dealer_completer, "fa5s.building")
         self.invoice_buyer_name_input.on_completion_accept = self._on_dealer_business_selected
 
         self._dealer_completer_timer = QTimer(self)
@@ -4588,6 +4610,7 @@ class MainWindow(QMainWindow):
         self.invoice_chassis_completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
         self.invoice_chassis_completer.setMaxVisibleItems(10)
         self.invoice_chassis_input.setCompleter(self.invoice_chassis_completer)
+        completer_style.style_completer(self.invoice_chassis_completer, "fa5s.motorcycle")
         self.invoice_chassis_input.on_completion_accept = self._on_chassis_selected
 
         self._chassis_completer_timer = QTimer(self)
@@ -4695,7 +4718,70 @@ class MainWindow(QMainWindow):
         color = "#d9700f" if active_env.upper() == "SANDBOX" else "#17934d"
         self.invoice_env_badge.setStyleSheet(invoice_style.env_badge_qss(color))
 
+        # --- Inline validation -------------------------------------------------------
+        # Presentation of the SAME rules this form always enforced (same regexes and
+        # messages as _validate_invoice_form / _check_invoice_form_completeness):
+        # red field + short message, a summary banner, errors only after you leave a
+        # field. It never enables/disables anything - Submit gating is unchanged.
+        validation_banner = form_validation.ValidationBanner()
+        container_layout.insertWidget(0, validation_banner)
+        self._invoice_validation = form_validation.FormValidator(
+            self, scroll_area=self.invoice_scroll_area, banner=validation_banner)
+        _v = self._invoice_validation
+        _req = form_validation.required
+        _v.add_line_edit(self.invoice_buyer_cnic_input, "CNIC", form_validation.cnic_rule)
+        _v.add_line_edit(self.invoice_buyer_name_input, "Buyer Name", _req("Buyer name is required."))
+        _v.add_line_edit(self.invoice_buyer_father_input, "Father Name", _req("Father name is required."))
+        _v.add_line_edit(self.invoice_buyer_phone_input, "Cell (Phone)", form_validation.phone_rule)
+        _v.add_line_edit(self.invoice_buyer_address_input, "Address", _req("Address is required."))
+        _v.add_combo(self.invoice_model_combo, "Model", _req("Model is required."))
+        _v.add_combo(self.invoice_color_combo, "Color", _req("Color is required."))
+        _v.add_line_edit(self.invoice_chassis_input, "Chassis Number", _req("Chassis number is required."))
+        _v.add_line_edit(self.invoice_engine_input, "Engine Number", _req("Engine number is required."))
+        _v.add_spin(self.invoice_amount_spin, "Amount (Excl. Tax)", form_validation.amount_rule)
+        _v.changed.connect(self._update_invoice_submit_tooltip)
+        self._update_invoice_submit_tooltip()
+
         return page
+
+    def _update_invoice_submit_tooltip(self) -> None:
+        """The disabled Submit button explains what is still needed."""
+        validation = getattr(self, "_invoice_validation", None)
+        if validation is not None and hasattr(self, "invoice_submit_btn"):
+            self.invoice_submit_btn.setToolTip(validation.summary_tooltip())
+
+    def _show_inline_validation(self, errors: list) -> bool:
+        """Show a failed submit's errors on the form itself: red fields, a summary
+        banner, and the first problem scrolled to and focused. Returns True if
+        EVERY error could be attached to a field (so no pop-up is needed); an error
+        that isn't tied to a field (e.g. the invoice number) returns False and the
+        caller falls back to the dialog, exactly as before."""
+        validation = getattr(self, "_invoice_validation", None)
+        if validation is None:
+            return False
+        targets = (
+            ("CNIC", self.invoice_buyer_cnic_input),
+            ("Buyer name", self.invoice_buyer_name_input),
+            ("Cell", self.invoice_buyer_phone_input),
+            ("Model", self.invoice_model_combo),
+            ("Color", self.invoice_color_combo),
+            ("Chassis number", self.invoice_chassis_input),
+            ("Duplicate Chassis", self.invoice_chassis_input),
+            ("Engine number", self.invoice_engine_input),
+            ("Duplicate Engine", self.invoice_engine_input),
+            ("Amount", self.invoice_amount_spin),
+        )
+        mapped = []
+        for err in errors:
+            widget = next((w for prefix, w in targets if err.startswith(prefix)), None)
+            if widget is None:
+                return False
+            mapped.append((widget, err))
+        validation.reveal_all(focus_first=False)
+        for widget, err in mapped:
+            validation.show_error(widget, err)
+        validation.focus_first_invalid()
+        return True
 
     def _create_settings_page(self) -> QWidget:
         """Dashboard-style settings page with category launchers."""
@@ -7922,6 +8008,8 @@ class MainWindow(QMainWindow):
             self.invoice_color_combo.setCurrentIndex(0)
             self.invoice_color_combo.blockSignals(False)
             self._on_invoice_color_changed(self.invoice_color_combo.currentText())
+            if hasattr(self, "_invoice_validation"):
+                self._invoice_validation.refresh()      # the list was filled with signals blocked
         else:
             self.invoice_color_combo.blockSignals(False)
             price = prices[0]
@@ -8681,6 +8769,12 @@ class MainWindow(QMainWindow):
                 f"Missing/invalid: {', '.join(missing)}" if missing else ""
             )
 
+        # Fields are often filled with signals blocked (autofill, chassis selection, the
+        # colour list...); this check runs right after those, so bring the inline
+        # validation up to date immediately instead of waiting for its safety-net poll.
+        if hasattr(self, "_invoice_validation"):
+            self._invoice_validation.refresh()
+
     def _validate_invoice_form(self) -> bool:
         """Same checks, same regexes, same pass/fail conditions as
         before - refactored from sequential "stop at the first problem"
@@ -8793,7 +8887,10 @@ class MainWindow(QMainWindow):
             errors.append("Amount (Excl. Tax) must be greater than zero.")
 
         if errors:
-            self._show_error("Validation Errors", "\n".join(f"• {e}" for e in errors))
+            # Shown inline on the form (red fields + summary banner, first problem
+            # focused); the pop-up is only the fallback for an error with no field.
+            if not self._show_inline_validation(errors):
+                self._show_error("Validation Errors", "\n".join(f"• {e}" for e in errors))
             return False
 
         # Only reached once every blocking check above has passed - same
@@ -8806,62 +8903,12 @@ class MainWindow(QMainWindow):
         return True
 
     def _show_error(self, title: str, message: str) -> None:
-        """Shows a professional looking error message box."""
-        msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Icon.Warning)
-        msg.setWindowTitle(title)
-        msg.setText(f"<b>{title}</b>")
-        msg.setInformativeText(message)
-        msg.setStyleSheet("""
-            QMessageBox {
-                background-color: white;
-            }
-            QLabel {
-                font-size: 13px;
-                color: #2c3e50;
-            }
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                padding: 6px 20px;
-                border-radius: 4px;
-                font-weight: bold;
-                min-width: 80px;
-            }
-            QPushButton:hover {
-                background-color: #2980b9;
-            }
-        """)
-        msg.exec()
+        """Shows an error notice (red header). Blocks until dismissed, as before."""
+        notice_dialog.show_notice(self, "error", title, message)
 
     def _show_success(self, title: str, message: str) -> None:
-        """Shows a professional looking success message box."""
-        msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Icon.Information)
-        msg.setWindowTitle(title)
-        msg.setText(f"<b>{title}</b>")
-        msg.setInformativeText(message)
-        msg.setStyleSheet("""
-            QMessageBox {
-                background-color: white;
-            }
-            QLabel {
-                font-size: 13px;
-                color: #27ae60;
-            }
-            QPushButton {
-                background-color: #2ecc71;
-                color: white;
-                padding: 6px 20px;
-                border-radius: 4px;
-                font-weight: bold;
-                min-width: 80px;
-            }
-            QPushButton:hover {
-                background-color: #27ae60;
-            }
-        """)
-        msg.exec()
+        """Shows a success notice (green header). Blocks until dismissed, as before."""
+        notice_dialog.show_notice(self, "success", title, message)
 
     def _display_invoice_qr(self, data: str | None) -> None:
         if not data:
@@ -8890,6 +8937,15 @@ class MainWindow(QMainWindow):
             self.invoice_qr_label.clear()
             self.invoice_fbr_label.clear()
             self._invoice_qr_pixmap = None
+
+    def _show_submitted_invoices(self, scope: str) -> None:
+        """Popup list of the invoices behind a header count card (today / month / all)."""
+        try:
+            from app.qt_ui import invoice_list_dialog
+            invoice_list_dialog.show_invoice_list(self, scope)
+        except Exception as e:
+            logger.error("Could not show the %s invoice list: %s", scope, e, exc_info=True)
+            self._show_error("Could Not Load Invoices", f"The invoice list could not be loaded.\n\n{e}")
 
     def _update_fbr_submitted_counter(self) -> None:
         """Update the FBR Submitted counter in the UI."""
@@ -9193,14 +9249,8 @@ class MainWindow(QMainWindow):
             inv_num = created.invoice_number
             fbr_id = created.fbr_invoice_number
             
-            if fbr_id:
-                title = "Submission Success"
-                msg = f"Invoice {inv_num} has been successfully created and uploaded to FBR.\n\nFBR ID: {fbr_id}"
-            else:
-                title = "Local Save Success"
-                msg = f"Invoice {inv_num} has been created locally but FBR sync failed.\n\n{created.fbr_response_message}\n\nYou can retry the sync later from the reports section."
-
-            self._show_success(title, msg)
+            # Green "uploaded" dialog, or amber "saved locally" with FBR's reason + retry hint.
+            notice_dialog.show_invoice_result(self, inv_num, fbr_id, created.fbr_response_message)
             
             self._clear_invoice_form_after_submission()
             self._update_fbr_submitted_counter()
@@ -9275,6 +9325,8 @@ class MainWindow(QMainWindow):
         self.invoice_fbr_number_display.setText("")
         self._display_invoice_qr(None)
         self._check_invoice_form_completeness()
+        if hasattr(self, "_invoice_validation"):
+            self._invoice_validation.reset()
 
     def _clear_invoice_form_after_submission(self) -> None:
         preserve = False
@@ -9306,6 +9358,8 @@ class MainWindow(QMainWindow):
         self._display_invoice_qr(None)
         self._generate_invoice_number()
         self._check_invoice_form_completeness()
+        if hasattr(self, "_invoice_validation"):
+            self._invoice_validation.reset()
         self.invoice_buyer_cnic_input.setFocus()
 
     def _on_invoice_reset_clicked(self) -> None:

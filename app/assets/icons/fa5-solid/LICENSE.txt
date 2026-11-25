@@ -1,0 +1,9 @@
+Font Awesome Free 5.15.4 - Solid icons
+https://fontawesome.com
+
+The icon shapes in this folder are derived from Font Awesome Free (Solid style) and are
+licensed under CC BY 4.0: https://creativecommons.org/licenses/by/4.0/
+Copyright (c) Fonticons, Inc.
+
+They were exported to SVG by scripts/build_icons.py. Only the icons the application uses
+are included.
