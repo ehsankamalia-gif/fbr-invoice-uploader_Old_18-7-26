@@ -14,7 +14,8 @@ from app.qt_ui.theme import TOKENS, _arrow_files
 # so they don't glare against the white cards, and the page behind the cards is a
 # calm blue-grey that lowers overall brightness.
 _INK = "#263445"          # input / strong text
-_INK_SOFT = "#556473"     # field labels
+_INK_SOFT = "#556473"     # secondary text / secondary buttons
+_LABEL = "#3a4d62"        # form field labels: darker than secondary text so they read as labels
 _HEADING = "#2f4358"      # section titles
 _LINE = "#dce3ea"         # card borders / dividers
 _FIELD_BG = "#f8fafc"     # input background (off-white)
@@ -58,7 +59,7 @@ def build_invoice_page_qss() -> str:
         border-radius: 14px;
     }}
     #invoicePage QFrame#formGroup QLabel {{
-        font-size: 13px; font-weight: 600; color: {_INK_SOFT};
+        font-size: 13px; font-weight: 600; letter-spacing: 0.2px; color: {_LABEL};
         background: transparent; border: none;
     }}
     #invoicePage QFrame#formGroup QLabel#groupTitle {{
@@ -136,42 +137,65 @@ def build_invoice_page_qss() -> str:
     """
 
 
-# ---- header KPI cards: one consistent family -------------------------------
-# [ icon tile ]  LABEL
-#                value
-# White card, hairline border, tinted icon tile carrying the accent colour, and
-# a large dark value. Every card has the same size so the row reads as a set.
-_CARD_H = 68
-_TILE = 36
+# ---- header KPI cards: colourful gradient cards ----------------------------
+# [ frosted icon tile ]  LABEL
+#                        value
+# Each card is a diagonal gradient of its own colour with white text, so the
+# row catches the eye. The colours are deliberately a touch deep (not neon) so
+# white text keeps good contrast and the row stays easy to look at. Every card
+# has the same size so the row reads as a set.
+_CARD_H = 70
+_TILE = 38
 
 
-def _rgba(hex_colour: str, alpha: float) -> str:
+def _shade(hex_colour: str, factor: float) -> str:
+    """Darken (factor < 1) a #rrggbb colour."""
     h = hex_colour.lstrip("#")
     r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
-    return f"rgba({r}, {g}, {b}, {alpha})"
+    return "#{:02x}{:02x}{:02x}".format(
+        max(0, min(255, int(r * factor))), max(0, min(255, int(g * factor))), max(0, min(255, int(b * factor)))
+    )
 
 
-def stat_card_qss(object_name: str) -> str:
+def _tint(hex_colour: str, amount: float) -> str:
+    """Lighten a #rrggbb colour toward white by `amount` (0..1)."""
+    h = hex_colour.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return "#{:02x}{:02x}{:02x}".format(
+        int(r + (255 - r) * amount), int(g + (255 - g) * amount), int(b + (255 - b) * amount)
+    )
+
+
+def _gradient(accent: str) -> str:
+    # A touch lighter at the top-left, the pure accent shaded a little at the
+    # bottom-right: reads as a lit, rich colour rather than a flat/muddy one.
+    return (
+        "qlineargradient(x1:0, y1:0, x2:1, y2:1, "
+        f"stop:0 {_tint(accent, 0.10)}, stop:1 {_shade(accent, 0.82)})"
+    )
+
+
+def stat_card_qss(object_name: str, accent: str = "#2e86c1") -> str:
     return f"""
         #{object_name} {{
-            background-color: #ffffff;
-            border: 1px solid {_LINE};
-            border-radius: 12px;
+            background: {_gradient(accent)};
+            border: none;
+            border-radius: 14px;
         }}
     """
 
 
 STAT_LABEL_QSS = (
-    "font-weight: 700; font-size: 10px; letter-spacing: 0.6px; color: #7b8794; "
+    "font-weight: 700; font-size: 10px; letter-spacing: 0.7px; color: rgba(255, 255, 255, 0.88); "
     "background: transparent; border: none;"
 )
-STAT_VALUE_QSS = "font-weight: 700; font-size: 22px; color: #263445; background: transparent; border: none;"
-ENV_VALUE_QSS = "font-weight: 700; font-size: 15px; letter-spacing: 0.5px; color: #263445; background: transparent; border: none;"
+STAT_VALUE_QSS = "font-weight: 800; font-size: 24px; color: #ffffff; background: transparent; border: none;"
+ENV_VALUE_QSS = "font-weight: 800; font-size: 16px; letter-spacing: 0.6px; color: #ffffff; background: transparent; border: none;"
 ENV_TITLE_QSS = STAT_LABEL_QSS
 
 
-def _icon_tile(icon_name: str, accent: str):
-    """Rounded tinted square holding a font icon in the accent colour."""
+def _icon_tile(icon_name: str, accent: str = "#ffffff"):
+    """Frosted (translucent white) rounded square holding a white font icon."""
     from PyQt6.QtCore import Qt
     from PyQt6.QtWidgets import QLabel
 
@@ -180,19 +204,19 @@ def _icon_tile(icon_name: str, accent: str):
     tile.setFixedSize(_TILE, _TILE)
     tile.setAlignment(Qt.AlignmentFlag.AlignCenter)
     tile.setStyleSheet(
-        f"QLabel#statIconTile {{ background-color: {_rgba(accent, 0.12)}; border: none; border-radius: 10px; }}"
+        "QLabel#statIconTile { background-color: rgba(255, 255, 255, 0.22); border: none; border-radius: 11px; }"
     )
-    try:  # QtAwesome is optional - without it the tile is simply a tinted square.
+    try:  # QtAwesome is optional - without it the tile is simply a frosted square.
         from app.qt_ui.theme import _qta
 
         if _qta is not None:
-            tile.setPixmap(_qta.icon(icon_name, color=accent).pixmap(18, 18))
+            tile.setPixmap(_qta.icon(icon_name, color="#ffffff").pixmap(19, 19))
     except Exception:
         pass
     return tile
 
 
-def _card_shell(parent, object_name: str):
+def _card_shell(parent, object_name: str, accent: str):
     from PyQt6.QtWidgets import QFrame, QHBoxLayout, QSizePolicy
 
     frame = QFrame(parent)
@@ -202,10 +226,10 @@ def _card_shell(parent, object_name: str):
     frame.setFixedHeight(_CARD_H)
     frame.setMinimumWidth(168)
     frame.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-    frame.setStyleSheet(stat_card_qss(object_name))
+    frame.setStyleSheet(stat_card_qss(object_name, accent))
     row = QHBoxLayout(frame)
-    row.setContentsMargins(12, 0, 14, 0)
-    row.setSpacing(10)
+    row.setContentsMargins(13, 0, 16, 0)
+    row.setSpacing(11)
     return frame, row
 
 
@@ -222,8 +246,8 @@ def build_stat_card(parent, object_name: str, title: str, icon_name: str, accent
     from PyQt6.QtCore import Qt
     from PyQt6.QtWidgets import QLabel, QVBoxLayout
 
-    frame, row = _card_shell(parent, object_name)
-    row.addWidget(_icon_tile(icon_name, accent))
+    frame, row = _card_shell(parent, object_name, accent)
+    row.addWidget(_icon_tile(icon_name))
 
     col = QVBoxLayout()
     col.setSpacing(0)
@@ -242,18 +266,19 @@ def build_stat_card(parent, object_name: str, title: str, icon_name: str, accent
 
 
 def env_badge_qss(colour: str) -> str:
-    """Environment card style. The SANDBOX (orange) / PRODUCTION (green) colour
-    is carried by the small status dot, not by a heavy outline. Scoped to its
-    object names so nothing leaks onto the labels inside it."""
+    """Environment card style: the whole card takes the environment's colour
+    (SANDBOX orange / PRODUCTION green), so which FBR environment you are on is
+    visible at a glance. Scoped to its object names so nothing leaks onto the
+    labels inside it."""
     return f"""
         QFrame#envBadge {{
-            background-color: #ffffff;
-            border: 1px solid {_LINE};
-            border-radius: 12px;
+            background: {_gradient(colour)};
+            border: none;
+            border-radius: 14px;
         }}
         QLabel#envDot {{
-            background-color: {colour};
-            border: 2px solid {_rgba(colour, 0.25)};
+            background-color: #ffffff;
+            border: 2px solid rgba(255, 255, 255, 0.45);
             border-radius: 6px;
         }}
     """
@@ -265,9 +290,9 @@ def build_env_card(parent):
     from PyQt6.QtCore import Qt
     from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout
 
-    frame, row = _card_shell(parent, "envBadge")
+    frame, row = _card_shell(parent, "envBadge", "#27ae60")
     frame.setStyleSheet(env_badge_qss("#27ae60"))
-    row.addWidget(_icon_tile("fa5s.server", "#5b6b7c"))
+    row.addWidget(_icon_tile("fa5s.server"))
 
     col = QVBoxLayout()
     col.setSpacing(0)
@@ -351,6 +376,22 @@ TOTAL_SPIN_QSS = (
 )
 
 
+def _align_field_labels(grid) -> None:
+    """Right-align each field label (columns 0 and 2) so it sits right next to
+    its input instead of floating at the far left of a wide column. Only plain
+    labels are touched: section titles and the small inline hints (which live in
+    column 4) keep their own alignment."""
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtWidgets import QLabel
+
+    for row in range(grid.rowCount()):
+        for col in (0, 2):
+            item = grid.itemAtPosition(row, col)
+            widget = item.widget() if item is not None else None
+            if isinstance(widget, QLabel) and widget.objectName() != "groupTitle":
+                widget.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+
 def polish_form_layouts(*grids, card_margins=None) -> None:
     """Align every form card to the same grid so the eye doesn't have to
     re-find the input column in each card: the label columns (0 and 2) get one
@@ -370,6 +411,7 @@ def polish_form_layouts(*grids, card_margins=None) -> None:
         grid.setColumnStretch(3, 1)
         grid.setColumnStretch(4, 0)
         grid.setColumnMinimumWidth(4, 6)
+        _align_field_labels(grid)
         if card_margins is not None and grid in card_margins:
             grid.setContentsMargins(*card_margins[grid])
         if not had_hint_column:

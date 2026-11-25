@@ -1090,7 +1090,7 @@ class MainWindow(QMainWindow):
             if hasattr(self, "invoice_env_value_label") and hasattr(self, "invoice_env_badge"):
                 active_env = settings_service.get_active_environment()
                 self.invoice_env_value_label.setText(active_env.upper())
-                color = "#e67e22" if active_env.upper() == "SANDBOX" else "#27ae60"
+                color = "#d9700f" if active_env.upper() == "SANDBOX" else "#17934d"
                 self.invoice_env_badge.setStyleSheet(invoice_style.env_badge_qss(color))
 
             if hasattr(self, "invoice_number_input"):
@@ -4032,7 +4032,7 @@ class MainWindow(QMainWindow):
         # The value labels keep their original attribute names; other code only
         # calls .setText(...) on them.
         fbr_stat_widget, self.invoice_fbr_stat_value = invoice_style.build_stat_card(
-            header_widget, "fbrStatBox", "FBR SUBMITTED", "fa5s.cloud-upload-alt", "#27ae60")
+            header_widget, "fbrStatBox", "FBR SUBMITTED", "fa5s.cloud-upload-alt", "#17934d")
         header_layout.addWidget(fbr_stat_widget)
 
         self.invoice_env_badge, self.invoice_env_value_label = invoice_style.build_env_card(header_widget)
@@ -4041,9 +4041,9 @@ class MainWindow(QMainWindow):
         # to the environment so the cashier sees today's progress and which FBR
         # environment it is going to.
         self.invoice_today_stat_widget, self.invoice_today_stat_value = invoice_style.build_stat_card(
-            header_widget, "todayStatBox", "SUBMITTED TODAY", "fa5s.calendar-day", "#2980b9")
+            header_widget, "todayStatBox", "SUBMITTED TODAY", "fa5s.calendar-day", "#2578b5")
         self.invoice_month_stat_widget, self.invoice_month_stat_value = invoice_style.build_stat_card(
-            header_widget, "monthStatBox", "SUBMITTED THIS MONTH", "fa5s.calendar-alt", "#8e44ad")
+            header_widget, "monthStatBox", "SUBMITTED THIS MONTH", "fa5s.calendar-alt", "#8340a0")
         invoice_style.equalize_cards(
             fbr_stat_widget, self.invoice_env_badge,
             self.invoice_today_stat_widget, self.invoice_month_stat_widget)
@@ -4692,7 +4692,7 @@ class MainWindow(QMainWindow):
         # Set initial environment badge
         active_env = settings_service.get_active_environment()
         self.invoice_env_value_label.setText(active_env.upper())
-        color = "#e67e22" if active_env.upper() == "SANDBOX" else "#27ae60"
+        color = "#d9700f" if active_env.upper() == "SANDBOX" else "#17934d"
         self.invoice_env_badge.setStyleSheet(invoice_style.env_badge_qss(color))
 
         return page
