@@ -15,12 +15,17 @@ pytest-asyncio
 playwright
 cryptography
 openpyxl
-PyQt6
+PyQt6==6.11.*
 schedule
 platformdirs
 jinja2
+<<<<<<< HEAD
 PyQt6-WebEngine
 qtawesome
+=======
+# Must stay on the same minor version as PyQt6, or QtWebEngineWidgets fails to load.
+PyQt6-WebEngine==6.11.*
+>>>>>>> 63d35fa08c1953bd37c27e554311222204844b4c
 android-sms-gateway
 reportlab
 python-pptx
