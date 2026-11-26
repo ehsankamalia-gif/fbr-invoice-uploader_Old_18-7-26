@@ -3457,10 +3457,21 @@ class MainWindow(QMainWindow):
 
             dialog = QDialog(self)
             dialog.setWindowTitle(f"Invoice Detail - {invoice.invoice_number}")
-            dialog.setMinimumSize(700, 800)
+            # Resizable: minimize / maximize buttons, drag any edge or the corner grip, and an
+            # opening size that always fits the screen (a fixed 700x800 minimum used to push
+            # the bottom off small screens and made the window impossible to shrink).
+            dialog.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)
+            dialog.setWindowFlag(Qt.WindowType.WindowMinimizeButtonHint, True)
+            dialog.setSizeGripEnabled(True)
+            dialog.setMinimumSize(520, 420)
+            _screen = self.screen().availableGeometry() if self.screen() else None
+            dialog.resize(
+                min(760, int(_screen.width() * 0.92)) if _screen else 760,
+                min(820, int(_screen.height() * 0.90)) if _screen else 820,
+            )
             dialog.setStyleSheet("""
-                QDialog { 
-                    background-color: #f8f9fa; 
+                QDialog {
+                    background-color: #f8f9fa;
                 }
                 QLabel#dialogHeader {
                     font-size: 22px;

@@ -439,3 +439,31 @@ def test_the_ball_follows_the_background_queue_refresh(window):
     db.close()
     window._update_invoice_upload_status()
     assert window.invoice_pending_ball.count() == 0
+
+
+# ---- the invoice detail popup is resizable ---------------------------------------------------
+def test_the_invoice_detail_popup_can_be_resized_and_maximised(window, monkeypatch):
+    import types
+    from PyQt6.QtWidgets import QDialog
+
+    _seed_invoices()
+    seen = {}
+
+    def fake_exec(self):
+        seen["dialog"] = self
+        seen["flags"] = self.windowFlags()
+        seen["min"] = (self.minimumWidth(), self.minimumHeight())
+        seen["max"] = (self.maximumWidth(), self.maximumHeight())
+        seen["grip"] = self.isSizeGripEnabled()
+        seen["size"] = (self.width(), self.height())
+        return 0
+
+    monkeypatch.setattr(QDialog, "exec", fake_exec)
+    window._open_invoice_detail_dialog(types.SimpleNamespace(invoice_number="P-5"))
+    assert seen["flags"] & Qt.WindowType.WindowMaximizeButtonHint
+    assert seen["flags"] & Qt.WindowType.WindowMinimizeButtonHint
+    assert seen["grip"] is True
+    assert seen["min"][0] <= 560 and seen["min"][1] <= 450          # can be made much smaller than before
+    assert seen["max"][0] > 5000 and seen["max"][1] > 5000          # no fixed upper limit
+    screen = window.screen().availableGeometry()
+    assert seen["size"][0] <= screen.width() and seen["size"][1] <= screen.height()
