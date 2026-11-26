@@ -2289,37 +2289,47 @@ class CreditLedgerSystemPage(QWidget):
             if entries:
                 self.lbl_cust_balance.setText(f"Outstanding: Rs. {entries[-1].balance:,.2f}")
 
-    def print_ledger(self):
-        """Generates and prints a professional ledger statement."""
-        if not hasattr(self, 'current_customer_details') or not self.current_customer_details:
-            QMessageBox.warning(self, "Print Error", "Please load a customer ledger first.")
-            return
+    def _collect_ledger_entries_for_print(self) -> list[dict]:
+        """The rows currently shown in the Customer Ledger table, as the print service expects them.
+        Columns of self.ledger_table: 0 Date, 1 Description, 2 Sale ID, 3 Debit, 4 Credit, 5 Balance."""
+        def cell(row: int, col: int) -> str:
+            item = self.ledger_table.item(row, col)
+            return item.text() if item is not None else ""
 
         entries = []
-        for r in range(self.ledger_model.rowCount()):
+        for r in range(self.ledger_table.rowCount()):
             entries.append({
-                "date": self.ledger_model.item(r, 0).text(),
-                "description": self.ledger_model.item(r, 1).text(),
-                "debit": self.ledger_model.item(r, 2).text().replace(',', ''),
-                "credit": self.ledger_model.item(r, 3).text().replace(',', ''),
-                "balance": self.ledger_model.item(r, 4).text().replace(',', '')
+                "date": cell(r, 0),
+                "description": cell(r, 1),
+                "debit": cell(r, 3).replace(",", "") or "0",
+                "credit": cell(r, 4).replace(",", "") or "0",
+                "balance": cell(r, 5).replace(",", "") or "0",
             })
+        return entries
 
-        if not entries:
-            QMessageBox.warning(self, "Print Error", "No transactions found to print.")
-            return
-
-        ledger_data = {
-            "customer": self.current_customer_details,
-            "entries": entries,
-            "date_range": f"{self.start_date.date().toString('dd-MM-yyyy')} to {self.end_date.date().toString('dd-MM-yyyy')}"
-        }
-
+    def print_ledger(self):
+        """Generates and prints a professional ledger statement."""
+        # This is a Qt slot: an exception that escapes it makes PyQt abort the whole application,
+        # so everything - including collecting the rows - is inside the try.
         try:
+            if not getattr(self, "current_customer_details", None):
+                QMessageBox.warning(self, "Print Error", "Please load a customer ledger first.")
+                return
+
+            entries = self._collect_ledger_entries_for_print()
+            if not entries:
+                QMessageBox.warning(self, "Print Error", "No transactions found to print.")
+                return
+
+            ledger_data = {
+                "customer": self.current_customer_details,
+                "entries": entries,
+                "date_range": f"{self.start_date.date().toString('dd-MM-yyyy')} to {self.end_date.date().toString('dd-MM-yyyy')}"
+            }
             html = self.print_service.render_ledger_statement(ledger_data)
             self.print_service.print_custom_html(html, self)
         except Exception as e:
-            logger.error(f"Failed to print ledger: {e}")
+            logger.error(f"Failed to print ledger: {e}", exc_info=True)
             QMessageBox.critical(self, "Print Error", f"Failed to generate print: {e}")
 
     def refresh(self):

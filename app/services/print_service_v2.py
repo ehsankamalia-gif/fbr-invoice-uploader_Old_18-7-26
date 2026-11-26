@@ -449,14 +449,20 @@ class PrintServiceV2:
         date_range = ledger_data.get("date_range", "Full Statement")
         total_debit = sum(float(e.get("debit") or 0) for e in entries)
         total_credit = sum(float(e.get("credit") or 0) for e in entries)
-        final_balance = entries[-1].get("balance") if entries else 0.0
+        # the balance arrives as text from the screen's table ("185000.00") - it must be a number to format
+        final_balance = float(entries[-1].get("balance") or 0) if entries else 0.0
 
         rows_html = ""
         for e in entries:
+            description = (
+                str(e.get("description") or "")
+                .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                .replace("\n", "<br>")
+            )
             rows_html += f"""
             <tr>
                 <td>{e.get('date', '')}</td>
-                <td>{e.get('description', '').replace('\n', '<br>')}</td>
+                <td>{description}</td>
                 <td style="text-align: right;">{float(e.get('debit') or 0):,.2f}</td>
                 <td style="text-align: right;">{float(e.get('credit') or 0):,.2f}</td>
                 <td style="text-align: right; font-weight: bold;">{float(e.get('balance') or 0):,.2f}</td>

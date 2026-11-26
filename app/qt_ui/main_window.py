@@ -122,6 +122,7 @@ from app.qt_ui.auto_scroll_manager import AutoScrollManager
 from app.qt_ui import invoice_style
 from app.qt_ui import completer_style
 from app.qt_ui import combo_style
+from app.qt_ui import dashboard_widgets
 from app.qt_ui.blank_spinbox import BlankZeroDoubleSpinBox
 from app.qt_ui import form_validation
 from app.qt_ui import notice_dialog
@@ -2343,25 +2344,44 @@ class MainWindow(QMainWindow):
             self.stack.setCurrentIndex(0)
 
     def _create_dashboard_page(self) -> QWidget:
+        """Dashboard: quick actions, FBR upload status, today at a glance, sales trend, needs-attention,
+        then the existing bike-booking cards and recent submissions. Look lives in dashboard_widgets.py,
+        numbers in app/services/dashboard_insights.py; the widget names other code relies on are unchanged."""
         page = QWidget(self)
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(25)
+        page.setObjectName("dashboardPage")
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = PanScrollArea(page)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        outer.addWidget(scroll)
+        body = QWidget()
+        scroll.setWidget(body)
+        layout = QVBoxLayout(body)
+        layout.setContentsMargins(30, 26, 30, 30)
+        layout.setSpacing(20)
 
         # Header
         header_layout = QHBoxLayout()
-        header = QLabel("Dashboard Overview")
+        titles = QVBoxLayout()
+        titles.setSpacing(2)
+        header = QLabel("Dashboard")
         header.setObjectName("pageHeader")
-        header_layout.addWidget(header)
+        self.dash_subtitle_label = QLabel(dt.datetime.now().strftime("%A, %d %B %Y"))
+        self.dash_subtitle_label.setStyleSheet("color: #6b7a8b; font-size: 13px; background: transparent;")
+        titles.addWidget(header)
+        titles.addWidget(self.dash_subtitle_label)
+        header_layout.addLayout(titles)
         header_layout.addStretch(1)
-        
-        retry_failed_btn = QPushButton("🔁 Retry All Failed")
+
+        retry_failed_btn = QPushButton("\U0001f501 Retry All Failed")
         retry_failed_btn.setObjectName("resetButton")
         retry_failed_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         retry_failed_btn.clicked.connect(self._retry_all_failed_invoices)
         header_layout.addWidget(retry_failed_btn)
 
-        delete_failed_btn = QPushButton("🗑️ Delete Failed")
+        delete_failed_btn = QPushButton("\U0001f5d1\ufe0f Delete Failed")
         delete_failed_btn.setObjectName("dangerButton")
         delete_failed_btn.setStyleSheet(
             "QPushButton#dangerButton {"
@@ -2381,20 +2401,64 @@ class MainWindow(QMainWindow):
         header_layout.addWidget(refresh_btn)
         layout.addLayout(header_layout)
 
-        # Stats Cards Row
+        # Quick actions (a shortcut is hidden when a Staff account has no access to that module)
+        layout.addWidget(dashboard_widgets.section_title("QUICK ACTIONS"))
+        self.dash_quick_actions = dashboard_widgets.QuickActions(allowed=self._dashboard_action_allowed)
+        self.dash_quick_actions.triggered.connect(self._select_page)
+        layout.addWidget(self.dash_quick_actions)
+
+        # FBR upload status (same four numbers as before; Synced / Pending / Failed open their lists)
+        layout.addWidget(dashboard_widgets.section_title("FBR UPLOAD STATUS"))
         stats_layout = QHBoxLayout()
         stats_layout.setSpacing(20)
-
-        self.dash_total_card = self._create_stat_card("TOTAL INVOICES", "0", "#3498db")
-        self.dash_synced_card = self._create_stat_card("SYNCED (FBR)", "0", "#2ecc71")
-        self.dash_pending_card = self._create_stat_card("PENDING SYNC", "0", "#f39c12")
-        self.dash_failed_card = self._create_stat_card("FAILED SYNC", "0", "#e74c3c")
-
-        stats_layout.addWidget(self.dash_total_card)
-        stats_layout.addWidget(self.dash_synced_card)
-        stats_layout.addWidget(self.dash_pending_card)
-        stats_layout.addWidget(self.dash_failed_card)
+        self.dash_total_card = dashboard_widgets.build_kpi_card("TOTAL INVOICES", "fa5s.file-alt", "#2578b5")
+        self.dash_synced_card = dashboard_widgets.build_kpi_card(
+            "SYNCED (FBR)", "fa5s.check-circle", "#17934d", clickable=True)
+        self.dash_pending_card = dashboard_widgets.build_kpi_card(
+            "PENDING SYNC", "fa5s.clock", "#d9730d", clickable=True)
+        self.dash_failed_card = dashboard_widgets.build_kpi_card(
+            "FAILED SYNC", "fa5s.exclamation-triangle", "#c0392b", clickable=True)
+        invoice_style.make_clickable(
+            self.dash_synced_card, lambda: self._show_submitted_invoices("all"),
+            "Click to view the invoices uploaded to FBR")
+        invoice_style.make_clickable(
+            self.dash_pending_card, lambda: self._show_submitted_invoices("pending"),
+            "Click to view the invoices waiting for FBR")
+        invoice_style.make_clickable(
+            self.dash_failed_card, self._open_failed_invoices_dialog,
+            "Click to review, retry or delete failed uploads")
+        for card in (self.dash_total_card, self.dash_synced_card, self.dash_pending_card, self.dash_failed_card):
+            stats_layout.addWidget(card)
         layout.addLayout(stats_layout)
+
+        # Today at a glance
+        layout.addWidget(dashboard_widgets.section_title("TODAY AT A GLANCE"))
+        glance_layout = QHBoxLayout()
+        glance_layout.setSpacing(18)
+        self.dash_glance_invoices = dashboard_widgets.GlanceTile("INVOICES TODAY", "fa5s.calendar-day", "#2578b5")
+        self.dash_glance_sales = dashboard_widgets.GlanceTile("SALES TODAY", "fa5s.coins", "#17934d")
+        self.dash_glance_month_invoices = dashboard_widgets.GlanceTile(
+            "INVOICES THIS MONTH", "fa5s.calendar-alt", "#8340a0")
+        self.dash_glance_month_sales = dashboard_widgets.GlanceTile("SALES THIS MONTH", "fa5s.chart-line", "#b4540a")
+        for tile in (self.dash_glance_invoices, self.dash_glance_sales,
+                     self.dash_glance_month_invoices, self.dash_glance_month_sales):
+            glance_layout.addWidget(tile, 1)
+        layout.addLayout(glance_layout)
+
+        # Sales trend + needs attention
+        middle = QHBoxLayout()
+        middle.setSpacing(20)
+        self.dash_trend_card = dashboard_widgets.TrendCard()
+        self.dash_trend_card.setMinimumHeight(330)
+        self.dash_trend_card.days_changed.connect(self._on_dash_trend_days_changed)
+        self.dash_attention = dashboard_widgets.AttentionPanel()
+        self.dash_attention.setMinimumWidth(400)
+        self.dash_attention.retry_requested.connect(self._retry_invoice_upload)
+        self.dash_attention.view_pending_requested.connect(lambda: self._show_submitted_invoices("pending"))
+        self.dash_attention.view_failed_requested.connect(self._open_failed_invoices_dialog)
+        middle.addWidget(self.dash_trend_card, 3)
+        middle.addWidget(self.dash_attention, 2)
+        layout.addLayout(middle)
 
         # Real-time Bike Booking Cards
         booking_section = QWidget()
@@ -2457,10 +2521,55 @@ class MainWindow(QMainWindow):
             "}"
             "QSplitter::handle:hover { background-color: #b2bec3; }"
         )
-
-        layout.addWidget(dash_splitter, 1)
+        dash_splitter.setMinimumHeight(560)       # the page scrolls; this keeps the table readable
+        layout.addWidget(dash_splitter)
 
         return page
+
+    def _dashboard_action_allowed(self, key: str) -> bool:
+        """Quick-action shortcuts follow the same permission rule as the sidebar."""
+        try:
+            if auth_session.is_logged_in() and key in STAFF_MODULE_CODES:
+                return bool(auth_session.has_permission(key))
+        except Exception:
+            pass
+        return True
+
+    def _on_dash_trend_days_changed(self, days: int) -> None:
+        """7 / 30 day switch on the sales-trend chart: reload just the series."""
+        if not hasattr(self, "dash_trend_card"):
+            return
+        from app.services import dashboard_insights
+        db = SessionLocal()
+        try:
+            self.dash_trend_card.set_series(dashboard_insights.daily_series(db, days))
+        except Exception as e:
+            logger.error("Dashboard trend refresh error: %s", e, exc_info=True)
+        finally:
+            db.close()
+
+    def _refresh_dashboard_insights(self, db) -> None:
+        """Fills the new panels (glance tiles, trend chart, needs-attention). Presentation only."""
+        if not hasattr(self, "dash_trend_card"):
+            return
+        from app.services import dashboard_insights as di
+
+        g = di.glance(db)
+        today, yesterday = g["today"], g["yesterday"]
+        month, last_month = g["month"], g["last_month_same_span"]
+        self.dash_glance_invoices.set_value(f"{today.count:,}")
+        self.dash_glance_invoices.set_trend(di.trend(today.count, yesterday.count), "vs yesterday")
+        self.dash_glance_sales.set_value(dashboard_widgets.format_money(today.amount))
+        self.dash_glance_sales.set_trend(di.trend(today.amount, yesterday.amount), "vs yesterday")
+        self.dash_glance_month_invoices.set_value(f"{month.count:,}")
+        self.dash_glance_month_invoices.set_trend(di.trend(month.count, last_month.count), "vs last month")
+        self.dash_glance_month_sales.set_value(dashboard_widgets.format_money(month.amount))
+        self.dash_glance_month_sales.set_trend(di.trend(month.amount, last_month.amount), "vs last month")
+
+        self.dash_trend_card.set_series(di.daily_series(db, self.dash_trend_card.days()))
+        attention = di.attention(db)
+        self.dash_attention.set_attention(attention.failed, attention.pending, attention.rows)
+        self.dash_subtitle_label.setText(dt.datetime.now().strftime("%A, %d %B %Y"))
 
     def _create_stat_card(self, title: str, value: str, color: str) -> QFrame:
         card = QFrame()
@@ -2516,6 +2625,19 @@ class MainWindow(QMainWindow):
             self.dash_synced_card.value_label.setText(str(synced))
             self.dash_pending_card.value_label.setText(str(pending))
             self.dash_failed_card.value_label.setText(str(failed))
+            self.dash_total_card.subtitle_label.setText("All saved invoices")
+            self.dash_synced_card.subtitle_label.setText(
+                f"{synced / total * 100:.0f}% of all invoices" if total else "Uploaded to FBR")
+            self.dash_pending_card.subtitle_label.setText("Waiting for FBR \u00b7 click to view")
+            self.dash_failed_card.subtitle_label.setText(
+                "Click to review & retry" if failed else "Nothing failed")
+
+            # New panels: today at a glance, sales trend, needs attention (never lets a problem here
+            # stop the rest of the dashboard from refreshing)
+            try:
+                self._refresh_dashboard_insights(db)
+            except Exception as e:
+                logger.error(f"Dashboard insights error: {e}", exc_info=True)
 
             # Update Recent Table (Top 10)
             rows = (
