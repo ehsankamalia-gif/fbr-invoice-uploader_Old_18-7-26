@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QDate, QStringListModel, QModelIndex, QTimer, QEvent, QRegularExpression, QPoint
 from PyQt6.QtGui import QStandardItemModel, QStandardItem, QFont, QShortcut, QKeySequence, QKeyEvent, QRegularExpressionValidator, QCursor
 from app.qt_ui.auto_scroll_manager import AutoScrollManager
+from app.qt_ui import completer_style
 from app.services.credit_ledger_service import credit_ledger_service
 from app.services.customer_portal_service import customer_portal_service
 
@@ -862,6 +863,7 @@ class CreditLedgerSystemPage(QWidget):
         self.sale_buyer_input.setPlaceholderText("Search by Name, Phone or CNIC...")
         self.sale_buyer_completer = BuyerCompleter(self.sale_buyer_input)
         self.sale_buyer_input.setCompleter(self.sale_buyer_completer)
+        completer_style.style_completer(self.sale_buyer_completer, None, completer_style.BuyerSuggestionDelegate)
         self.sale_buyer_input.textChanged.connect(self._update_buyer_suggestions)
         self.sale_buyer_completer.activated[QModelIndex].connect(self._on_buyer_selected_index)
         self.sale_buyer_input.editingFinished.connect(self._on_buyer_input_finished)
@@ -1330,6 +1332,7 @@ class CreditLedgerSystemPage(QWidget):
         # Add Chassis Completer
         chassis_completer = ChassisCompleter(chassis_edit)
         chassis_edit.setCompleter(chassis_completer)
+        completer_style.style_completer(chassis_completer, "fa5s.motorcycle", completer_style.ColumnSuggestionDelegate)
         chassis_edit.textChanged.connect(self._update_chassis_suggestions)
         chassis_completer.activated[QModelIndex].connect(self._on_chassis_selected)
         chassis_edit.editingFinished.connect(self._validate_chassis_input)
@@ -1629,6 +1632,7 @@ class CreditLedgerSystemPage(QWidget):
         self.pay_buyer_input.setPlaceholderText("Search by Name, Phone or CNIC...")
         self.pay_buyer_completer = BuyerCompleter(self.pay_buyer_input)
         self.pay_buyer_input.setCompleter(self.pay_buyer_completer)
+        completer_style.style_completer(self.pay_buyer_completer, None, completer_style.BuyerSuggestionDelegate)
         self.pay_buyer_input.textChanged.connect(self._update_pay_buyer_suggestions)
         self.pay_buyer_completer.activated[QModelIndex].connect(self._on_pay_buyer_selected_index)
         form_layout.addWidget(self.pay_buyer_input, 0, 1)
@@ -2109,6 +2113,7 @@ class CreditLedgerSystemPage(QWidget):
         self.ledger_buyer_input.setPlaceholderText("Search Buyer...")
         self.ledger_buyer_completer = BuyerCompleter(self.ledger_buyer_input)
         self.ledger_buyer_input.setCompleter(self.ledger_buyer_completer)
+        completer_style.style_completer(self.ledger_buyer_completer, None, completer_style.BuyerSuggestionDelegate)
         self.ledger_buyer_input.textChanged.connect(self._update_ledger_buyer_suggestions)
         self.ledger_buyer_completer.activated[QModelIndex].connect(self._on_ledger_buyer_selected_index)
         filters.addWidget(self.ledger_buyer_input, 0, 1)

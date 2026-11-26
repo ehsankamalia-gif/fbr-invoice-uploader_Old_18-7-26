@@ -331,3 +331,46 @@ def test_default_dashboard_template_gets_party_widget_once(SF):
     assert metrics == ["status_breakdown", "party_breakdown", "invoices"]
     assert [w["metric"] for w in custom.definition["widgets"]] == ["status_breakdown", "invoices"]
     db.close()
+
+
+# ---- CNIC rule: known CNIC -> that record; unknown CNIC -> a NEW CUSTOMER (never a dealer) -----
+def _invoice_for(number, cnic, name, buyer_type):
+    inv = _new_invoice(number, buyer_type=buyer_type)
+    inv.buyer_cnic, inv.buyer_name = cnic, name
+    return inv
+
+
+def test_new_cnic_is_saved_as_a_customer_even_if_the_form_flag_says_dealer(SF, dealer, patched_invoice_env):
+    db = SF()
+    InvoiceService().create_invoice(db, _invoice_for("N-1", "22222-2222222-2", "NEW BUYER", "DEALER"))
+    db.close()
+    db = SF()
+    c = db.query(Customer).filter(Customer.cnic == "22222-2222222-2").one()
+    assert c.type == "INDIVIDUAL" and c.name == "NEW BUYER"
+    inv = db.query(Invoice).filter(Invoice.invoice_number == "N-1").one()
+    assert inv.invoice_party_type == "INDIVIDUAL" and inv.customer_id == c.id
+    assert db.query(Customer).count() == 2                      # the dealer + the new customer
+    db.close()
+
+
+def test_a_stale_dealer_flag_cannot_turn_an_existing_customer_into_a_dealer(SF, dealer, patched_invoice_env):
+    db = SF()
+    InvoiceService().create_invoice(db, _invoice_for("C-1", "33333-1111111-1", "WALK IN", "INDIVIDUAL"))
+    InvoiceService().create_invoice(db, _invoice_for("C-2", "33333-1111111-1", "WALK IN", "DEALER"))   # stale flag
+    db.close()
+    db = SF()
+    assert db.query(Customer).filter(Customer.cnic == "33333-1111111-1").one().type == "INDIVIDUAL"
+    assert {i.invoice_party_type for i in db.query(Invoice).filter(Invoice.invoice_number.in_(["C-1", "C-2"]))} == {"INDIVIDUAL"}
+    db.close()
+
+
+def test_a_known_dealer_cnic_loads_the_dealer_and_stays_a_dealer(SF, dealer, patched_invoice_env):
+    db = SF()
+    InvoiceService().create_invoice(db, _invoice_for("D-1", "11111-1111111-1", "SOMEONE ELSE", "INDIVIDUAL"))
+    db.close()
+    db = SF()
+    c = db.query(Customer).get(dealer)
+    assert c.type == "DEALER" and c.name == "DEALER ONE"          # same record, details not overwritten
+    assert db.query(Customer).count() == 1
+    assert db.query(Invoice).filter(Invoice.invoice_number == "D-1").one().invoice_party_type == "DEALER"
+    db.close()

@@ -467,3 +467,75 @@ def test_the_invoice_detail_popup_can_be_resized_and_maximised(window, monkeypat
     assert seen["max"][0] > 5000 and seen["max"][1] > 5000          # no fixed upper limit
     screen = window.screen().availableGeometry()
     assert seen["size"][0] <= screen.width() and seen["size"][1] <= screen.height()
+
+
+# ---- Print Documents page: its chassis dropdown has the same professional look ---------------
+def test_the_print_documents_chassis_dropdown_is_styled_like_the_invoice_form(window):
+    from app.qt_ui import completer_style
+
+    page = window._create_print_document_page()
+    completer = window.print_search_completer
+    popup = completer.popup()
+    assert isinstance(getattr(completer, "_suggestion_delegate", None), completer_style.SuggestionDelegate)
+    assert popup.itemDelegate() is completer._suggestion_delegate
+    assert "border-radius" in popup.styleSheet()
+    assert popup.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    page.deleteLater()
+
+
+# ---- Advance Booking: Model / Color drop-down lists --------------------------------------------
+def test_advance_booking_model_and_color_dropdowns_are_styled(window):
+    from app.qt_ui import combo_style
+
+    page = window._create_advance_booking_page()
+    for combo in (window.ab_model_combo, window.ab_color_combo):
+        assert isinstance(combo.view().itemDelegate(), combo_style.ComboItemDelegate)
+        assert "border-radius" in combo.view().styleSheet()
+    assert window.ab_model_combo._item_delegate._icon_name == "fa5s.motorcycle"
+    assert window.ab_color_combo._item_delegate._icon_name == "fa5s.palette"
+    page.deleteLater()
+
+
+# ---- Quotation page: the Model drop-down in each line ---------------------------------------------
+def test_quotation_line_model_dropdown_is_styled_and_still_works(window, monkeypatch):
+    from PyQt6.QtWidgets import QComboBox, QTableWidget
+    from app.qt_ui import combo_style
+    from app.services import price_service as ps
+
+    class _Model:
+        model_name = "CG125S"
+
+    class _Price:
+        product_model = _Model()
+
+    monkeypatch.setattr(ps.price_service, "get_all_active_prices", lambda: [_Price()])
+    table = QTableWidget()
+    table.setColumnCount(7)
+    widgets = window._build_quotation_line_row(table, lambda: None)
+    combo = table.cellWidget(0, 1)
+    assert isinstance(combo, QComboBox)
+    assert isinstance(combo.view().itemDelegate(), combo_style.ComboItemDelegate)
+    assert [combo.itemText(i) for i in range(combo.count())] == ["", "CG125S"]      # items unchanged
+    combo.setCurrentIndex(1)
+    assert combo.currentText() == "CG125S"
+    table.deleteLater()
+
+
+# ---- Spare Parts Ledger: the "New Ledger Transaction" amount starts blank --------------------------
+def test_new_ledger_transaction_amount_field_starts_blank(window, monkeypatch):
+    from PyQt6.QtWidgets import QDialog, QDoubleSpinBox
+    from app.qt_ui.blank_spinbox import BlankZeroDoubleSpinBox
+
+    seen = {}
+
+    def fake_exec(self):
+        spins = self.findChildren(QDoubleSpinBox)
+        seen["classes"] = [type(s) for s in spins]
+        seen["texts"] = [s.lineEdit().text() for s in spins]
+        seen["values"] = [s.value() for s in spins]
+        return 0                                   # "Cancel": nothing is saved
+
+    monkeypatch.setattr(QDialog, "exec", fake_exec)
+    window._open_new_ledger_transaction_dialog()
+    assert seen["classes"] == [BlankZeroDoubleSpinBox]
+    assert seen["texts"] == ["Rs. "] and seen["values"] == [0.0]

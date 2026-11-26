@@ -38,6 +38,7 @@ from spare_parts.errors import SparePartsValidationError
 from spare_parts.services import customers_service, held_sales_service, parts_service, sales_service, stock_service
 from spare_parts.services.settings_service import get_settings
 from spare_parts.ui.customers_page import CustomerDialog
+from spare_parts.ui.part_suggest_popup import style_part_completer
 from spare_parts.ui.widgets import NoScrollComboBox, NoScrollDoubleSpinBox, NoScrollSpinBox, trash_icon
 from spare_parts.utils import DEFAULT_SALE_INVOICE_TYPE, SALE_INVOICE_TYPES
 from spare_parts.logging_config import get_logger
@@ -312,16 +313,10 @@ _PART_SEARCH_INPUT_QSS = """
     }
 """
 
-_PART_SEARCH_POPUP_QSS = """
-    QListView {
-        font-size: 13px;
-        border: 1px solid #3498db;
-        outline: 0;
-        background-color: #ffffff;
-        selection-background-color: #3498db;
-        selection-color: white;
+_QTY_STOCK_QSS = """
+    QSpinBox[overStock="true"] {
+        border: 2px solid #e74c3c; background-color: #fdecea; color: #b42318; font-weight: 700;
     }
-    QListView::item { padding: 4px 8px; }
 """
 
 _WALK_IN_LABEL = "(Walk-in / No customer)"
@@ -352,6 +347,7 @@ class SaleCardWidget(QWidget):
         self.custom_label: Optional[str] = None
         self._dirty = False
         self._saving = False
+        self._stock_warning_open = False     # one over-stock popup at a time
         # Guards against the part search box adding the same item twice
         # for one Enter keypress - see _on_part_completer_activated and
         # _on_part_search_enter.
@@ -608,7 +604,7 @@ class SaleCardWidget(QWidget):
         completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         completer.setFilterMode(Qt.MatchFlag.MatchContains)
         completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
-        completer.popup().setStyleSheet(_PART_SEARCH_POPUP_QSS)
+        style_part_completer(completer)      # rounded list, part chip + stock badge (presentation only)
 
         completer.activated.connect(self._on_part_completer_activated)
         return completer
@@ -825,6 +821,98 @@ class SaleCardWidget(QWidget):
                 f"{new_total_qty_this_card}. Double-check before completing.",
             )
 
+    # --- stock guard: a quantity above the available stock cannot be sold -----------------
+    # Compared with the CURRENT STOCK shown in the search dropdown ("Stock: N"), counting every
+    # line of the same part on this card (pieces + packs, in base units). Skipped when the
+    # owner enabled "Allow negative stock" in Spare Parts settings - the same switch the
+    # stock ledger's own check obeys.
+
+    def _stock_problems(self) -> list[dict]:
+        """Parts on this card whose total quantity is more than the stock on hand."""
+        wanted: dict[int, int] = {}
+        names: dict[int, str] = {}
+        for row in range(self.items_table.rowCount()):
+            part_item = self.items_table.item(row, _COL_PART)
+            if not part_item:
+                continue
+            part_id = part_item.data(Qt.ItemDataRole.UserRole)
+            if part_id not in wanted:
+                wanted[part_id] = self.qty_reserved_for_part(part_id)
+                names[part_id] = part_item.text()
+        if not wanted:
+            return []
+        db = get_spare_session()
+        try:
+            if get_settings(db).allow_negative_stock:
+                return []
+            stock = stock_service.get_current_stock_bulk(db, list(wanted))
+        finally:
+            db.close()
+        problems = []
+        for part_id, requested in wanted.items():
+            in_stock = max(0, int(stock.get(part_id, 0)))
+            if requested > in_stock:
+                problems.append(dict(part_id=part_id, name=names[part_id], requested=requested, in_stock=in_stock))
+        return problems
+
+    @staticmethod
+    def _over_stock_text(problem: dict) -> str:
+        if problem["in_stock"] <= 0:
+            return f"'{problem['name']}' is out of stock (you entered {problem['requested']})."
+        return (f"'{problem['name']}': you entered {problem['requested']}, "
+                f"but only {problem['in_stock']} in stock.")
+
+    def _refresh_stock_flags(self) -> None:
+        """Red quantity box + tooltip on every line of a part that is over stock."""
+        problems = {pr["part_id"]: pr for pr in self._stock_problems()}
+        for row in range(self.items_table.rowCount()):
+            part_item = self.items_table.item(row, _COL_PART)
+            spin = self.items_table.cellWidget(row, _COL_QTY)
+            if not part_item or spin is None:
+                continue
+            problem = problems.get(part_item.data(Qt.ItemDataRole.UserRole))
+            over = problem is not None
+            if bool(spin.property("overStock")) != over:
+                spin.setProperty("overStock", over)
+                spin.style().unpolish(spin)
+                spin.style().polish(spin)
+            spin.setToolTip(
+                f"Only {problem['in_stock']} in stock - reduce the quantity to complete the sale."
+                if over else ""
+            )
+
+    def _warn_if_over_stock(self, part_id: int) -> bool:
+        """Popup for one part when its quantity is over stock. True if it warned."""
+        for problem in self._stock_problems():
+            if problem["part_id"] == part_id:
+                QMessageBox.warning(
+                    self, "Quantity Exceeds Stock",
+                    f"{self._over_stock_text(problem)}\n\n"
+                    f"Reduce the quantity to {problem['in_stock']} or less. "
+                    f"This sale cannot be completed until the quantity is fixed.",
+                )
+                return True
+        return False
+
+    def _wire_stock_check(self, qty_spin) -> None:
+        qty_spin.setStyleSheet(_QTY_STOCK_QSS)
+        qty_spin.editingFinished.connect(lambda spin=qty_spin: self._on_qty_editing_finished(spin))
+
+    def _on_qty_editing_finished(self, qty_spin) -> None:
+        """When the cashier finishes typing a quantity (Enter / leaving the box)."""
+        if self._stock_warning_open:
+            return
+        for row in range(self.items_table.rowCount()):
+            if self.items_table.cellWidget(row, _COL_QTY) is qty_spin:
+                part_item = self.items_table.item(row, _COL_PART)
+                if part_item:
+                    self._stock_warning_open = True
+                    try:
+                        self._warn_if_over_stock(part_item.data(Qt.ItemDataRole.UserRole))
+                    finally:
+                        self._stock_warning_open = False
+                return
+
     def _add_line_item(self, part) -> None:
         existing_row = self._find_unit_row_for_part(part.id)
         if existing_row is not None:
@@ -834,7 +922,8 @@ class SaleCardWidget(QWidget):
             self.items_table.setCurrentCell(existing_row, _COL_QTY)
             qty_widget.setFocus()
             qty_widget.selectAll()
-            self._warn_if_oversold(part, self.qty_reserved_for_part(part.id))
+            if not self._warn_if_over_stock(part.id):
+                self._warn_if_oversold(part, self.qty_reserved_for_part(part.id))
             return
 
         default_type = self.default_line_type()
@@ -879,6 +968,7 @@ class SaleCardWidget(QWidget):
         qty_spin.setRange(1, 1_000_000)
         qty_spin.setValue(1)
         qty_spin.valueChanged.connect(self._recalc_totals)
+        self._wire_stock_check(qty_spin)
         self.items_table.setCellWidget(row, _COL_QTY, qty_spin)
 
         price_spin = NoScrollDoubleSpinBox()
@@ -922,7 +1012,8 @@ class SaleCardWidget(QWidget):
                 f"{part.min_wholesale_qty}. Adjust the quantity if needed.",
             )
 
-        self._warn_if_oversold(part, self.qty_reserved_for_part(part.id))
+        if not self._warn_if_over_stock(part.id):
+            self._warn_if_oversold(part, self.qty_reserved_for_part(part.id))
 
     def _remove_line_item(self, btn) -> None:
         for row in range(self.items_table.rowCount()):
@@ -980,6 +1071,10 @@ class SaleCardWidget(QWidget):
         paid = Decimal(str(self.paid_spin.value()))
         due = total - paid
         self.due_label.setText(f"{due:,.2f}")
+        try:
+            self._refresh_stock_flags()
+        except Exception as e:  # presentation only - the totals above must never fail because of it
+            logger.warning(f"Could not refresh stock flags: {e}")
         self.totals_changed.emit()
 
     # --- public helpers for PosPage -------------------------------------------
@@ -1091,6 +1186,19 @@ class SaleCardWidget(QWidget):
             sale_type, _is_mixed = self._compute_overall_type()
             customer_id = self.customer_combo.currentData()
             items = self._collect_items_payload()
+
+            over_stock = self._stock_problems()
+            if over_stock:
+                lines = "\n".join(f"\u2022 {self._over_stock_text(pr)}" for pr in over_stock)
+                QMessageBox.warning(
+                    self, "Cannot Complete Sale",
+                    f"Quantity is more than the stock available:\n\n{lines}\n\n"
+                    f"Reduce the quantity (or remove the line), then complete the sale again.",
+                )
+                self.error_label.setText("Cannot complete the sale: " + " ".join(
+                    self._over_stock_text(pr) for pr in over_stock))
+                self.error_label.show()
+                return None
 
             if not self._check_credit_limit(customer_id):
                 return None
@@ -1290,6 +1398,7 @@ class SaleCardWidget(QWidget):
                 qty_spin.setRange(1, 1_000_000)
                 qty_spin.setValue(item.pack_qty if item.sold_as == "PACK" and item.pack_qty else item.qty)
                 qty_spin.valueChanged.connect(self._recalc_totals)
+                self._wire_stock_check(qty_spin)
                 self.items_table.setCellWidget(row, _COL_QTY, qty_spin)
 
                 price_spin = NoScrollDoubleSpinBox()

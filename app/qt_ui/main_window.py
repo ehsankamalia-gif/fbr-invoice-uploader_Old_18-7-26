@@ -121,6 +121,8 @@ from app.qt_ui.settings_modals import (
 from app.qt_ui.auto_scroll_manager import AutoScrollManager
 from app.qt_ui import invoice_style
 from app.qt_ui import completer_style
+from app.qt_ui import combo_style
+from app.qt_ui.blank_spinbox import BlankZeroDoubleSpinBox
 from app.qt_ui import form_validation
 from app.qt_ui import notice_dialog
 from app.core.signals import booking_signals
@@ -2663,6 +2665,7 @@ class MainWindow(QMainWindow):
         self.print_search_completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
         self.print_search_completer.setMaxVisibleItems(10)
         self.print_search_input.setCompleter(self.print_search_completer)
+        completer_style.style_completer(self.print_search_completer, "fa5s.motorcycle")
         self.print_search_input.textEdited.connect(self._on_print_search_input_changed)
 
         self._print_search_completer_timer = QTimer(self)
@@ -10001,10 +10004,12 @@ class MainWindow(QMainWindow):
         self.ab_model_combo = QComboBox()
         self.ab_model_combo.setEditable(False)
         self.ab_model_combo.setPlaceholderText("Select model")
+        combo_style.style_combo(self.ab_model_combo, "fa5s.motorcycle", "Select model")
         self.ab_model_label = make_label("Motorcycle Model")
         self.ab_color_combo = QComboBox()
         self.ab_color_combo.setEditable(False)
         self.ab_color_combo.setPlaceholderText("Select color")
+        combo_style.style_combo(self.ab_color_combo, "fa5s.palette", "Select color")
         self.ab_color_label = make_label("Color")
 
         def force_upper(le: QLineEdit) -> None:
@@ -11169,6 +11174,7 @@ class MainWindow(QMainWindow):
 
         model_combo = QComboBox()
         model_combo.setEditable(False)
+        combo_style.style_combo(model_combo, "fa5s.motorcycle", "Select model")
         model_combo.addItem("")
         prices = price_service.get_all_active_prices()
         models: List[str] = []
@@ -12516,7 +12522,7 @@ class MainWindow(QMainWindow):
         form.addWidget(QLabel("Transaction Date"), 2, 0)
         form.addWidget(date_edit, 2, 1)
 
-        amount_spin = QDoubleSpinBox()
+        amount_spin = BlankZeroDoubleSpinBox()      # reads just "Rs. " until a number is typed
         amount_spin.setRange(0, 99999999)
         amount_spin.setDecimals(2)
         amount_spin.setPrefix("Rs. ")

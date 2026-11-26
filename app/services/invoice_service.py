@@ -173,13 +173,11 @@ class InvoiceService:
             # via the Customer Directory, not the invoice form.
             # Only update NTN and is_deleted as those are administrative fields.
             if invoice_in.buyer_ntn: customer.ntn = (invoice_in.buyer_ntn or "").upper()
-            
-            # If we explicitly pass DEALER type, ensure it stays/becomes DEALER
-            # A converted party (converted_to_customer_at set) is never
-            # re-promoted by a stale form flag; only a deliberate conversion
-            # can change its type.
-            if invoice_in.buyer_type == CustomerType.DEALER and not customer.converted_to_customer_at:
-                customer.type = CustomerType.DEALER
+
+            # An invoice NEVER changes an existing record's type (Dealer stays Dealer, Customer
+            # stays Customer). It used to promote a customer to Dealer whenever the form's hidden
+            # "dealer selected" flag was stale. Only the Dealers page / the Convert button
+            # create dealers or change a record's type.
 
             # Reactivate if they were deleted
             customer.is_deleted = False
@@ -193,8 +191,6 @@ class InvoiceService:
                 customer = existing_by_cnic
                 # Do NOT overwrite permanent customer details
                 if invoice_in.buyer_ntn: customer.ntn = (invoice_in.buyer_ntn or "").upper()
-                if invoice_in.buyer_type == CustomerType.DEALER and not customer.converted_to_customer_at:
-                    customer.type = CustomerType.DEALER
                 customer.is_deleted = False
             else:
                 customer = Customer(
@@ -204,7 +200,9 @@ class InvoiceService:
                     ntn=(invoice_in.buyer_ntn or "").upper(),
                     phone=invoice_in.buyer_phone,
                     address=(invoice_in.buyer_address or "").upper(),
-                    type=invoice_in.buyer_type or CustomerType.INDIVIDUAL,
+                    # A CNIC nobody has used before is a NEW CUSTOMER, never a new dealer
+                    # (dealers are created on the Dealers page), whatever the form's flag says.
+                    type=CustomerType.INDIVIDUAL,
                 )
                 db.add(customer)
         
